@@ -399,7 +399,7 @@ function renderRecipe(){
         <span style="font-family:'DM Mono',monospace;font-size:16px;color:${C.ember};flex-shrink:0">✦</span>
         <div>
           <div style="font-family:'DM Mono',monospace;font-size:9px;color:${C.ember};letter-spacing:1.5px;text-transform:uppercase;margin-bottom:4px">AI CONSULENTE</div>
-          <div style="font-family:'Lato',sans-serif;font-size:13px;color:${C.ink};line-height:1.6">Descrivi un problema o un risultato che vuoi ottenere. L&#39;AI analizza questa ricetta e ti dice cosa cambiare e perché.</div>
+          <div style="font-family:'Lato',sans-serif;font-size:13px;color:${C.ink};line-height:1.6">Descrivi un problema o un risultato che vuoi ottenere. L'AI analizza questa ricetta e ti dice cosa cambiare e perché.</div>
         </div>
       </div>
       <div id="ai-messages" style="display:flex;flex-direction:column;gap:12px;margin-bottom:16px"></div>
@@ -598,7 +598,7 @@ function renderLoadHome(){
     '<div style="padding:32px 24px 20px;border-bottom:1px solid '+C.ash+'">'+
       '<div style="font-family:DM Mono,monospace;font-size:9px;color:'+C.smoke+';letter-spacing:2px;text-transform:uppercase;margin-bottom:6px">IMPORTA</div>'+
       '<div style="font-family:Playfair Display,serif;font-size:30px;font-weight:900;color:'+C.ink+';letter-spacing:-1px">Load</div>'+
-      '<div style="font-family:Lato,sans-serif;font-size:13px;color:'+C.smoke+';margin-top:4px;font-weight:300">Testo, immagine o link. L&#39;AI struttura tutto.</div>'+
+      '<div style="font-family:Lato,sans-serif;font-size:13px;color:'+C.smoke+';margin-top:4px;font-weight:300">Testo, immagine o link. L'AI struttura tutto.</div>'+
     '</div>'+
     '<div style="padding:20px 24px;display:flex;flex-direction:column;gap:10px">'+
       btns+
@@ -662,7 +662,7 @@ window.analyzeImage=async function(){
   renderLoadImage(true,"");
   try{
     const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
-      headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true","x-api-key":"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"},
+      headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},
       body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,system:SYS,
         messages:[{role:"user",content:[
           {type:"image",source:{type:"base64",media_type:currentImageType,data:currentImageB64}},
@@ -720,9 +720,11 @@ window.fetchUrl=async function(){
                    .substring(0,8000);
     if(!text||text.length<100)throw new Error("Pagina non leggibile o vuota");
     const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
-      headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true","x-api-key":"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"},
+      headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},
       body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,system:SYS,
-        messages:[{role:"user",content:"Estrai la ricetta da questo testo e restituisci il JSON:\n\n"+text}]})});
+        messages:[{role:"user",content:"Estrai la ricetta da questo testo e restituisci il JSON:
+
+"+text}]})});
     if(!res.ok)throw new Error("HTTP "+res.status);
     const data=await res.json();
     const raw=data.content?.map(b=>b.text||"").join("").trim().replace(/```json|```/g,"").trim();
@@ -756,7 +758,7 @@ window.digitalize=async function(){
   let i=0;
   loadMsgTimer=setInterval(()=>{i=(i+1)%MSGS.length;const m=el("load-msg");if(m)m.textContent=MSGS[i];},1800);
   try{
-    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true","x-api-key":"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"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,system:SYS,messages:[{role:"user",content:"Analizza:\n\n"+text}]})});
+    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,system:SYS,messages:[{role:"user",content:"Analizza:\n\n"+text}]})});
     clearInterval(loadMsgTimer);
     if(!res.ok)throw new Error("HTTP "+res.status);
     const data=await res.json();
@@ -845,23 +847,33 @@ window.sendAiMessage=async function(){
   renderAiMessages(false);
 
   // Costruisci contesto ricetta
-  const recipeCtx="RICETTA: "+recipe.name+" ("+recipe.code+") - "+recipe.category+
-    "\nVersione: "+v.id+" - "+v.label+" - Stato: "+v.status+
-    "\nPorzioni: "+v.portions+" x "+(v.portion_weight_g||"nd")+"g"+
-    "\n\nINGREDIENTI:\n"+v.ingredients.map(function(ing){return "- "+ing.n+": "+ing.q+" "+ing.u;}).join("\n")+
-    "\n\nPROCEDIMENTO:\n"+v.steps.map(function(s,idx){return (idx+1)+". "+s.t+": "+s.d;}).join("\n")+
-    "\n\nNOTE: "+(v.notes||"nessuna");
+  const recipeCtx=`RICETTA: ${recipe.name} (${recipe.code}) - ${recipe.category}
+Versione: ${v.id} - ${v.label} - Stato: ${v.status}
+Porzioni: ${v.portions} x ${v.portion_weight_g||"—"}g
+
+INGREDIENTI:
+${v.ingredients.map(i=>`- ${i.n}: ${i.q} ${i.u}`).join("
+")}
+
+PROCEDIMENTO:
+${v.steps.map((s,i)=>`${i+1}. ${s.t}: ${s.d}`).join("
+")}
+
+NOTE: ${v.notes||"nessuna"}
+
+${recipe.versions.length>1?`VERSIONI PRECEDENTI: ${recipe.versions.filter(vv=>vv.id!==v.id).map(vv=>`${vv.id}(${vv.status}): ${vv.notes||vv.label}`).join(" | ")}`:""}`;
 
   const btn=el("ai-send-btn");if(btn)btn.disabled=true;
 
   try{
     const messages=[
-      {role:"user",content:"Contesto ricetta:\n"+recipeCtx},
+      {role:"user",content:"Contesto ricetta:
+"+recipeCtx},
       {role:"assistant",content:"Ho analizzato la ricetta. Sono pronto a rispondere alle tue domande tecniche."},
       ...aiMessages
     ];
     const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
-      headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true","x-api-key":"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"},
+      headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},
       body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:800,system:AI_CONSULT_SYS,messages})});
     if(!res.ok)throw new Error("HTTP "+res.status);
     const data=await res.json();
