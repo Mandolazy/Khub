@@ -662,7 +662,7 @@ window.analyzeImage=async function(){
   renderLoadImage(true,"");
   try{
     const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
-      headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},
+      headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true","x-api-key":"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"},
       body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,system:SYS,
         messages:[{role:"user",content:[
           {type:"image",source:{type:"base64",media_type:currentImageType,data:currentImageB64}},
@@ -720,7 +720,7 @@ window.fetchUrl=async function(){
                    .substring(0,8000);
     if(!text||text.length<100)throw new Error("Pagina non leggibile o vuota");
     const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
-      headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},
+      headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true","x-api-key":"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"},
       body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,system:SYS,
         messages:[{role:"user",content:"Estrai la ricetta da questo testo e restituisci il JSON:\n\n"+text}]})});
     if(!res.ok)throw new Error("HTTP "+res.status);
@@ -756,7 +756,7 @@ window.digitalize=async function(){
   let i=0;
   loadMsgTimer=setInterval(()=>{i=(i+1)%MSGS.length;const m=el("load-msg");if(m)m.textContent=MSGS[i];},1800);
   try{
-    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,system:SYS,messages:[{role:"user",content:"Analizza:\n\n"+text}]})});
+    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true","x-api-key":"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"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,system:SYS,messages:[{role:"user",content:"Analizza:\n\n"+text}]})});
     clearInterval(loadMsgTimer);
     if(!res.ok)throw new Error("HTTP "+res.status);
     const data=await res.json();
@@ -861,7 +861,7 @@ window.sendAiMessage=async function(){
       ...aiMessages
     ];
     const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
-      headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},
+      headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true","x-api-key":"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"},
       body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:800,system:AI_CONSULT_SYS,messages})});
     if(!res.ok)throw new Error("HTTP "+res.status);
     const data=await res.json();
