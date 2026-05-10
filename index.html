@@ -848,12 +848,10 @@ Versione: ${v.id} - ${v.label} - Stato: ${v.status}
 Porzioni: ${v.portions} x ${v.portion_weight_g||"—"}g
 
 INGREDIENTI:
-${v.ingredients.map(i=>`- ${i.n}: ${i.q} ${i.u}`).join("
-")}
+${v.ingredients.map(i=>`- ${i.n}: ${i.q} ${i.u}`).join("\n")}
 
 PROCEDIMENTO:
-${v.steps.map((s,i)=>`${i+1}. ${s.t}: ${s.d}`).join("
-")}
+${v.steps.map((s,i)=>`${i+1}. ${s.t}: ${s.d}`).join("\n")}
 
 NOTE: ${v.notes||"nessuna"}
 
