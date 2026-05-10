@@ -861,8 +861,7 @@ ${recipe.versions.length>1?`VERSIONI PRECEDENTI: ${recipe.versions.filter(vv=>vv
 
   try{
     const messages=[
-      {role:"user",content:"Contesto ricetta:
-"+recipeCtx},
+      {role:"user",content:"Contesto ricetta:\n"+recipeCtx},
       {role:"assistant",content:"Ho analizzato la ricetta. Sono pronto a rispondere alle tue domande tecniche."},
       ...aiMessages
     ];
