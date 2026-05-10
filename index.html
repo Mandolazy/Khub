@@ -517,7 +517,7 @@ function doFetchUrl(){
   var url=el("url-inp")&&el("url-inp").value&&el("url-inp").value.trim();
   if(!url)return;
   renderLoadUrl(true,"");
-  fetch("https://api.allorigins.win/get?url="+encodeURIComponent(url)).then(function(r){return r.json();}).then(function(d){
+  fetch("https://corsproxy.io/?"+encodeURIComponent(url)).then(function(r){return r.json();}).then(function(d){
     var text=(d.contents||"").replace(/<script[^>]*>[\s\S]*?<\/script>/gi,"").replace(/<style[^>]*>[\s\S]*?<\/style>/gi,"").replace(/<[^>]+>/g," ").replace(/\s+/g," ").substring(0,8000);
     if(!text||text.length<100)throw new Error("Pagina non leggibile");
     return fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true","anthropic-version":"2023-06-01","x-api-key":K()},body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:1500,system:SYS,messages:[{role:"user",content:"Estrai la ricetta:\n\n"+text}]})});
