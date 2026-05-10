@@ -162,7 +162,7 @@ function renderHome(){
   </div>
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;border-bottom:1px solid ${C.ash}">
     ${[{n:main.length,l:"ricette"},{n:prod.length,l:"in prod."},{n:bases.length,l:"basi"}].map((s,i)=>`
-    <div style="padding:16px 0;text-align:center;border-right:${i<2?"1px solid "+C.ash:"none"}">
+    <div style="padding:16px 0;text-align:center;border-right:${i<2?`1px solid ${C.ash}`:"none"}">
       <div style="font-family:'Playfair Display',serif;font-size:28px;font-weight:700;color:${C.ember};line-height:1">${s.n}</div>
       <div style="font-family:'DM Mono',monospace;font-size:9px;color:${C.smoke};letter-spacing:1.5px;text-transform:uppercase;margin-top:3px">${s.l}</div>
     </div>`).join("")}
@@ -267,7 +267,7 @@ function renderRecipe(){
   <!-- Version tabs -->
   <div style="background:${C.ink};border-top:1px solid rgba(255,255,255,.06);padding:0 16px;display:flex;align-items:center">
     <div style="display:flex;flex:1;overflow-x:auto">
-      ${recipe.versions.map(vv=>`<button onclick="currentVersionId='${vv.id}';editingDraft=null;renderRecipe()" style="background:none;border:none;padding:11px 12px 9px;flex-shrink:0;border-bottom:${vid===vv.id?"2px solid "+C.ember:"2px solid transparent"};font-family:'DM Mono',monospace;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:${vid===vv.id?"#fff":C.smoke}">${vv.id}</button>`).join("")}
+      ${recipe.versions.map(vv=>`<button onclick="currentVersionId='${vv.id}';editingDraft=null;renderRecipe()" style="background:none;border:none;padding:11px 12px 9px;flex-shrink:0;border-bottom:${vid===vv.id?`2px solid ${C.ember}`:"2px solid transparent"};font-family:'DM Mono',monospace;font-size:10px;letter-spacing:1px;text-transform:uppercase;color:${vid===vv.id?"#fff":C.smoke}">${vv.id}</button>`).join("")}
     </div>
     <button onclick="showNewVersionModal()" style="background:none;border:none;font-family:'DM Mono',monospace;font-size:20px;color:${C.smoke};padding:0 8px">+</button>
   </div>
@@ -324,7 +324,7 @@ function renderRecipe(){
 
   <!-- Content tabs -->
   <div style="display:flex;border-bottom:1px solid ${C.ash};padding:0 24px;margin-top:${editing?0:16}px" id="content-tabs">
-    ${["ingredienti","procedimento","note","AI"].map(t=>`<button onclick="showTab('${t}')" id="tab-${t}" style="background:none;border:none;font-family:'DM Mono',monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:${t==="ingredienti"?C.ember:C.smoke};padding:12px 14px 10px;border-bottom:${t==="ingredienti"?"2px solid "+C.ember:"2px solid transparent"}">${t}</button>`).join("")}
+    ${["ingredienti","procedimento","note","AI ✦"].map(t=>`<button onclick="showTab('${t}')" id="tab-${t.replace(' ✦','')}" style="background:none;border:none;font-family:'DM Mono',monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:${t==="ingredienti"?C.ember:C.smoke};padding:12px 14px 10px;border-bottom:${t==="ingredienti"?`2px solid ${C.ember}`:"2px solid transparent"}">${t}</button>`).join("")}
   </div>
 
   <div id="tab-content-ingredienti">
@@ -427,7 +427,7 @@ window.showTab=function(tab){
   ["ingredienti","procedimento","note","AI"].forEach(t=>{
     const content=el("tab-content-"+t),btn=el("tab-"+t);
     if(content)content.style.display=t===tab?"block":"none";
-    if(btn){btn.style.color=t===tab?C.ember:C.smoke;btn.style.borderBottom=t===tab?"2px solid "+C.ember:"2px solid transparent";}
+    if(btn){btn.style.color=t===tab?C.ember:C.smoke;btn.style.borderBottom=t===tab?`2px solid ${C.ember}`:"2px solid transparent";}
   });
 };
 
@@ -577,38 +577,36 @@ function renderLoad(){
   else if(loadMode==="saved")renderLoadSaved();
 }
 function renderLoadHome(){
-  var opts=[
-    {mode:"text",  icon:"&#9634;", title:"Testo libero",    sub:"Incolla da web, PDF, WhatsApp, appunti", bg:C.ink},
-    {mode:"image", icon:"&#9672;",  title:"Foto / Immagine", sub:"Foto ricettario, screenshot, handwriting", bg:C.pine},
-    {mode:"url",   icon:"&#8599;",  title:"Link / URL",      sub:"Qualsiasi pagina web con una ricetta",    bg:C.brass},
-  ];
-  var btns=opts.map(function(opt){
-    return '<button onclick="loadMode=\''+opt.mode+'\';renderLoad()" style="background:#fff;border:1px solid '+C.ash+';border-radius:6px;padding:18px 20px;cursor:pointer;text-align:left;display:flex;align-items:center;gap:16px">'+
-      '<div style="width:40px;height:40px;border-radius:4px;background:'+opt.bg+';display:flex;align-items:center;justify-content:center;flex-shrink:0">'+
-        '<span style="font-family:DM Mono,monospace;font-size:20px;color:#fff">'+opt.icon+'</span>'+
-      '</div>'+
-      '<div>'+
-        '<div style="font-family:Playfair Display,serif;font-size:16px;font-weight:700;color:'+C.ink+'">'+opt.title+'</div>'+
-        '<div style="font-family:Lato,sans-serif;font-size:12px;color:'+C.smoke+';margin-top:2px">'+opt.sub+'</div>'+
-      '</div>'+
-      '<span style="margin-left:auto;font-family:DM Mono,monospace;font-size:18px;color:'+C.smoke+'">&#8250;</span>'+
-    '</button>';
-  }).join("");
-  el("screen-load").innerHTML=
-    '<div style="padding:32px 24px 20px;border-bottom:1px solid '+C.ash+'">'+
-      '<div style="font-family:DM Mono,monospace;font-size:9px;color:'+C.smoke+';letter-spacing:2px;text-transform:uppercase;margin-bottom:6px">IMPORTA</div>'+
-      '<div style="font-family:Playfair Display,serif;font-size:30px;font-weight:900;color:'+C.ink+';letter-spacing:-1px">Load</div>'+
-      '<div style="font-family:Lato,sans-serif;font-size:13px;color:'+C.smoke+';margin-top:4px;font-weight:300">Testo, immagine o link. L'AI struttura tutto.</div>'+
-    '</div>'+
-    '<div style="padding:20px 24px;display:flex;flex-direction:column;gap:10px">'+
-      btns+
-      '<div style="background:rgba(200,68,10,.06);border:1px solid rgba(200,68,10,.2);border-radius:6px;padding:12px 16px;display:flex;gap:10px;align-items:flex-start;margin-top:4px">'+
-        '<span style="font-family:DM Mono,monospace;font-size:16px;color:'+C.ember+';margin-top:1px">&#10022;</span>'+
-        '<div style="font-family:Lato,sans-serif;font-size:12px;color:'+C.ink+';line-height:1.6"><strong style="font-family:DM Mono,monospace;font-size:9px;color:'+C.ember+';letter-spacing:1.5px;text-transform:uppercase">AI INTEGRATA &mdash; </strong>Claude estrae automaticamente ingredienti, quantita e passaggi da qualsiasi fonte.</div>'+
-      '</div>'+
-    '</div>';
+  el("screen-load").innerHTML=`
+  <div style="padding:32px 24px 20px;border-bottom:1px solid ${C.ash}">
+    <div style="font-family:'DM Mono',monospace;font-size:9px;color:${C.smoke};letter-spacing:2px;text-transform:uppercase;margin-bottom:6px">IMPORTA</div>
+    <div style="font-family:'Playfair Display',serif;font-size:30px;font-weight:900;color:${C.ink};letter-spacing:-1px">Load</div>
+    <div style="font-family:'Lato',sans-serif;font-size:13px;color:${C.smoke};margin-top:4px;font-weight:300">Testo, immagine o link. L'AI struttura tutto.</div>
+  </div>
+  <div style="padding:20px 24px;display:flex;flex-direction:column;gap:10px">
+    ${[
+      {mode:"text", icon:"⊞", title:"Testo libero", sub:"Incolla da web, PDF, WhatsApp, appunti", bg:C.ink},
+      {mode:"image", icon:"◈", title:"Foto / Immagine", sub:"Foto ricettario, screenshot, handwriting", bg:C.pine},
+      {mode:"url", icon:"↗", title:"Link / URL", sub:"Qualsiasi pagina web con una ricetta", bg:C.brass},
+    ].map(opt=>`
+    <button onclick="loadMode='${opt.mode}';renderLoad()" style="background:#fff;border:1px solid ${C.ash};border-radius:6px;padding:18px 20px;cursor:pointer;text-align:left;display:flex;align-items:center;gap:16px">
+      <div style="width:40px;height:40px;border-radius:4px;background:${opt.bg};display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <span style="font-family:'DM Mono',monospace;font-size:20px;color:#fff">${opt.icon}</span>
+      </div>
+      <div>
+        <div style="font-family:'Playfair Display',serif;font-size:16px;font-weight:700;color:${C.ink}">${opt.title}</div>
+        <div style="font-family:'Lato',sans-serif;font-size:12px;color:${C.smoke};margin-top:2px">${opt.sub}</div>
+      </div>
+      <span style="margin-left:auto;font-family:'DM Mono',monospace;font-size:18px;color:${C.smoke}">›</span>
+    </button>`).join("")}
+    <div style="background:rgba(200,68,10,.06);border:1px solid rgba(200,68,10,.2);border-radius:6px;padding:12px 16px;display:flex;gap:10px;align-items:flex-start;margin-top:4px">
+      <span style="font-family:'DM Mono',monospace;font-size:16px;color:${C.ember};margin-top:1px">✦</span>
+      <div style="font-family:'Lato',sans-serif;font-size:12px;color:${C.ink};line-height:1.6"><strong style="font-family:'DM Mono',monospace;font-size:9px;color:${C.ember};letter-spacing:1.5px;text-transform:uppercase">AI INTEGRATA — </strong>Claude estrae automaticamente ingredienti, quantità e passaggi da qualsiasi fonte.</div>
+    </div>
+  </div>`;
 }
 
+// ── LOAD IMAGE ───────────────────────────────────────
 function renderLoadImage(loading,err){
   loading=loading||false;err=err||"";
   el("screen-load").innerHTML=`
@@ -906,15 +904,7 @@ function renderAiMessages(loading){
 function resetAiChat(){aiMessages=[];}
 
 // ── INIT ─────────────────────────────────────────────
-try {
-  go("home");
-} catch(e) {
-  document.getElementById("screen-home").innerHTML = 
-    '<div style="padding:32px 24px;font-family:monospace;font-size:12px;color:red;word-break:break-all">' +
-    '<strong>ERRORE JS:</strong><br>' + e.message + '<br><br>' +
-    e.stack + '</div>';
-  document.getElementById("screen-home").style.display = "block";
-}
+go("home");
 </script>
 </body>
 </html>
