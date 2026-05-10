@@ -405,8 +405,7 @@ function sendAI(){
   aiMsgs.push({role:"user",content:txt});
   renderAiMsgs();
   var ctx="RICETTA: "+r.name+" ("+r.code+") - "+r.cat+"\nVersione: "+v.id+" - "+v.label+" - Stato: "+v.st+"\nPorzioni: "+v.por+" x "+(v.gpor||"nd")+"g\n\nINGREDIENTI:\n"+v.ings.map(function(i){return"- "+i.n+": "+i.q+" "+i.u;}).join("\n")+"\n\nPROCEDIMENTO:\n"+v.steps.map(function(s,i){return(i+1)+". "+s.t+": "+s.d;}).join("\n")+"\n\nNOTE: "+(v.notes||"nessuna");
-  var msgs=[{role:"user",content:"Contesto ricetta:\n"+ctx},{role:"assistant",content:"Ho analizzato la ricetta. Sono pronto."},{role:"user",content:txt}];
-  if(aiMsgs.length>1)msgs=msgs.concat(aiMsgs.slice(0,-1));
+  var msgs=[{role:"user",content:"Contesto ricetta:\n"+ctx},{role:"assistant",content:"Ho analizzato la ricetta. Sono pronto."}].concat(aiMsgs);
   fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true","x-api-key":K()},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:800,system:"Sei un consulente tecnico di cucina professionale. Analizza la ricetta e rispondi in modo preciso. Quando suggerisci modifiche indica: cosa cambiare, di quanto, e perche. Rispondi in italiano, conciso ma completo.",messages:msgs})}).then(function(res){return res.json();}).then(function(data){var reply=data.content&&data.content.map(function(b){return b.text||"";}).join("").trim()||"Nessuna risposta";aiMsgs.push({role:"assistant",content:reply});renderAiMsgs();}).catch(function(e){aiMsgs.push({role:"assistant",content:"Errore: "+e.message});renderAiMsgs();});
 }
 window.sendAI=sendAI;
