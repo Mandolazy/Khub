@@ -720,9 +720,7 @@ window.fetchUrl=async function(){
     const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
       headers:{"Content-Type":"application/json","anthropic-dangerous-direct-browser-access":"true"},
       body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1500,system:SYS,
-        messages:[{role:"user",content:"Estrai la ricetta da questo testo e restituisci il JSON:
-
-"+text}]})});
+        messages:[{role:"user",content:"Estrai la ricetta da questo testo e restituisci il JSON:\n\n"+text}]})});
     if(!res.ok)throw new Error("HTTP "+res.status);
     const data=await res.json();
     const raw=data.content?.map(b=>b.text||"").join("").trim().replace(/```json|```/g,"").trim();
