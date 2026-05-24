@@ -347,14 +347,18 @@ async function extractFromSource(type, payload) {
   } else if (type==='text') {
     messages=[{role:'user',content:`Estrai la ricetta dal seguente testo. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes e nella ricetta madre metti solo il riferimento come ingrediente con isSubRecipe:true. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.\n\nTESTO:\n${payload}`}];
   } else if (type==='url') {
-    // Usa proxy CORS per leggere il contenuto reale della pagina
+    // Usa il nostro proxy /api/chat per leggere il contenuto della pagina
     let pageText = '';
     try {
-      const proxyRes = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(payload));
+      const proxyRes = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fetchUrl: payload })
+      });
       const proxyData = await proxyRes.json();
-      if (proxyData && proxyData.contents) {
+      if (proxyData && proxyData.html) {
         const tmp = document.createElement('div');
-        tmp.innerHTML = proxyData.contents;
+        tmp.innerHTML = proxyData.html;
         tmp.querySelectorAll('script,style,nav,header,footer,aside').forEach(el=>el.remove());
         pageText = (tmp.innerText || tmp.textContent || '').replace(/\s+/g,' ').trim().slice(0,6000);
       }
