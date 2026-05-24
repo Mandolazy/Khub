@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Khub — Kitchen Hub</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --orange: #C85A1E; --orange-light: #FDF0E8; --orange-border: rgba(200,90,30,0.18);
+  --sage: #8A9E88; --sage-light: #EBF0EA;
+  --cream: #F5F0E8; --dark: #2C2C2A; --mid: #6B6A66;
+  --border: rgba(44,44,42,0.11); --white: #FFFFFF;
+  --r-sm: 8px; --r-md: 12px; --r-lg: 16px;
+}
+body { font-family: 'DM Sans', sans-serif; background: var(--cream); color: var(--dark); min-height: 100vh; font-size: 14px; line-height: 1.5; }
+.shell { display: grid; grid-template-columns: 230px 1fr; grid-template-rows: 54px 1fr; height: 100vh; overflow: hidden; }
+.topbar { grid-column: 1/-1; background: var(--cream); border-bottom: 1px solid var(--border); display: flex; align-items: center; padding: 0 20px; gap: 12px; }
+.logo { font-size: 20px; font-weight: 600; color: var(--orange); letter-spacing: -0.4px; }
+.logo span { color: var(--dark); font-weight: 300; }
+.logo-sub { font-size: 10px; color: var(--mid); }
+.mode-switcher { margin-left: auto; display: flex; background: var(--sage-light); border-radius: 999px; padding: 3px; gap: 2px; }
+.mode-btn { padding: 5px 14px; border-radius: 999px; border: none; font-family: inherit; font-size: 12px; font-weight: 500; cursor: pointer; color: var(--mid); background: transparent; display: flex; align-items: center; gap: 5px; transition: all 0.15s; }
+.mode-btn.active-prod { background: var(--white); color: var(--dark); box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+.mode-btn.active-lab { background: var(--orange); color: var(--white); }
+.sidebar { background: var(--cream); border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; padding: 14px 10px; overflow-y: auto; }
+.new-btn { display: flex; align-items: center; gap: 7px; width: 100%; padding: 9px 12px; background: var(--orange); color: var(--white); border: none; border-radius: var(--r-md); font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; margin-bottom: 4px; transition: opacity 0.15s; }
+.new-btn:hover { opacity: 0.88; }
+.load-btn-side { display: flex; align-items: center; gap: 7px; width: 100%; padding: 9px 12px; background: var(--sage-light); color: var(--sage); border: none; border-radius: var(--r-md); font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; margin-bottom: 8px; transition: all 0.15s; }
+.load-btn-side:hover { background: var(--sage); color: white; }
+.load-btn-side.active { background: var(--sage); color: white; }
+.sec-label { font-size: 9px; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--mid); padding: 10px 8px 3px; }
+.recipe-btn { display: flex; align-items: center; gap: 7px; width: 100%; padding: 7px 9px; border: none; border-radius: var(--r-sm); background: transparent; font-family: inherit; font-size: 12px; color: var(--dark); cursor: pointer; text-align: left; transition: background 0.1s; }
+.recipe-btn:hover { background: var(--sage-light); }
+.recipe-btn.active { background: var(--orange-light); color: var(--orange); font-weight: 500; }
+.sub-pill { margin-left: auto; font-size: 9px; font-weight: 600; background: var(--sage-light); color: var(--sage); padding: 1px 5px; border-radius: 999px; }
+.recipe-btn.active .sub-pill { background: var(--orange-light); color: var(--orange); }
+.var-count { font-size: 9px; font-weight: 600; background: var(--sage-light); color: var(--sage); padding: 1px 5px; border-radius: 999px; }
+.main { overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+.card { background: var(--white); border-radius: var(--r-lg); border: 1px solid var(--border); padding: 20px 22px; }
+.card-label { font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mid); display: flex; align-items: center; gap: 6px; margin-bottom: 14px; }
+.recipe-name { font-size: 22px; font-weight: 600; letter-spacing: -0.4px; }
+.recipe-meta { font-size: 11px; color: var(--mid); display: flex; gap: 10px; align-items: center; margin-top: 3px; flex-wrap: wrap; }
+.badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+.badge-orange { background: var(--orange); color: white; }
+.nav-link { display: inline-flex; align-items: center; gap: 3px; background: var(--sage-light); color: var(--sage); font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px; border: none; font-family: inherit; cursor: pointer; transition: all 0.12s; }
+.nav-link:hover { background: var(--sage); color: white; }
+.scaling-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin: 16px 0; }
+.field-group { display: flex; flex-direction: column; gap: 4px; }
+.field-label { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--mid); }
+.num-input { width: 86px; padding: 7px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); font-family: 'DM Mono', monospace; font-size: 13px; background: var(--cream); color: var(--dark); outline: none; transition: border-color 0.15s; }
+.num-input:focus { border-color: var(--orange); }
+.total-pill { padding: 7px 14px; background: var(--orange-light); border: 1px solid var(--orange-border); border-radius: var(--r-sm); display: flex; flex-direction: column; gap: 1px; }
+.tp-label { font-size: 9px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--orange); opacity: 0.7; }
+.tp-val { font-size: 15px; font-weight: 600; color: var(--orange); font-family: 'DM Mono', monospace; }
+table { width: 100%; border-collapse: collapse; }
+thead th { font-size: 9px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mid); padding: 5px 6px; text-align: left; border-bottom: 1px solid var(--border); }
+tbody td { padding: 7px 6px; border-bottom: 1px solid rgba(44,44,42,0.05); font-size: 13px; vertical-align: middle; }
+tbody tr:last-child td { border-bottom: none; }
+.ing-name-cell { display: flex; align-items: center; gap: 6px; }
+.editable-text { background: transparent; border: 1px solid transparent; border-radius: var(--r-sm); padding: 3px 6px; font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500; color: var(--dark); outline: none; transition: all 0.15s; min-width: 90px; width: 100%; }
+.editable-text:hover { border-color: var(--border); background: var(--cream); }
+.editable-text:focus { border-color: var(--sage); background: var(--white); }
+.qty-field { width: 70px; padding: 4px 7px; border: 1px solid var(--border); border-radius: var(--r-sm); font-family: 'DM Mono', monospace; font-size: 12px; background: var(--cream); color: var(--dark); outline: none; transition: border-color 0.15s; }
+.qty-field:focus { border-color: var(--orange); }
+.qty-field.lab { border-color: rgba(138,158,136,0.4); background: var(--sage-light); }
+.qty-field.lab:focus { border-color: var(--sage); }
+.unit-select { padding: 4px 5px; border: 1px solid var(--border); border-radius: var(--r-sm); font-family: 'DM Mono', monospace; font-size: 11px; background: var(--cream); color: var(--mid); outline: none; cursor: pointer; }
+.unit-select.lab { border-color: rgba(138,158,136,0.4); background: var(--sage-light); }
+.unit-select:disabled { cursor: default; opacity: 0.5; }
+.pct-wrap { display: flex; align-items: center; gap: 5px; }
+.pct-bar-bg { width: 40px; height: 3px; background: var(--sage-light); border-radius: 999px; overflow: hidden; }
+.pct-bar-fill { height: 100%; background: var(--sage); border-radius: 999px; }
+.pct-text { font-size: 11px; color: var(--mid); font-family: 'DM Mono', monospace; min-width: 30px; }
+.rm-ing-btn { background: none; border: none; color: var(--mid); cursor: pointer; display: flex; align-items: center; padding: 3px; border-radius: 4px; opacity: 0.35; transition: opacity 0.1s; }
+.rm-ing-btn:hover { opacity: 1; color: #c0392b; }
+.add-ing-row { display: flex; gap: 6px; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--border); flex-wrap: wrap; }
+.add-ing-row input[type=text] { flex: 2; min-width: 120px; padding: 7px 9px; border: 1px solid rgba(138,158,136,0.35); border-radius: var(--r-sm); font-family: inherit; font-size: 13px; background: var(--sage-light); color: var(--dark); outline: none; }
+.add-ing-row input[type=text]:focus { border-color: var(--sage); background: var(--white); }
+.add-ing-row input[type=number] { width: 72px; padding: 7px 8px; border: 1px solid rgba(138,158,136,0.35); border-radius: var(--r-sm); font-family: 'DM Mono', monospace; font-size: 12px; background: var(--sage-light); color: var(--dark); outline: none; }
+.add-ing-row input[type=number]:focus { border-color: var(--sage); background: var(--white); }
+.add-ing-row select { padding: 7px 6px; border: 1px solid rgba(138,158,136,0.35); border-radius: var(--r-sm); font-family: 'DM Mono', monospace; font-size: 11px; background: var(--sage-light); color: var(--mid); outline: none; }
+.add-ing-btn { padding: 7px 13px; background: var(--sage); color: white; border: none; border-radius: var(--r-sm); font-family: inherit; font-size: 12px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 4px; white-space: nowrap; transition: opacity 0.15s; }
+.add-ing-btn:hover { opacity: 0.85; }
+.validate-section { background: var(--orange-light); border: 1px solid var(--orange-border); border-radius: var(--r-lg); padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+.vs-title { font-size: 13px; font-weight: 600; color: var(--orange); display: flex; align-items: center; gap: 7px; }
+.vs-sub { font-size: 12px; color: var(--mid); }
+.variant-name-input { width: 100%; padding: 10px 14px; border: 1.5px solid var(--orange-border); border-radius: var(--r-sm); font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 500; background: var(--white); color: var(--dark); outline: none; transition: border-color 0.15s; }
+.variant-name-input:focus { border-color: var(--orange); }
+.variant-name-input::placeholder { color: rgba(107,106,102,0.4); font-weight: 400; }
+.validate-btn { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; padding: 12px; background: var(--orange); color: white; border: none; border-radius: var(--r-md); font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer; transition: opacity 0.15s; }
+.validate-btn:hover { opacity: 0.85; }
+.validate-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.variants-grid { display: flex; flex-direction: column; gap: 8px; }
+.variant-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--r-md); border: 1px solid var(--border); background: var(--cream); cursor: default; }
+.variant-card.production { border-color: var(--orange); background: var(--orange-light); }
+.vc-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sage); flex-shrink: 0; }
+.vc-dot.production { background: var(--orange); }
+.vc-name { font-size: 14px; font-weight: 500; flex: 1; }
+.vc-meta { font-size: 11px; color: var(--mid); }
+.vc-prod-badge { font-size: 9px; font-weight: 600; background: var(--orange); color: white; padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
+.set-prod-btn { font-size: 11px; color: var(--sage); background: none; border: 1px solid var(--sage-light); cursor: pointer; font-family: inherit; padding: 4px 9px; border-radius: var(--r-sm); transition: all 0.1s; white-space: nowrap; }
+.set-prod-btn:hover { background: var(--sage-light); }
+.ai-panel { background: var(--orange-light); border: 1px solid var(--orange-border); border-radius: var(--r-lg); padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+.ai-header { font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--orange); display: flex; align-items: center; gap: 6px; }
+.ai-msgs { display: flex; flex-direction: column; gap: 7px; max-height: 200px; overflow-y: auto; }
+.ai-bubble { padding: 9px 13px; border-radius: var(--r-md); font-size: 13px; line-height: 1.5; max-width: 88%; }
+.ai-bubble.user { background: var(--white); border: 1px solid var(--border); align-self: flex-end; }
+.ai-bubble.bot { background: var(--orange); color: white; align-self: flex-start; }
+.ai-empty { font-size: 12px; color: var(--orange); opacity: 0.55; font-style: italic; }
+.ai-sugg { background: var(--white); border: 1px solid var(--orange-border); border-radius: var(--r-md); padding: 10px 14px; }
+.ai-sugg-label { font-size: 9px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--orange); margin-bottom: 5px; }
+.apply-btn { display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; padding: 6px 14px; background: var(--orange); color: white; border: none; border-radius: 999px; font-family: inherit; font-size: 12px; font-weight: 500; cursor: pointer; transition: opacity 0.15s; }
+.apply-btn:hover { opacity: 0.85; }
+.ai-input-row { display: flex; gap: 7px; }
+.ai-input { flex: 1; padding: 8px 11px; border: 1px solid var(--orange-border); border-radius: var(--r-sm); font-family: inherit; font-size: 13px; background: var(--white); color: var(--dark); outline: none; }
+.ai-input:focus { border-color: var(--orange); }
+.send-btn { padding: 8px 13px; background: var(--orange); color: white; border: none; border-radius: var(--r-sm); cursor: pointer; font-size: 13px; transition: opacity 0.15s; }
+.send-btn:hover { opacity: 0.85; }
+.send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── LOAD PANEL ── */
+.load-panel { display: flex; flex-direction: column; gap: 20px; }
+.load-title { font-size: 22px; font-weight: 600; letter-spacing: -0.4px; margin-bottom: 4px; }
+.load-sub { font-size: 13px; color: var(--mid); }
+.load-tabs { display: flex; gap: 6px; margin-bottom: 4px; }
+.load-tab { padding: 8px 16px; border-radius: var(--r-sm); border: 1px solid var(--border); background: transparent; font-family: inherit; font-size: 13px; font-weight: 500; color: var(--mid); cursor: pointer; transition: all 0.15s; display: flex; align-items: center; gap: 6px; }
+.load-tab:hover { background: var(--sage-light); border-color: var(--sage); }
+.load-tab.active { background: var(--dark); color: white; border-color: var(--dark); }
+.load-zone { border: 2px dashed var(--border); border-radius: var(--r-lg); padding: 40px 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; cursor: pointer; transition: all 0.15s; text-align: center; background: var(--white); }
+.load-zone:hover { border-color: var(--sage); background: var(--sage-light); }
+.load-zone.dragover { border-color: var(--orange); background: var(--orange-light); }
+.load-zone i { font-size: 36px; color: var(--mid); opacity: 0.4; }
+.load-zone h3 { font-size: 15px; font-weight: 500; color: var(--dark); }
+.load-zone p { font-size: 12px; color: var(--mid); }
+.load-zone-btn { padding: 8px 18px; background: var(--dark); color: white; border: none; border-radius: var(--r-sm); font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; margin-top: 4px; transition: opacity 0.15s; }
+.load-zone-btn:hover { opacity: 0.85; }
+.url-row { display: flex; gap: 8px; }
+.url-input { flex: 1; padding: 10px 13px; border: 1px solid var(--border); border-radius: var(--r-sm); font-family: inherit; font-size: 13px; background: var(--white); color: var(--dark); outline: none; transition: border-color 0.15s; }
+.url-input:focus { border-color: var(--orange); }
+.url-input::placeholder { color: rgba(107,106,102,0.4); }
+.extract-btn { padding: 10px 18px; background: var(--orange); color: white; border: none; border-radius: var(--r-sm); font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap; transition: opacity 0.15s; display: flex; align-items: center; gap: 6px; }
+.extract-btn:hover { opacity: 0.85; }
+.extract-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.text-area { width: 100%; min-height: 180px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--r-sm); font-family: inherit; font-size: 13px; background: var(--white); color: var(--dark); outline: none; resize: vertical; line-height: 1.6; transition: border-color 0.15s; }
+.text-area:focus { border-color: var(--orange); }
+.text-area::placeholder { color: rgba(107,106,102,0.35); }
+.extracting-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 40px; text-align: center; }
+.extracting-state i { font-size: 32px; color: var(--orange); }
+.extracting-state p { font-size: 13px; color: var(--mid); }
+.preview-panel { display: flex; flex-direction: column; gap: 16px; }
+.preview-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.preview-notice { display: flex; align-items: center; gap: 7px; background: var(--sage-light); border-radius: var(--r-sm); padding: 9px 13px; font-size: 12px; color: var(--sage); font-weight: 500; }
+.preview-ing-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid rgba(44,44,42,0.05); }
+.preview-ing-row:last-child { border-bottom: none; }
+.preview-ing-name { flex: 2; font-size: 13px; font-weight: 500; }
+.preview-ing-qty { width: 70px; padding: 4px 7px; border: 1px solid var(--border); border-radius: var(--r-sm); font-family: 'DM Mono', monospace; font-size: 12px; background: var(--cream); color: var(--dark); outline: none; }
+.preview-ing-qty:focus { border-color: var(--orange); }
+.preview-ing-unit { padding: 4px 6px; border: 1px solid var(--border); border-radius: var(--r-sm); font-family: 'DM Mono', monospace; font-size: 11px; background: var(--cream); color: var(--mid); outline: none; cursor: pointer; }
+.preview-sub-badge { font-size: 9px; font-weight: 600; background: var(--sage-light); color: var(--sage); padding: 1px 6px; border-radius: 999px; }
+.preview-actions { display: flex; gap: 8px; justify-content: flex-end; padding-top: 4px; }
+.btn-discard { padding: 9px 16px; background: transparent; color: var(--mid); border: 1px solid var(--border); border-radius: var(--r-sm); font-family: inherit; font-size: 13px; cursor: pointer; }
+.btn-save { padding: 9px 20px; background: var(--orange); color: white; border: none; border-radius: var(--r-sm); font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: opacity 0.15s; }
+.btn-save:hover { opacity: 0.85; }
+.img-preview { max-width: 200px; max-height: 160px; border-radius: var(--r-md); border: 1px solid var(--border); object-fit: cover; }
+.preview-name-input { font-size: 18px; font-weight: 600; letter-spacing: -0.3px; border: 1px solid transparent; border-radius: var(--r-sm); padding: 3px 6px; background: transparent; color: var(--dark); outline: none; width: 100%; transition: all 0.15s; }
+.preview-name-input:hover { border-color: var(--border); background: var(--cream); }
+.preview-name-input:focus { border-color: var(--orange); background: var(--white); }
+
+/* MODAL */
+/* VOICE NOTES */
+.voice-panel { background: var(--white); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+.voice-header { font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mid); display: flex; align-items: center; gap: 6px; }
+.rec-row { display: flex; align-items: center; gap: 12px; }
+.rec-btn { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 999px; border: none; font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+.rec-btn.idle { background: var(--cream); color: var(--dark); border: 1.5px solid var(--border); }
+.rec-btn.idle:hover { border-color: #c0392b; color: #c0392b; }
+.rec-btn.recording { background: #c0392b; color: white; animation: pulse 1.2s ease infinite; }
+@keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(192,57,43,0.3); } 50% { box-shadow: 0 0 0 8px rgba(192,57,43,0); } }
+.rec-status { font-size: 12px; color: var(--mid); font-style: italic; }
+.rec-status.active { color: #c0392b; font-style: normal; font-weight: 500; }
+.transcribing { font-size: 12px; color: var(--orange); display: flex; align-items: center; gap: 5px; }
+.voice-notes-list { display: flex; flex-direction: column; gap: 8px; }
+.voice-note-item { background: var(--cream); border-radius: var(--r-md); padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+.vn-header { display: flex; align-items: center; justify-content: space-between; }
+.vn-time { font-size: 10px; color: var(--mid); font-family: 'DM Mono', monospace; }
+.vn-text { font-size: 13px; color: var(--dark); line-height: 1.5; }
+.vn-text.editing { background: var(--white); border: 1px solid var(--sage); border-radius: var(--r-sm); padding: 6px 8px; outline: none; width: 100%; font-family: inherit; font-size: 13px; resize: none; }
+.vn-audio { width: 100%; height: 28px; }
+.vn-actions { display: flex; gap: 6px; }
+.vn-btn { background: none; border: none; font-size: 11px; color: var(--mid); cursor: pointer; font-family: inherit; padding: 2px 6px; border-radius: var(--r-sm); transition: background 0.1s; }
+.vn-btn:hover { background: var(--sage-light); color: var(--sage); }
+.vn-btn.del:hover { background: #fde8e8; color: #c0392b; }
+
+.overlay { position: fixed; inset: 0; background: rgba(44,44,42,0.45); display: flex; align-items: center; justify-content: center; z-index: 999; padding: 20px; }
+.modal { background: var(--white); border-radius: var(--r-lg); padding: 26px; width: 100%; max-width: 460px; max-height: 86vh; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+.modal-title { font-size: 18px; font-weight: 600; letter-spacing: -0.3px; }
+.form-group { display: flex; flex-direction: column; gap: 5px; }
+.form-label { font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--mid); }
+.form-input { padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--r-sm); font-family: inherit; font-size: 13px; background: var(--cream); color: var(--dark); outline: none; transition: border-color 0.15s; width: 100%; }
+.form-input:focus { border-color: var(--orange); }
+.row-3 { display: grid; grid-template-columns: 1fr 80px 80px; gap: 10px; }
+.ing-add-row-m { display: flex; gap: 7px; align-items: flex-end; }
+.add-ing-btn-m { padding: 9px 11px; background: var(--sage-light); color: var(--sage); border: none; border-radius: var(--r-sm); cursor: pointer; font-size: 16px; display: flex; align-items: center; flex-shrink: 0; }
+.ing-preview { display: flex; flex-direction: column; gap: 4px; }
+.ing-preview-row { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: var(--cream); border-radius: var(--r-sm); font-size: 12px; }
+.rm { background: none; border: none; color: var(--mid); cursor: pointer; display: flex; align-items: center; }
+.sub-notice { background: var(--orange-light); border: 1px solid var(--orange-border); border-radius: var(--r-sm); padding: 9px 13px; font-size: 12px; color: var(--orange); }
+.modal-footer { display: flex; gap: 8px; justify-content: flex-end; }
+.btn-cancel { padding: 8px 16px; background: transparent; color: var(--mid); border: 1px solid var(--border); border-radius: var(--r-sm); font-family: inherit; font-size: 13px; cursor: pointer; }
+.btn-ok { padding: 8px 18px; background: var(--orange); color: white; border: none; border-radius: var(--r-sm); font-family: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.toast { position: fixed; bottom: 22px; right: 22px; background: var(--dark); color: white; padding: 11px 18px; border-radius: var(--r-md); font-size: 13px; font-weight: 500; z-index: 9999; display: flex; align-items: center; gap: 8px; animation: toastIn 0.2s ease; max-width: 340px; }
+@keyframes toastIn { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+.spin { animation: spinning 1s linear infinite; display: inline-block; }
+@keyframes spinning { to { transform: rotate(360deg); } }
+.thinking { font-size: 12px; color: var(--orange); display: flex; align-items: center; gap: 5px; padding: 4px 0; opacity: 0.7; }
+.empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 10px; color: var(--mid); text-align: center; padding: 40px; }
+.empty i { font-size: 36px; opacity: 0.25; }
+.empty h3 { font-size: 15px; font-weight: 500; color: var(--dark); }
+</style>
+</head>
+<body>
+<div class="shell" id="app"></div>
+<script>
+const UNITS = ['g','ml','kg','l','n','tbsp','tsp','cl'];
+const SUB_KW = ['crema pasticcera','besciamella','pasta frolla','pasta sfoglia','pan di spagna','crema chantilly','crema al burro','ganache','caramello','ragù','brodo','pesto','maionese','coulis','composta','meringa','pasta brisée','pasta choux','crema diplomatica','crema inglese','frangipane','namelaka'];
+const isSub = n => SUB_KW.some(k => n.toLowerCase().includes(k));
+
+let S = {
+  view: 'recipe', // 'recipe' | 'load'
+  mode: 'produzione', selectedId: 'r1', showModal: false,
+  toast: null, toastTimer: null,
+  pendingVariantName: '',
+  addIng: { name:'', qty:'', unit:'g' },
+  aiMsgs: {}, aiLoading: false, aiSugg: null,
+  selectedVariantId: null, expandedRecipes: {},
+  voiceNotes: {}, // { recipeId: [{id, text, audioUrl, createdAt}] }
+  isRecording: false,
+  // LOAD state
+  loadTab: 'foto', // 'foto' | 'link' | 'testo'
+  loadUrl: '', loadText: '', loadImageB64: null, loadImagePreviewUrl: null,
+  loadExtracting: false, loadPreview: null, // extracted recipe preview
+  modal: { name:'', category:'Dolci', portions:4, gpp:200, ings:[], iName:'', iQty:'', iUnit:'g' },
+  recipes: [
+    { id:'r1', name:'Zuppa Inglese', category:'Dolci', department:'Pasticceria',
+      productionVariantId:null, validatedVariants:[], currentLabIdx:0,
+      labVersions:[{ id:'v1', label:'Versione 1', note:'Ricetta base', portionsCount:8, gramsPerPortion:150,
+        ingredients:[
+          {id:'i1',name:'Crema Pasticcera',qty:600,unit:'g',isSubRecipe:true,subRecipeId:'r2'},
+          {id:'i2',name:'Pan di Spagna',qty:300,unit:'g',isSubRecipe:false},
+          {id:'i3',name:'Alchermes',qty:80,unit:'ml',isSubRecipe:false},
+          {id:'i4',name:'Cioccolato fondente',qty:100,unit:'g',isSubRecipe:false},
+          {id:'i5',name:'Panna fresca',qty:120,unit:'ml',isSubRecipe:false},
+        ]}]
+    },
+    { id:'r2', name:'Crema Pasticcera', category:'Basi', department:'Pasticceria',
+      parentRecipeId:'r1', productionVariantId:null, validatedVariants:[], currentLabIdx:0,
+      labVersions:[{ id:'v1', label:'Versione 1', note:'Variante da Zuppa Inglese', portionsCount:1, gramsPerPortion:600,
+        ingredients:[
+          {id:'i1',name:'Latte intero',qty:500,unit:'ml',isSubRecipe:false},
+          {id:'i2',name:'Tuorli',qty:120,unit:'g',isSubRecipe:false},
+          {id:'i3',name:'Zucchero',qty:150,unit:'g',isSubRecipe:false},
+          {id:'i4',name:'Amido di mais',qty:40,unit:'g',isSubRecipe:false},
+          {id:'i5',name:'Vaniglia',qty:5,unit:'g',isSubRecipe:false},
+        ]}]
+    }
+  ]
+};
+
+const R = id => S.recipes.find(r=>r.id===id);
+const curLab = r => r.labVersions[r.currentLabIdx];
+const totQty = v => v.ingredients.reduce((s,i)=>s+(parseFloat(i.qty)||0),0);
+
+function toast(msg, icon='ti-check') {
+  if (S.toastTimer) clearTimeout(S.toastTimer);
+  S.toast={msg,icon};
+  S.toastTimer=setTimeout(()=>{S.toast=null;render();},3000);
+}
+
+function upRec(id,fn){S.recipes=S.recipes.map(r=>r.id===id?fn({...r}):r);render();}
+function upLab(id,fn){upRec(id,r=>{const lv=r.labVersions.map((v,i)=>i===r.currentLabIdx?fn({...v,ingredients:[...v.ingredients]}):v);return{...r,labVersions:lv};});}
+
+function onPortions(id,val){upLab(id,v=>{const n=parseInt(val)||1,t=totQty(v);return{...v,portionsCount:n,gramsPerPortion:n>0?parseFloat((t/n).toFixed(1)):v.gramsPerPortion};});}
+function onGpp(id,val){upLab(id,v=>{const g=parseFloat(val)||1,ot=totQty(v),nt=g*v.portionsCount,rat=ot>0?nt/ot:1;return{...v,gramsPerPortion:g,ingredients:v.ingredients.map(i=>({...i,qty:parseFloat((i.qty*rat).toFixed(2))}))};});}
+function onIngQty(rid,iid,nq){
+  const q=parseFloat(nq)||0;
+  if(S.mode==='lab'){upLab(rid,v=>{const ings=v.ingredients.map(i=>i.id===iid?{...i,qty:q}:i),t=totQty({ingredients:ings});return{...v,ingredients:ings,gramsPerPortion:v.portionsCount>0?parseFloat((t/v.portionsCount).toFixed(1)):v.gramsPerPortion};});}
+  else{upLab(rid,v=>{const old=v.ingredients.find(i=>i.id===iid),rat=q/(old.qty||1);const ings=v.ingredients.map(i=>i.id===iid?{...i,qty:q}:{...i,qty:parseFloat((i.qty*rat).toFixed(2))}),t=totQty({ingredients:ings});return{...v,ingredients:ings,gramsPerPortion:v.portionsCount>0?parseFloat((t/v.portionsCount).toFixed(1)):v.gramsPerPortion};});}
+}
+function onIngName(rid,iid,nn){upLab(rid,v=>({...v,ingredients:v.ingredients.map(i=>i.id===iid?{...i,name:nn,isSubRecipe:isSub(nn)}:i)}));}
+function onIngUnit(rid,iid,nu){upLab(rid,v=>({...v,ingredients:v.ingredients.map(i=>i.id===iid?{...i,unit:nu}:i)}));}
+function onRmIng(rid,iid){upLab(rid,v=>{const ings=v.ingredients.filter(i=>i.id!==iid),t=totQty({ingredients:ings});return{...v,ingredients:ings,gramsPerPortion:v.portionsCount>0?parseFloat((t/v.portionsCount).toFixed(1)):v.gramsPerPortion};});}
+function addIngLab(rid){
+  const{name,qty,unit}=S.addIng;if(!name.trim()||!qty)return;
+  const ni={id:'i'+Date.now(),name:name.trim(),qty:parseFloat(qty),unit,isSubRecipe:isSub(name.trim()),subRecipeId:null};
+  upLab(rid,v=>{const ings=[...v.ingredients,ni],t=totQty({ingredients:ings});return{...v,ingredients:ings,gramsPerPortion:v.portionsCount>0?parseFloat((t/v.portionsCount).toFixed(1)):v.gramsPerPortion};});
+  S.addIng={name:'',qty:'',unit:'g'};toast('Ingrediente aggiunto');
+}
+function onValidate(id){
+  const name=S.pendingVariantName.trim();if(!name)return;
+  const r=R(id),v=curLab(r);
+  const nv={id:'vv'+Date.now(),name,validatedAt:new Date().toLocaleDateString('it-IT'),portionsCount:v.portionsCount,gramsPerPortion:v.gramsPerPortion,ingredients:v.ingredients.map(i=>({...i}))};
+  upRec(id,r=>({...r,validatedVariants:[...r.validatedVariants,nv],productionVariantId:r.productionVariantId||nv.id,labVersions:[{id:'v'+Date.now(),label:'Versione 1',note:'Nuovo test',portionsCount:v.portionsCount,gramsPerPortion:v.gramsPerPortion,ingredients:v.ingredients.map(i=>({...i}))}],currentLabIdx:0}));
+  S.pendingVariantName='';S.mode='produzione';toast(`"${name}" validata`,'ti-circle-check');
+}
+function setProd(rid,vid){upRec(rid,r=>({...r,productionVariantId:vid}));toast('Versione di produzione aggiornata','ti-settings-2');}
+
+/* ── AI LAB ── */
+async function sendAi(){
+  const recipe=R(S.selectedId),v=curLab(recipe);
+  const el=document.getElementById('ai-input');const msg=el?el.value.trim():'';if(!msg||S.aiLoading)return;
+  if(el)el.value='';
+  S.aiMsgs[S.selectedId]=[...(S.aiMsgs[S.selectedId]||[]),{role:'user',text:msg}];
+  S.aiLoading=true;S.aiSugg=null;render();
+  const ingList=v.ingredients.map(i=>`${i.name}: ${i.qty}${i.unit}`).join(', ');
+  const sys=`Sei un consulente tecnico di cucina professionale in Khub, nel LAB di "${recipe.name}". Ingredienti: ${ingList}. Porzioni: ${v.portionsCount}, g/porzione: ${v.gramsPerPortion}g. Rispondi in italiano, conciso. Se suggerisci modifica specifica concludi con: SUGGERIMENTO:{"ingredientName":"nome attuale","newName":"nuovo nome o stesso","newQty":numero,"unit":"unità","reason":"motivo"}`;
+  try{
+    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:800,system:sys,messages:[...(S.aiMsgs[S.selectedId]||[]).slice(0,-1).map(m=>({role:m.role==='user'?'user':'assistant',content:m.text})),{role:'user',content:msg}]})});
+    const data=await res.json();let text=(data.content||[]).map(c=>c.text||'').join('');
+    let sugg=null;const m=text.match(/SUGGERIMENTO:(\{[^}]+\})/);
+    if(m){try{sugg=JSON.parse(m[1]);}catch(e){}text=text.replace(/SUGGERIMENTO:\{[^}]+\}/,'').trim();}
+    S.aiMsgs[S.selectedId]=[...(S.aiMsgs[S.selectedId]||[]),{role:'bot',text}];S.aiSugg=sugg;
+  }catch(e){S.aiMsgs[S.selectedId]=[...(S.aiMsgs[S.selectedId]||[]),{role:'bot',text:'Errore. Riprova.'}];}
+  S.aiLoading=false;render();
+  setTimeout(()=>{const el=document.getElementById('ai-msgs');if(el)el.scrollTop=el.scrollHeight;},50);
+}
+function applyAiSugg(){
+  if(!S.aiSugg)return;const v=curLab(R(S.selectedId)),sugg=S.aiSugg;
+  const ing=v.ingredients.find(i=>i.name.toLowerCase().includes(sugg.ingredientName.toLowerCase()));if(!ing)return;
+  upLab(S.selectedId,v=>({...v,ingredients:v.ingredients.map(i=>i.id===ing.id?{...i,qty:parseFloat(sugg.newQty),name:sugg.newName||i.name,isSubRecipe:isSub(sugg.newName||i.name)}:i)}));
+  S.aiSugg=null;toast('Modifica applicata');
+}
+
+/* ── LOAD / EXTRACT ── */
+async function extractFromSource(type, payload) {
+  S.loadExtracting=true; S.loadPreview=null; render();
+
+  let messages = [];
+  if (type==='image') {
+    messages=[{role:'user',content:[
+      {type:'image',source:{type:'base64',media_type:payload.mediaType,data:payload.b64}},
+      {type:'text',text:'Estrai la ricetta da questa immagine. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes e nella ricetta madre metti solo il riferimento come ingrediente con isSubRecipe:true. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.'}
+    ]}];
+  } else if (type==='text') {
+    messages=[{role:'user',content:`Estrai la ricetta dal seguente testo. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes e nella ricetta madre metti solo il riferimento come ingrediente con isSubRecipe:true. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.\n\nTESTO:\n${payload}`}];
+  } else if (type==='url') {
+    // Usa proxy CORS per leggere il contenuto reale della pagina
+    let pageText = '';
+    try {
+      const proxyRes = await fetch('https://api.allorigins.win/get?url=' + encodeURIComponent(payload));
+      const proxyData = await proxyRes.json();
+      if (proxyData && proxyData.contents) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = proxyData.contents;
+        tmp.querySelectorAll('script,style,nav,header,footer,aside').forEach(el=>el.remove());
+        pageText = (tmp.innerText || tmp.textContent || '').replace(/\s+/g,' ').trim().slice(0,6000);
+      }
+    } catch(e) { pageText = ''; }
+    const urlContent = pageText
+      ? 'Estrai la ricetta dal seguente testo (fonte: ' + payload + ').\n\nTESTO:\n' + pageText
+      : 'Estrai la ricetta da questo URL: ' + payload + '. Usa il nome nell URL per dedurre la ricetta.';
+    messages=[{role:'user',content: urlContent + '\n\nRispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes e nella ricetta madre metti solo il riferimento come ingrediente con isSubRecipe:true. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.'}];
+  }
+
+  try {
+    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1500,messages})});
+    const data=await res.json();
+    let text=(data.content||[]).map(c=>c.text||'').join('').trim();
+    text=text.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
+    const parsed=JSON.parse(text);
+    parsed.ingredients=parsed.ingredients.map((i,idx)=>({...i,id:'pi'+idx,isSubRecipe:isSub(i.name),subRecipeId:null,qty:parseFloat(i.qty)||0,unit:UNITS.includes(i.unit)?i.unit:'g'}));
+    S.loadPreview=parsed;
+  } catch(e) {
+    toast('Errore nella lettura. Riprova o usa il testo libero.','ti-alert-circle');
+  }
+  S.loadExtracting=false; render();
+}
+
+function savePreview() {
+  const p=S.loadPreview; if(!p) return;
+  const newId='r'+Date.now();
+  const ts = Date.now();
+  const recipesToAdd = [];
+  const recipeUpdates = []; // { id, newLabVersion }
+
+  // Helper: cerca ricetta esistente per nome (case-insensitive, fuzzy)
+  function findExistingRecipe(name) {
+    const nl = name.toLowerCase().trim();
+    return S.recipes.find(r => r.name.toLowerCase().trim() === nl ||
+      r.name.toLowerCase().includes(nl) || nl.includes(r.name.toLowerCase()));
+  }
+
+  // 1. Processa sub-ricette esplicite dall'AI (subRecipes array)
+  if (p.subRecipes && p.subRecipes.length) {
+    p.subRecipes.forEach((sr, idx) => {
+      const srIngs = (sr.ingredients||[]).map((i,j) => ({
+        id:'sri'+idx+'_'+j, name:i.name, qty:parseFloat(i.qty)||0,
+        unit:i.unit||'g', isSubRecipe:false, subRecipeId:null
+      }));
+      const srTot = srIngs.reduce((s,i)=>s+(parseFloat(i.qty)||0),0);
+      const newLabVersion = {
+        id:'lv'+ts+'_'+idx, label:'Versione 1',
+        note:'Da '+p.name,
+        portionsCount:1, gramsPerPortion:srTot||500,
+        ingredients: srIngs
+      };
+
+      // Cerca se esiste già una ricetta con questo nome
+      const existing = findExistingRecipe(sr.name);
+      let targetId;
+
+      if (existing) {
+        // Aggiunge come nuova versione LAB alla ricetta esistente
+        targetId = existing.id;
+        recipeUpdates.push({ id: existing.id, newLabVersion });
+      } else {
+        // Crea nuova ricetta
+        targetId = 'r'+(ts+idx+1);
+        recipesToAdd.push({
+          id: targetId, name: sr.name, category:'Basi', department:'Cucina',
+          parentRecipeId: newId, productionVariantId:null, validatedVariants:[],
+          currentLabIdx:0, labVersions:[newLabVersion]
+        });
+      }
+
+      // Collega nella ricetta madre
+      const existing_ing = p.ingredients.find(i =>
+        i.name.toLowerCase().includes(sr.name.toLowerCase()) ||
+        sr.name.toLowerCase().includes(i.name.toLowerCase())
+      );
+      if (existing_ing) { existing_ing.isSubRecipe=true; existing_ing.subRecipeId=targetId; }
+      else { p.ingredients.push({id:'psr'+idx,name:sr.name,qty:srTot,unit:'g',isSubRecipe:true,subRecipeId:targetId}); }
+    });
+  }
+
+  // 2. Sub-ricette rilevate da keyword negli ingredienti (fallback)
+  p.ingredients.forEach((ing, idx) => {
+    if (ing.isSubRecipe && !ing.subRecipeId) {
+      const existing = findExistingRecipe(ing.name);
+      if (existing) {
+        ing.subRecipeId = existing.id;
+        // Aggiunge versione LAB vuota con placeholder
+        recipeUpdates.push({
+          id: existing.id,
+          newLabVersion: {
+            id:'lv'+ts+'k'+idx, label:'Versione 1', note:'Da '+p.name,
+            portionsCount:1, gramsPerPortion:parseFloat(ing.qty)||500,
+            ingredients:[
+              {id:'si1',name:'Ingrediente 1',qty:200,unit:'g',isSubRecipe:false},
+              {id:'si2',name:'Ingrediente 2',qty:150,unit:'g',isSubRecipe:false}
+            ]
+          }
+        });
+      } else {
+        const sid = 'r'+(ts+100+idx);
+        ing.subRecipeId = sid;
+        recipesToAdd.push({
+          id:sid, name:ing.name.charAt(0).toUpperCase()+ing.name.slice(1),
+          category:'Basi', department:'Cucina', parentRecipeId:newId,
+          productionVariantId:null, validatedVariants:[], currentLabIdx:0,
+          labVersions:[{
+            id:'v1', label:'Versione 1', note:'Da '+p.name,
+            portionsCount:1, gramsPerPortion:parseFloat(ing.qty)||500,
+            ingredients:[
+              {id:'si1',name:'Ingrediente 1',qty:200,unit:'g',isSubRecipe:false},
+              {id:'si2',name:'Ingrediente 2',qty:150,unit:'g',isSubRecipe:false}
+            ]
+          }]
+        });
+      }
+    }
+  });
+
+  // 3. Applica aggiornamenti alle ricette esistenti (nuova versione LAB)
+  if (recipeUpdates.length) {
+    S.recipes = S.recipes.map(r => {
+      const upd = recipeUpdates.find(u => u.id === r.id);
+      if (!upd) return r;
+      const newVersions = [...r.labVersions, upd.newLabVersion];
+      return { ...r, labVersions: newVersions, currentLabIdx: newVersions.length - 1 };
+    });
+  }
+
+  // 4. Salva ricetta madre + nuove sub-ricette
+  const mainRecipe = {
+    id:newId, name:p.name, category:p.category||'Altro', department:'Cucina',
+    productionVariantId:null, validatedVariants:[], currentLabIdx:0,
+    labVersions:[{
+      id:'v1', label:'Versione 1', note:'Importata',
+      portionsCount:parseInt(p.portionsCount)||4,
+      gramsPerPortion:parseFloat(p.gramsPerPortion)||200,
+      ingredients:p.ingredients
+    }]
+  };
+  S.recipes = [...S.recipes, mainRecipe, ...recipesToAdd];
+
+  S.selectedId=newId; S.view='recipe'; S.loadPreview=null;
+  S.loadImageB64=null; S.loadImagePreviewUrl=null; S.loadUrl=''; S.loadText='';
+
+  const totalSubs = recipesToAdd.length + recipeUpdates.length;
+  if (recipeUpdates.length) {
+    const names = recipeUpdates.map(u => S.recipes.find(r=>r.id===u.id)?.name||'').filter(Boolean);
+    toast(`"${p.name}" importata — nuova versione aggiunta a: ${names.join(', ')}`, 'ti-sparkles');
+  } else if (recipesToAdd.length) {
+    toast(`"${p.name}" importata + ${recipesToAdd.length} sub-ricett${recipesToAdd.length>1?'e':'a'} creat${recipesToAdd.length>1?'e':'a'}`, 'ti-sparkles');
+  } else {
+    toast(`"${p.name}" importata con successo`, 'ti-circle-check');
+  }
+}
+
+/* ── VOICE NOTES ── */
+let mediaRecorder = null;
+let audioChunks = [];
+let recTimer = null;
+let recSeconds = 0;
+let speechRecognition = null;
+let liveTranscript = '';
+
+function startRecording() {
+  if (!navigator.mediaDevices) { alert('Il tuo browser non supporta la registrazione audio.'); return; }
+
+  // Avvia riconoscimento vocale in tempo reale
+  const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  liveTranscript = '';
+  if (SpeechRec) {
+    speechRecognition = new SpeechRec();
+    speechRecognition.lang = 'it-IT';
+    speechRecognition.continuous = true;
+    speechRecognition.interimResults = true;
+    speechRecognition.onresult = e => {
+      liveTranscript = Array.from(e.results).map(r => r[0].transcript).join(' ');
+      const el = document.getElementById('rec-status');
+      if (el) el.textContent = '● ' + liveTranscript;
+    };
+    speechRecognition.start();
+  }
+
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+    audioChunks = []; recSeconds = 0;
+    mediaRecorder = new MediaRecorder(stream);
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+    mediaRecorder.onstop = () => {
+      stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(audioChunks, { type: 'audio/webm' });
+      const audioUrl = URL.createObjectURL(blob);
+      const finalText = liveTranscript.trim() || '(nessuna trascrizione — clicca ✏️ per aggiungere testo)';
+      saveVoiceNote(finalText, audioUrl);
+    };
+    mediaRecorder.start();
+    S.isRecording = true;
+    recTimer = setInterval(() => { recSeconds++; updateRecTimer(); }, 1000);
+    render();
+  }).catch(() => alert('Impossibile accedere al microfono. Controlla i permessi del browser.'));
+}
+
+function updateRecTimer() {
+  const el = document.getElementById('rec-timer');
+  if (el) { const m = Math.floor(recSeconds/60), s = recSeconds%60; el.textContent = `${m}:${s.toString().padStart(2,'0')}`; }
+}
+
+function stopRecording() {
+  if (speechRecognition) { speechRecognition.stop(); speechRecognition = null; }
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+  if (recTimer) { clearInterval(recTimer); recTimer = null; }
+  S.isRecording = false;
+  render();
+}
+
+function saveVoiceNote(text, audioUrl) {
+  const rid = S.selectedId;
+  const note = {
+    id: 'vn' + Date.now(),
+    text,
+    audioUrl,
+    createdAt: new Date().toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }),
+    editing: false
+  };
+  S.voiceNotes[rid] = [...(S.voiceNotes[rid] || []), note];
+  render();
+  toast('Nota vocale salvata', 'ti-microphone');
+}
+
+function deleteVoiceNote(rid, nid) {
+  S.voiceNotes[rid] = (S.voiceNotes[rid] || []).filter(n => n.id !== nid);
+  render();
+}
+
+function editVoiceNote(rid, nid, newText) {
+  S.voiceNotes[rid] = (S.voiceNotes[rid] || []).map(n => n.id === nid ? {...n, text: newText, editing: false} : n);
+  render();
+}
+
+function toggleEditNote(rid, nid) {
+  S.voiceNotes[rid] = (S.voiceNotes[rid] || []).map(n => n.id === nid ? {...n, editing: !n.editing} : n);
+  render();
+  setTimeout(() => { const el = document.getElementById('edit-'+nid); if(el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }}, 50);
+}
+
+function renderVoicePanel(recipeId) {
+  const notes = S.voiceNotes[recipeId] || [];
+  return `<div class="voice-panel">
+    <div class="voice-header"><i class="ti ti-microphone"></i> Note vocali — LAB</div>
+    <div class="rec-row">
+      ${S.isRecording
+        ? `<button class="rec-btn recording" id="btn-stop-rec"><i class="ti ti-player-stop-filled"></i> Stop <span id="rec-timer">0:00</span></button>
+           <span class="rec-status active" id="rec-status">● Registrazione in corso...</span>`
+        : `<button class="rec-btn idle" id="btn-start-rec"><i class="ti ti-microphone"></i> Registra nota</button>
+           <span class="rec-status" id="rec-status">${notes.length ? notes.length + ' nota' + (notes.length>1?'e':'') + ' salvata' + (notes.length>1?'e':'') : 'Parla liberamente durante il test'}</span>`
+      }
+    </div>
+    ${notes.length ? `<div class="voice-notes-list">
+      ${notes.map(n => `<div class="voice-note-item">
+        <div class="vn-header">
+          <span class="vn-time"><i class="ti ti-clock" style="font-size:10px"></i> ${n.createdAt}</span>
+          <div class="vn-actions">
+            <button class="vn-btn" data-edit-note="${n.id}" data-recipe="${recipeId}"><i class="ti ti-pencil" style="font-size:11px"></i></button>
+            <button class="vn-btn del" data-del-note="${n.id}" data-recipe="${recipeId}"><i class="ti ti-trash" style="font-size:11px"></i></button>
+          </div>
+        </div>
+        ${n.editing
+          ? `<textarea class="vn-text editing" id="edit-${n.id}" data-save-note="${n.id}" data-recipe="${recipeId}" rows="3">${n.text}</textarea>
+             <button class="add-ing-btn" style="align-self:flex-end;padding:5px 12px" data-confirm-note="${n.id}" data-recipe="${recipeId}"><i class="ti ti-check"></i> Salva</button>`
+          : `<div class="vn-text">${n.text}</div>`
+        }
+        <audio class="vn-audio" controls src="${n.audioUrl}"></audio>
+      </div>`).join('')}
+    </div>` : ''}
+  </div>`;
+}
+
+function addIngModal(){const m=S.modal;if(!m.iName.trim()||!m.iQty)return;S.modal.ings=[...m.ings,{id:'ni'+Date.now(),name:m.iName.trim(),qty:parseFloat(m.iQty),unit:m.iUnit,isSubRecipe:isSub(m.iName.trim()),subRecipeId:null}];S.modal.iName='';S.modal.iQty='';S.modal.iUnit='g';render();}
+function submitModal(){
+  const m=S.modal;if(!m.name.trim()||!m.ings.length)return;
+  const newId='r'+Date.now(),subs=[];
+  m.ings.forEach(ing=>{if(ing.isSubRecipe){const sid='r'+Date.now()+Math.round(Math.random()*9999);ing.subRecipeId=sid;subs.push({id:sid,name:ing.name.charAt(0).toUpperCase()+ing.name.slice(1),category:'Basi',department:'Cucina',parentRecipeId:newId,productionVariantId:null,validatedVariants:[],currentLabIdx:0,labVersions:[{id:'v1',label:'Versione 1',note:'Sub-ricetta da '+m.name,portionsCount:1,gramsPerPortion:parseFloat(m.ings.find(i=>i.isSubRecipe)?.qty)||500,ingredients:[{id:'si1',name:'Ingrediente 1',qty:200,unit:'g',isSubRecipe:false}]}]});}});
+  S.recipes=[...S.recipes,{id:newId,name:m.name,category:m.category,department:'Cucina',productionVariantId:null,validatedVariants:[],currentLabIdx:0,labVersions:[{id:'v1',label:'Versione 1',note:'Ricetta base',portionsCount:parseInt(m.portions)||4,gramsPerPortion:parseFloat(m.gpp)||200,ingredients:m.ings}]},...subs];
+  S.selectedId=newId;S.view='recipe';S.showModal=false;S.modal={name:'',category:'Dolci',portions:4,gpp:200,ings:[],iName:'',iQty:'',iUnit:'g'};
+  if(subs.length)toast(`${subs.length} sub-ricett${subs.length>1?'e':'a'} creat${subs.length>1?'e':'a'} automaticamente`,'ti-sparkles');else toast('Ricetta aggiunta');
+}
+
+/* ── RENDER ── */
+function render(){
+  const app=document.getElementById('app'),recipe=R(S.selectedId);
+  const cats={Basi:[],Dolci:[],Salato:[],Altro:[]};
+  S.recipes.forEach(r=>{(cats[r.category]?cats[r.category]:cats['Altro']).push(r);});
+  const icons={Basi:'ti-tool',Dolci:'ti-cookie',Salato:'ti-soup',Altro:'ti-star'};
+
+  const sidebar=`<div class="sidebar">
+    <button class="new-btn" id="btn-new"><i class="ti ti-plus"></i> Nuova ricetta</button>
+    <button class="load-btn-side ${S.view==='load'?'active':''}" id="btn-load-view"><i class="ti ti-upload"></i> Carica ricetta</button>
+    ${Object.entries(cats).map(([cat,items])=>!items.length?'':
+      `<div class="sec-label">${cat}</div>${items.map(r=>{
+        const isActive = r.id===S.selectedId&&S.view==='recipe';
+        const hasVariants = r.validatedVariants.length > 0;
+        const isExpanded = hasVariants && (isActive || S.expandedRecipes && S.expandedRecipes[r.id]);
+        return `
+        <button class="recipe-btn ${isActive&&!S.selectedVariantId?'active':''}" data-nav="${r.id}">
+          <i class="ti ${icons[r.category]||'ti-file'}"></i>
+          <span style="flex:1;font-size:12px">${r.name}</span>
+          ${r.parentRecipeId?'<span class="sub-pill">sub</span>':''}
+          ${hasVariants?`<span class="var-count" style="background:var(--orange-light);color:var(--orange)">${r.validatedVariants.length}</span>`:''}
+        </button>
+        ${hasVariants&&(isActive||isExpanded)?`<div class="recipe-variants">
+          ${r.validatedVariants.map(vv=>{
+            const isProd = vv.id===r.productionVariantId;
+            const isSelV = S.selectedVariantId===vv.id&&S.selectedId===r.id;
+            return `<button class="variant-sidebar-btn ${isProd?'prod-dot':'other-dot'} ${isSelV?'active':''}" data-nav-variant="${vv.id}" data-recipe="${r.id}">
+              ${vv.name}
+              ${isProd?'<span style="margin-left:auto;font-size:9px;color:var(--orange);font-weight:600">PROD</span>':''}
+            </button>`;
+          }).join('')}
+          <button class="variant-sidebar-btn other-dot" data-nav="${r.id}" data-go-lab="1" style="color:var(--sage);font-style:italic">
+            <i class="ti ti-flask" style="font-size:10px"></i> LAB
+          </button>
+        </div>`:''}`;
+      }).join('')}`
+    ).join('')}
+  </div>`;
+
+  let mainContent = '';
+  if (S.view==='load') { mainContent = renderLoad(); }
+  else if (recipe) { mainContent = renderRecipe(recipe); }
+  else { mainContent = '<div class="empty"><i class="ti ti-chef-hat"></i><h3>Seleziona una ricetta</h3></div>'; }
+
+  app.innerHTML=`
+    <div class="topbar">
+      <div><div class="logo">K<span>hub</span></div><div class="logo-sub">Dall'idea alla ricetta che funziona...sempre!</div></div>
+      <div class="mode-switcher">
+        <button class="mode-btn ${S.mode==='produzione'?'active-prod':''}" id="btn-prod"><i class="ti ti-settings-2"></i> Produzione</button>
+        <button class="mode-btn ${S.mode==='lab'?'active-lab':''}" id="btn-lab"><i class="ti ti-flask"></i> LAB</button>
+      </div>
+    </div>
+    ${sidebar}
+    <div class="main">${mainContent}</div>
+    ${S.showModal?renderModal():''}
+    ${S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:''}
+  `;
+  bind();
+}
+
+function renderLoad(){
+  if (S.loadExtracting) return `<div class="card extracting-state">
+    <i class="ti ti-loader spin" style="font-size:36px;color:var(--orange)"></i>
+    <p style="font-size:15px;font-weight:500;color:var(--dark)">Sto leggendo la ricetta...</p>
+    <p>L'AI sta analizzando il contenuto e strutturando gli ingredienti</p>
+  </div>`;
+
+  if (S.loadPreview) return renderPreview();
+
+  const tabs=[['foto','ti-camera','Foto'],['link','ti-link','Link'],['testo','ti-text-size','Testo libero']];
+  return `<div class="load-panel">
+    <div class="card">
+      <div class="load-title">Carica una ricetta</div>
+      <div class="load-sub" style="margin-bottom:20px">L'AI legge la fonte e struttura automaticamente ingredienti e procedimento. Poi puoi correggere tutto prima di salvare.</div>
+      <div class="load-tabs">
+        ${tabs.map(([t,ic,label])=>`<button class="load-tab ${S.loadTab===t?'active':''}" data-tab="${t}"><i class="ti ${ic}"></i> ${label}</button>`).join('')}
+      </div>
+    </div>
+
+    ${S.loadTab==='foto'?`<div class="card">
+      <div class="load-zone" id="drop-zone">
+        ${S.loadImagePreviewUrl
+          ?`<img class="img-preview" src="${S.loadImagePreviewUrl}" alt="anteprima"><p style="font-size:12px;color:var(--mid)">Immagine caricata — pronta per l'analisi</p>`
+          :`<i class="ti ti-photo"></i>
+           <h3>Trascina una foto qui</h3>
+           <p>Foto di una ricetta scritta, pagina di libro, screenshot di app</p>`
+        }
+        <input type="file" id="file-input" accept="image/*" style="display:none">
+        <button class="load-zone-btn" id="btn-pick-file">${S.loadImagePreviewUrl?'Cambia foto':'Scegli foto'}</button>
+      </div>
+      ${S.loadImageB64?`<div style="margin-top:16px;text-align:right"><button class="extract-btn" id="btn-extract-img"><i class="ti ti-sparkles"></i> Analizza con AI</button></div>`:''}
+    </div>`:''}
+
+    ${S.loadTab==='link'?`<div class="card">
+      <div class="card-label"><i class="ti ti-link"></i> URL ricetta</div>
+      <div style="margin-bottom:10px;font-size:12px;color:var(--mid)">Incolla il link di una ricetta da un sito, blog o piattaforma.</div>
+      <div class="url-row">
+        <input class="url-input" id="url-input" type="url" placeholder="https://www.esempio.com/ricetta-tiramisù" value="${S.loadUrl}">
+        <button class="extract-btn" id="btn-extract-url" ${!S.loadUrl.trim()?'disabled':''}><i class="ti ti-sparkles"></i> Estrai ricetta</button>
+      </div>
+    </div>`:''}
+
+    ${S.loadTab==='testo'?`<div class="card">
+      <div class="card-label"><i class="ti ti-text-size"></i> Testo libero</div>
+      <div style="margin-bottom:10px;font-size:12px;color:var(--mid)">Incolla il testo di una ricetta da qualsiasi fonte — email, PDF copiato, appunti, messaggio.</div>
+      <textarea class="text-area" id="text-input" placeholder="Es: Tiramisù classico&#10;Per 6 persone&#10;&#10;Ingredienti:&#10;500g mascarpone&#10;4 uova&#10;100g zucchero&#10;200g savoiardi&#10;...">${S.loadText}</textarea>
+      <div style="margin-top:12px;text-align:right"><button class="extract-btn" id="btn-extract-text" ${!S.loadText.trim()?'disabled':''}><i class="ti ti-sparkles"></i> Struttura con AI</button></div>
+    </div>`:''}
+  </div>`;
+}
+
+function renderPreview(){
+  const p=S.loadPreview;
+  const tot=p.ingredients.reduce((s,i)=>s+(parseFloat(i.qty)||0),0);
+  return `<div class="preview-panel">
+    <div class="card">
+      <div class="preview-notice"><i class="ti ti-check"></i> Ricetta estratta — controlla e correggi prima di salvare</div>
+      <div style="margin-top:16px;margin-bottom:4px">
+        <input class="preview-name-input" id="prev-name" value="${p.name}" placeholder="Nome ricetta">
+      </div>
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;flex-wrap:wrap">
+        <select id="prev-cat" style="padding:5px 8px;border:1px solid var(--border);border-radius:var(--r-sm);font-family:inherit;font-size:12px;background:var(--cream);color:var(--mid);outline:none">
+          ${['Dolci','Salato','Basi','Altro'].map(c=>`<option ${(p.category||'Altro')===c?'selected':''}>${c}</option>`).join('')}
+        </select>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:11px;color:var(--mid);text-transform:uppercase;letter-spacing:0.05em;font-weight:600">Porzioni</span>
+          <input id="prev-portions" type="number" min="1" value="${p.portionsCount||4}" style="width:60px;padding:5px 7px;border:1px solid var(--border);border-radius:var(--r-sm);font-family:monospace;font-size:12px;background:var(--cream);outline:none">
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:11px;color:var(--mid);text-transform:uppercase;letter-spacing:0.05em;font-weight:600">g/porz</span>
+          <input id="prev-gpp" type="number" min="1" value="${p.gramsPerPortion||200}" style="width:70px;padding:5px 7px;border:1px solid var(--border);border-radius:var(--r-sm);font-family:monospace;font-size:12px;background:var(--cream);outline:none">
+        </div>
+        <div style="padding:5px 12px;background:var(--orange-light);border-radius:var(--r-sm);font-size:13px;font-weight:600;color:var(--orange)">${Math.round(tot)} g totali</div>
+      </div>
+
+      <div class="card-label"><i class="ti ti-list-details"></i> Ingredienti estratti</div>
+      <div>
+        ${p.ingredients.map((ing,idx)=>`
+          <div class="preview-ing-row">
+            <div class="preview-ing-name">
+              ${ing.name}
+              ${ing.isSubRecipe?'<span class="preview-sub-badge">sub-ricetta</span>':''}
+            </div>
+            <input class="preview-ing-qty" data-pidx="${idx}" type="number" min="0" step="0.1" value="${ing.qty}">
+            <select class="preview-ing-unit" data-pidx="${idx}">
+              ${UNITS.map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}
+            </select>
+            <button class="rm-ing-btn" data-prm="${idx}" style="opacity:0.35"><i class="ti ti-x" style="font-size:12px"></i></button>
+          </div>`).join('')}
+      </div>
+
+      ${p.steps&&p.steps.length?`
+        <div class="card-label" style="margin-top:16px"><i class="ti ti-list-numbers"></i> Procedimento estratto</div>
+        <ol style="padding-left:18px;display:flex;flex-direction:column;gap:8px">
+          ${p.steps.map(s=>`<li style="font-size:13px;color:var(--dark);line-height:1.5">${s}</li>`).join('')}
+        </ol>`:''}
+
+      ${p.ingredients.some(i=>i.isSubRecipe)?`
+        <div style="margin-top:14px;background:var(--orange-light);border:1px solid var(--orange-border);border-radius:var(--r-sm);padding:9px 13px;font-size:12px;color:var(--orange)">
+          <i class="ti ti-sparkles" style="margin-right:5px"></i>
+          Khub creerà automaticamente le schede per: <strong>${p.ingredients.filter(i=>i.isSubRecipe).map(i=>i.name).join(', ')}</strong>
+        </div>`:''}
+
+      <div class="preview-actions">
+        <button class="btn-discard" id="btn-discard">Scarta</button>
+        <button class="btn-save" id="btn-save-preview"><i class="ti ti-circle-check"></i> Salva in archivio</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+
+function renderVariantDetail(recipe, vv) {
+  const tot = vv.ingredients.reduce((s,i)=>s+(parseFloat(i.qty)||0),0);
+  const isProd = vv.id === recipe.productionVariantId;
+  const parent = recipe.parentRecipeId ? R(recipe.parentRecipeId) : null;
+  return `
+  <div class="variant-detail-card">
+    <div class="variant-detail-header">
+      <div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <button class="nav-link" data-nav="${recipe.id}" style="font-size:11px">
+            <i class="ti ti-arrow-left" style="font-size:9px"></i> ${recipe.name}
+          </button>
+          ${isProd?'<span class="badge badge-orange">Produzione</span>':''}
+        </div>
+        <div class="variant-detail-name" style="margin-top:8px">${vv.name}</div>
+        <div class="variant-detail-meta">${vv.portionsCount} porzioni · ${vv.gramsPerPortion}g/porzione · validata il ${vv.validatedAt}</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        ${!isProd?`<button class="set-prod-btn" data-set-prod="${vv.id}" data-recipe="${recipe.id}">→ Produzione</button>`:''}
+        <button class="add-ing-btn" style="padding:7px 14px" data-go-lab-from-variant="${recipe.id}">
+          <i class="ti ti-flask"></i> Testa nel LAB
+        </button>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+      <div class="total-pill"><span class="tp-label">Peso totale</span><span class="tp-val">${Math.round(tot)} g</span></div>
+      <div class="total-pill"><span class="tp-label">Porzioni</span><span class="tp-val">${vv.portionsCount}</span></div>
+      <div class="total-pill"><span class="tp-label">g/porzione</span><span class="tp-val">${vv.gramsPerPortion}</span></div>
+    </div>
+
+    <div class="card-label"><i class="ti ti-list-details"></i> Ingredienti</div>
+    ${vv.ingredients.map(ing=>{
+      const pct = tot>0?(parseFloat(ing.qty)/tot*100):0;
+      const subR = ing.isSubRecipe&&ing.subRecipeId?R(ing.subRecipeId):null;
+      return `<div class="variant-ing-row">
+        <div class="variant-ing-name">
+          ${ing.name}
+          ${subR?`<button class="nav-link" data-nav="${subR.id}" style="margin-left:6px"><i class="ti ti-arrow-right" style="font-size:9px"></i>${subR.name}</button>`:''}
+        </div>
+        <div class="variant-ing-qty">${ing.qty} ${ing.unit}</div>
+        <div class="variant-pct-wrap">
+          <div class="pct-bar-bg"><div class="pct-bar-fill" style="width:${Math.min(pct,100)}%"></div></div>
+          <span class="pct-text">${pct.toFixed(1)}%</span>
+        </div>
+      </div>`;
+    }).join('')}
+  </div>
+
+  <div class="card">
+    <div class="card-label"><i class="ti ti-versions"></i> Tutte le varianti di ${recipe.name}</div>
+    <div class="variants-grid">
+      ${recipe.validatedVariants.map(v2=>{
+        const isCur = v2.id===vv.id;
+        const isPr = v2.id===recipe.productionVariantId;
+        return `<div class="variant-card ${isPr?'production':''}" style="${isCur?'border-color:var(--sage);background:var(--sage-light)':''}">
+          <div class="vc-dot ${isPr?'production':''}"></div>
+          <div style="flex:1">
+            <div class="vc-name">${v2.name} ${isCur?'<span style="font-size:10px;color:var(--sage)">(questa)</span>':''}</div>
+            <div class="vc-meta">${v2.portionsCount} porzioni · ${v2.gramsPerPortion}g/porz · ${v2.validatedAt}</div>
+          </div>
+          ${isPr?'<span class="vc-prod-badge">Produzione</span>':
+            `<button class="set-prod-btn" data-set-prod="${v2.id}" data-recipe="${recipe.id}">→ Produzione</button>`}
+          ${!isCur?`<button class="nav-link" data-nav-variant="${v2.id}" data-recipe="${recipe.id}" style="margin-left:4px">Apri</button>`:''}
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
+function renderRecipe(recipe){
+  // If a specific validated variant is selected, show its detail view
+  if (S.selectedVariantId && S.mode !== 'lab') {
+    const selV = recipe.validatedVariants.find(vv=>vv.id===S.selectedVariantId);
+    if (selV) return renderVariantDetail(recipe, selV);
+  }
+  const isLab=S.mode==='lab',v=curLab(recipe),tot=totQty(v);
+  const parent=recipe.parentRecipeId?R(recipe.parentRecipeId):null;
+  const prodV=recipe.productionVariantId?recipe.validatedVariants.find(vv=>vv.id===recipe.productionVariantId):null;
+
+  return `
+  <div class="card">
+    <div style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <div class="recipe-name">${recipe.name}</div>
+        ${isLab?'<span class="badge badge-orange"><i class="ti ti-flask" style="font-size:10px;margin-right:2px"></i>LAB</span>':''}
+        ${prodV?`<span class="badge" style="background:var(--sage-light);color:var(--sage)">Prod: ${prodV.name}</span>`:''}
+      </div>
+      <div class="recipe-meta">
+        <span>${recipe.category}</span>
+        ${recipe.department?`<span>${recipe.department}</span>`:''}
+        ${parent?`<button class="nav-link" data-nav="${parent.id}"><i class="ti ti-arrow-up" style="font-size:9px"></i> da ${parent.name}</button>`:''}
+      </div>
+    </div>
+    <div class="scaling-row">
+      <div class="field-group"><div class="field-label">Porzioni</div><input class="num-input" id="inp-p" type="number" min="1" value="${v.portionsCount}"></div>
+      <div class="field-group"><div class="field-label">g / porzione</div><input class="num-input" id="inp-g" type="number" min="1" step="0.1" value="${v.gramsPerPortion}"></div>
+      <div class="total-pill"><span class="tp-label">Peso totale</span><span class="tp-val">${Math.round(tot)} g</span></div>
+    </div>
+    <div class="card-label"><i class="ti ti-list-details"></i> Ingredienti
+      <span style="margin-left:auto;font-size:10px;font-weight:400;text-transform:none;letter-spacing:0;color:${isLab?'var(--sage)':'var(--mid)'}">
+        ${isLab?'Modifica nome, quantità e unità liberamente':'Le proporzioni si mantengono in Produzione'}
+      </span>
+    </div>
+    <table>
+      <thead><tr><th style="width:38%">Ingrediente</th><th>Quantità</th><th>Unità</th><th>%</th>${isLab?'<th></th>':''}</tr></thead>
+      <tbody>
+        ${v.ingredients.map(ing=>{
+          const pct=tot>0?(parseFloat(ing.qty)/tot*100):0;
+          const subR=ing.isSubRecipe&&ing.subRecipeId?R(ing.subRecipeId):null;
+          return `<tr>
+            <td><div class="ing-name-cell">
+              ${isLab?`<input class="editable-text" data-ing-name="${ing.id}" data-recipe="${recipe.id}" value="${ing.name}">`:
+              `<span style="font-weight:500">${ing.name}</span>`}
+              ${subR?`<button class="nav-link" data-nav="${subR.id}" style="flex-shrink:0"><i class="ti ti-arrow-right" style="font-size:9px"></i>${subR.name}</button>`:''}
+            </div></td>
+            <td><input class="qty-field ${isLab?'lab':''}" data-ing="${ing.id}" data-recipe="${recipe.id}" type="number" min="0" step="0.1" value="${ing.qty}"></td>
+            <td><select class="unit-select ${isLab?'lab':''}" data-ing-unit="${ing.id}" data-recipe="${recipe.id}" ${isLab?'':'disabled'}>${UNITS.map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}</select></td>
+            <td><div class="pct-wrap"><div class="pct-bar-bg"><div class="pct-bar-fill" style="width:${Math.min(pct,100)}%"></div></div><span class="pct-text">${pct.toFixed(1)}%</span></div></td>
+            ${isLab?`<td><button class="rm-ing-btn" data-rm-ing="${ing.id}" data-recipe="${recipe.id}"><i class="ti ti-x" style="font-size:12px"></i></button></td>`:''}
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+    ${isLab?`<div class="add-ing-row">
+      <input type="text" id="ai-name" placeholder="Nuovo ingrediente..." value="${S.addIng.name}">
+      <input type="number" id="ai-qty" placeholder="Qtà" min="0" step="0.1" value="${S.addIng.qty}">
+      <select id="ai-unit">${UNITS.map(u=>`<option ${S.addIng.unit===u?'selected':''}>${u}</option>`).join('')}</select>
+      <button class="add-ing-btn" id="btn-add-ing"><i class="ti ti-plus"></i> Aggiungi</button>
+    </div>`:''}
+  </div>
+
+  ${recipe.validatedVariants.length?`<div class="card">
+    <div class="card-label"><i class="ti ti-circle-check"></i> Varianti validate <span style="background:var(--sage-light);color:var(--sage);padding:1px 7px;border-radius:999px;font-size:10px;margin-left:4px">${recipe.validatedVariants.length}</span></div>
+    <div class="variants-grid">
+      ${recipe.validatedVariants.map(vv=>{const isProd=vv.id===recipe.productionVariantId;return`<div class="variant-card ${isProd?'production':''}">
+        <div class="vc-dot ${isProd?'production':''}"></div>
+        <div style="flex:1"><div class="vc-name">${vv.name}</div><div class="vc-meta">${vv.portionsCount} porzioni · ${vv.gramsPerPortion}g/porz · ${vv.validatedAt}</div></div>
+        ${isProd?'<span class="vc-prod-badge">Produzione</span>':`<button class="set-prod-btn" data-set-prod="${vv.id}" data-recipe="${recipe.id}">→ Produzione</button>`}
+      </div>`;}).join('')}
+    </div>
+  </div>`:''}
+
+  ${isLab?`
+  ${renderVoicePanel(recipe.id)}
+  <div class="ai-panel">
+    <div class="ai-header"><i class="ti ti-sparkles"></i> Consulente AI — LAB ${recipe.name}</div>
+    <div class="ai-msgs" id="ai-msgs">
+      ${!(S.aiMsgs[recipe.id]||[]).length?'<div class="ai-empty">Chiedimi qualcosa. Es: "La crema è troppo liquida, cosa faccio?"</div>':''}
+      ${(S.aiMsgs[recipe.id]||[]).map(m=>`<div class="ai-bubble ${m.role}">${m.text}</div>`).join('')}
+      ${S.aiLoading?'<div class="thinking"><i class="ti ti-loader spin"></i> Analizzo...</div>':''}
+    </div>
+    ${S.aiSugg?`<div class="ai-sugg"><div class="ai-sugg-label">Modifica suggerita</div><div style="font-size:13px"><strong>${S.aiSugg.ingredientName}</strong>${S.aiSugg.newName&&S.aiSugg.newName!==S.aiSugg.ingredientName?` → <strong>${S.aiSugg.newName}</strong>`:''} · ${S.aiSugg.newQty}${S.aiSugg.unit} <span style="color:var(--mid);margin-left:5px">(${S.aiSugg.reason})</span></div><button class="apply-btn" id="apply-sugg"><i class="ti ti-plus"></i> Applica</button></div>`:''}
+    <div class="ai-input-row">
+      <input class="ai-input" id="ai-input" placeholder="Es: Voglio sostituire la vaniglia con estratto, che quantità uso?">
+      <button class="send-btn" id="ai-send" ${S.aiLoading?'disabled':''}><i class="ti ti-send"></i></button>
+    </div>
+  </div>
+  <div class="validate-section">
+    <div class="vs-title"><i class="ti ti-circle-check"></i> Valida questa versione</div>
+    <div class="vs-sub">Dai un nome che descrive l'uso finale. Es: "per crostate", "per dolci al cucchiaio"</div>
+    <input class="variant-name-input" id="vni" placeholder="Nome della variante..." value="${S.pendingVariantName}">
+    <button class="validate-btn" id="btn-validate" ${!S.pendingVariantName.trim()?'disabled':''}>
+      <i class="ti ti-circle-check"></i> Valida come "${S.pendingVariantName.trim()||'...'}"
+    </button>
+  </div>`:''}`;
+}
+
+function renderModal(){
+  const m=S.modal,sf=m.ings.filter(i=>i.isSubRecipe);
+  return `<div class="overlay" id="overlay"><div class="modal">
+    <div class="modal-title">Nuova ricetta</div>
+    <div class="form-group"><div class="form-label">Nome</div><input class="form-input" id="m-name" placeholder="Es: Tiramisù classico" value="${m.name}"></div>
+    <div class="row-3">
+      <div class="form-group"><div class="form-label">Categoria</div><select class="form-input" id="m-cat">${['Dolci','Salato','Basi','Altro'].map(c=>`<option ${m.category===c?'selected':''}>${c}</option>`).join('')}</select></div>
+      <div class="form-group"><div class="form-label">Porzioni</div><input class="form-input" id="m-p" type="number" min="1" value="${m.portions}"></div>
+      <div class="form-group"><div class="form-label">g/porz</div><input class="form-input" id="m-g" type="number" min="1" value="${m.gpp}"></div>
+    </div>
+    <div class="form-group"><div class="form-label">Aggiungi ingrediente</div>
+      <div class="ing-add-row-m">
+        <input class="form-input" id="m-in" placeholder="Nome" value="${m.iName}" style="flex:2">
+        <input class="form-input" id="m-iq" type="number" placeholder="Qtà" value="${m.iQty}" style="width:70px">
+        <select class="form-input" id="m-iu" style="width:65px">${UNITS.map(u=>`<option ${m.iUnit===u?'selected':''}>${u}</option>`).join('')}</select>
+        <button class="add-ing-btn-m" id="m-add"><i class="ti ti-plus"></i></button>
+      </div>
+    </div>
+    ${m.ings.length?`<div class="ing-preview">${m.ings.map(i=>`<div class="ing-preview-row"><span>${i.name} — ${i.qty}${i.unit}</span><div style="display:flex;align-items:center;gap:5px">${i.isSubRecipe?'<span style="font-size:9px;background:var(--sage-light);color:var(--sage);padding:1px 6px;border-radius:999px;font-weight:600">sub</span>':''}<button class="rm" data-mi="${i.id}"><i class="ti ti-x"></i></button></div></div>`).join('')}</div>`:''}
+    ${sf.length?`<div class="sub-notice"><i class="ti ti-sparkles" style="margin-right:5px"></i>Khub creerà automaticamente: <strong>${sf.map(i=>i.name).join(', ')}</strong></div>`:''}
+    <div class="modal-footer"><button class="btn-cancel" id="m-cancel">Annulla</button><button class="btn-ok" id="m-ok">Crea ricetta</button></div>
+  </div></div>`;
+}
+
+function bind(){
+  document.querySelectorAll('[data-nav]').forEach(el=>el.addEventListener('click',e=>{
+    e.stopPropagation();
+    if (el.dataset.goLab) { S.selectedId=el.dataset.nav; S.view='recipe'; S.selectedVariantId=null; S.mode='lab'; S.aiSugg=null; S.addIng={name:'',qty:'',unit:'g'}; render(); return; }
+    S.selectedId=el.dataset.nav; S.view='recipe'; S.selectedVariantId=null; S.aiSugg=null; S.addIng={name:'',qty:'',unit:'g'};
+    // Auto-expand recipe in sidebar
+    S.expandedRecipes = {...(S.expandedRecipes||{}), [el.dataset.nav]: true};
+    render();
+  }));
+  document.querySelectorAll('[data-nav-variant]').forEach(el=>el.addEventListener('click',e=>{
+    e.stopPropagation();
+    S.selectedId=el.dataset.recipe; S.selectedVariantId=el.dataset.navVariant;
+    S.view='recipe'; S.aiSugg=null; render();
+  }));
+  const bp=document.getElementById('btn-prod'),bl=document.getElementById('btn-lab');
+  if(bp)bp.addEventListener('click',()=>{S.mode='produzione';render();});
+  if(bl)bl.addEventListener('click',()=>{S.mode='lab';render();});
+  const bn=document.getElementById('btn-new');if(bn)bn.addEventListener('click',()=>{S.showModal=true;render();});
+  const blv=document.getElementById('btn-load-view');if(blv)blv.addEventListener('click',()=>{S.view='load';S.loadPreview=null;render();});
+
+  // LOAD tabs
+  document.querySelectorAll('[data-tab]').forEach(el=>el.addEventListener('click',()=>{S.loadTab=el.dataset.tab;S.loadPreview=null;render();}));
+
+  // FOTO
+  const fi=document.getElementById('file-input');
+  const bf=document.getElementById('btn-pick-file');
+  const dz=document.getElementById('drop-zone');
+  if(bf)bf.addEventListener('click',()=>fi&&fi.click());
+  if(fi)fi.addEventListener('change',e=>{
+    const file=e.target.files[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      S.loadImagePreviewUrl=ev.target.result;
+      S.loadImageB64=ev.target.result.split(',')[1];
+      S.loadImageMediaType=file.type||'image/jpeg';
+      render();
+    };
+    reader.readAsDataURL(file);
+  });
+  if(dz){
+    dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('dragover');});
+    dz.addEventListener('dragleave',()=>dz.classList.remove('dragover'));
+    dz.addEventListener('drop',e=>{
+      e.preventDefault();dz.classList.remove('dragover');
+      const file=e.dataTransfer.files[0];if(!file||!file.type.startsWith('image/'))return;
+      const reader=new FileReader();
+      reader.onload=ev=>{S.loadImagePreviewUrl=ev.target.result;S.loadImageB64=ev.target.result.split(',')[1];S.loadImageMediaType=file.type;render();};
+      reader.readAsDataURL(file);
+    });
+  }
+  const bei=document.getElementById('btn-extract-img');
+  if(bei)bei.addEventListener('click',()=>extractFromSource('image',{b64:S.loadImageB64,mediaType:S.loadImageMediaType||'image/jpeg'}));
+
+  // LINK
+  const ui=document.getElementById('url-input');
+  if(ui)ui.addEventListener('input',e=>{S.loadUrl=e.target.value;const b=document.getElementById('btn-extract-url');if(b)b.disabled=!e.target.value.trim();});
+  const beu=document.getElementById('btn-extract-url');
+  if(beu)beu.addEventListener('click',()=>extractFromSource('url',S.loadUrl));
+
+  // TESTO
+  const ti=document.getElementById('text-input');
+  if(ti)ti.addEventListener('input',e=>{S.loadText=e.target.value;const b=document.getElementById('btn-extract-text');if(b)b.disabled=!e.target.value.trim();});
+  const bet=document.getElementById('btn-extract-text');
+  if(bet)bet.addEventListener('click',()=>extractFromSource('text',S.loadText));
+
+  // PREVIEW
+  const pn=document.getElementById('prev-name');if(pn)pn.addEventListener('input',e=>{if(S.loadPreview)S.loadPreview.name=e.target.value;});
+  const pc=document.getElementById('prev-cat');if(pc)pc.addEventListener('change',e=>{if(S.loadPreview)S.loadPreview.category=e.target.value;});
+  const pp=document.getElementById('prev-portions');if(pp)pp.addEventListener('input',e=>{if(S.loadPreview)S.loadPreview.portionsCount=parseInt(e.target.value)||4;});
+  const pg=document.getElementById('prev-gpp');if(pg)pg.addEventListener('input',e=>{if(S.loadPreview)S.loadPreview.gramsPerPortion=parseFloat(e.target.value)||200;});
+  document.querySelectorAll('.preview-ing-qty[data-pidx]').forEach(el=>el.addEventListener('change',e=>{if(S.loadPreview)S.loadPreview.ingredients[parseInt(el.dataset.pidx)].qty=parseFloat(e.target.value)||0;}));
+  document.querySelectorAll('.preview-ing-unit[data-pidx]').forEach(el=>el.addEventListener('change',e=>{if(S.loadPreview)S.loadPreview.ingredients[parseInt(el.dataset.pidx)].unit=e.target.value;}));
+  document.querySelectorAll('[data-prm]').forEach(el=>el.addEventListener('click',()=>{if(S.loadPreview){S.loadPreview.ingredients.splice(parseInt(el.dataset.prm),1);render();}}));
+  const bsp=document.getElementById('btn-save-preview');if(bsp)bsp.addEventListener('click',savePreview);
+  const bdi=document.getElementById('btn-discard');if(bdi)bdi.addEventListener('click',()=>{S.loadPreview=null;render();});
+
+  // RECIPE
+  const ip=document.getElementById('inp-p');if(ip)ip.addEventListener('change',e=>onPortions(S.selectedId,e.target.value));
+  const ig=document.getElementById('inp-g');if(ig)ig.addEventListener('change',e=>onGpp(S.selectedId,e.target.value));
+  document.querySelectorAll('.qty-field[data-ing]').forEach(el=>{
+    el.addEventListener('keydown',e=>{if(e.key==='Enter'){e.target.blur();}});
+    el.addEventListener('blur',e=>onIngQty(e.target.dataset.recipe,e.target.dataset.ing,e.target.value));
+  });
+  document.querySelectorAll('[data-ing-name]').forEach(el=>el.addEventListener('change',e=>onIngName(e.target.dataset.recipe,e.target.dataset.ingName,e.target.value)));
+  document.querySelectorAll('[data-ing-unit]').forEach(el=>el.addEventListener('change',e=>onIngUnit(e.target.dataset.recipe,e.target.dataset.ingUnit,e.target.value)));
+  document.querySelectorAll('.rm-ing-btn[data-rm-ing]').forEach(el=>el.addEventListener('click',()=>onRmIng(el.dataset.recipe,el.dataset.rmIng)));
+  document.querySelectorAll('[data-set-prod]').forEach(el=>el.addEventListener('click',()=>setProd(el.dataset.recipe,el.dataset.setProd)));
+  document.querySelectorAll('[data-go-lab-from-variant]').forEach(el=>el.addEventListener('click',()=>{
+    S.selectedId=el.dataset.goLabFromVariant; S.selectedVariantId=null; S.mode='lab'; S.view='recipe'; render();
+  }));
+  const ain=document.getElementById('ai-name'),aiq=document.getElementById('ai-qty'),aiu=document.getElementById('ai-unit'),bai=document.getElementById('btn-add-ing');
+  if(ain)ain.addEventListener('input',e=>S.addIng.name=e.target.value);
+  if(aiq)aiq.addEventListener('input',e=>S.addIng.qty=e.target.value);
+  if(aiu)aiu.addEventListener('change',e=>S.addIng.unit=e.target.value);
+  if(bai)bai.addEventListener('click',()=>addIngLab(S.selectedId));
+  if(ain)ain.addEventListener('keydown',e=>{if(e.key==='Enter'){S.addIng.qty=aiq?aiq.value:'';S.addIng.unit=aiu?aiu.value:'g';addIngLab(S.selectedId);}});
+  const vni=document.getElementById('vni');
+  if(vni)vni.addEventListener('input',e=>{S.pendingVariantName=e.target.value;const b=document.getElementById('btn-validate');if(b){b.disabled=!e.target.value.trim();b.innerHTML=`<i class="ti ti-circle-check"></i> Valida come "${e.target.value.trim()||'...'}"`;} });
+  const bv=document.getElementById('btn-validate');if(bv)bv.addEventListener('click',()=>onValidate(S.selectedId));
+  const as=document.getElementById('ai-send');if(as)as.addEventListener('click',sendAi);
+
+  // VOICE NOTES
+  const bsr=document.getElementById('btn-start-rec');if(bsr)bsr.addEventListener('click',startRecording);
+  const bstp=document.getElementById('btn-stop-rec');if(bstp)bstp.addEventListener('click',stopRecording);
+  document.querySelectorAll('[data-del-note]').forEach(el=>el.addEventListener('click',()=>deleteVoiceNote(el.dataset.recipe,el.dataset.delNote)));
+  document.querySelectorAll('[data-edit-note]').forEach(el=>el.addEventListener('click',()=>toggleEditNote(el.dataset.recipe,el.dataset.editNote)));
+  document.querySelectorAll('[data-confirm-note]').forEach(el=>el.addEventListener('click',()=>{
+    const ta=document.getElementById('edit-'+el.dataset.confirmNote);
+    if(ta)editVoiceNote(el.dataset.recipe,el.dataset.confirmNote,ta.value);
+  }));
+  document.querySelectorAll('[data-save-note]').forEach(el=>el.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();editVoiceNote(el.dataset.recipe,el.dataset.saveNote,el.value);}}));
+  const aii=document.getElementById('ai-input');if(aii)aii.addEventListener('keydown',e=>{if(e.key==='Enter')sendAi();});
+  const ap=document.getElementById('apply-sugg');if(ap)ap.addEventListener('click',applyAiSugg);
+
+  // MODAL
+  const ov=document.getElementById('overlay');
+  if(ov){
+    ov.addEventListener('click',e=>{if(e.target===ov){S.showModal=false;render();}});
+    const mn=document.getElementById('m-name');if(mn)mn.addEventListener('input',e=>S.modal.name=e.target.value);
+    const mc=document.getElementById('m-cat');if(mc)mc.addEventListener('change',e=>S.modal.category=e.target.value);
+    const mpp=document.getElementById('m-p');if(mpp)mpp.addEventListener('input',e=>S.modal.portions=e.target.value);
+    const mg=document.getElementById('m-g');if(mg)mg.addEventListener('input',e=>S.modal.gpp=e.target.value);
+    const mi=document.getElementById('m-in');if(mi){mi.addEventListener('input',e=>S.modal.iName=e.target.value);mi.addEventListener('keydown',e=>{if(e.key==='Enter')addIngModal();});}
+    const mq=document.getElementById('m-iq');if(mq)mq.addEventListener('input',e=>S.modal.iQty=e.target.value);
+    const mu=document.getElementById('m-iu');if(mu)mu.addEventListener('change',e=>S.modal.iUnit=e.target.value);
+    const ma=document.getElementById('m-add');if(ma)ma.addEventListener('click',addIngModal);
+    document.querySelectorAll('[data-mi]').forEach(el=>el.addEventListener('click',()=>{S.modal.ings=S.modal.ings.filter(i=>i.id!==el.dataset.mi);render();}));
+    const mca=document.getElementById('m-cancel');if(mca)mca.addEventListener('click',()=>{S.showModal=false;render();});
+    const mok=document.getElementById('m-ok');if(mok)mok.addEventListener('click',submitModal);
+  }
+}
+
+render();
+</script>
+</body>
+</html>
