@@ -318,7 +318,7 @@ async function sendAi(){
   const ingList=v.ingredients.map(i=>`${i.name}: ${i.qty}${i.unit}`).join(', ');
   const sys=`Sei un consulente tecnico di cucina professionale in Khub, nel LAB di "${recipe.name}". Ingredienti: ${ingList}. Porzioni: ${v.portionsCount}, g/porzione: ${v.gramsPerPortion}g. Rispondi in italiano, conciso. Se suggerisci modifica specifica concludi con: SUGGERIMENTO:{"ingredientName":"nome attuale","newName":"nuovo nome o stesso","newQty":numero,"unit":"unità","reason":"motivo"}`;
   try{
-    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:800,system:sys,messages:[...(S.aiMsgs[S.selectedId]||[]).slice(0,-1).map(m=>({role:m.role==='user'?'user':'assistant',content:m.text})),{role:'user',content:msg}]})});
+    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:800,system:sys,messages:[...(S.aiMsgs[S.selectedId]||[]).slice(0,-1).map(m=>({role:m.role==='user'?'user':'assistant',content:m.text})),{role:'user',content:msg}]})});
     const data=await res.json();let text=(data.content||[]).map(c=>c.text||'').join('');
     let sugg=null;const m=text.match(/SUGGERIMENTO:(\{[^}]+\})/);
     if(m){try{sugg=JSON.parse(m[1]);}catch(e){}text=text.replace(/SUGGERIMENTO:\{[^}]+\}/,'').trim();}
@@ -370,7 +370,7 @@ async function extractFromSource(type, payload) {
   }
 
   try {
-    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1500,messages})});
+    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:1500,messages})});
     const data=await res.json();
     let text=(data.content||[]).map(c=>c.text||'').join('').trim();
     text=text.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
