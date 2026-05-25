@@ -220,6 +220,234 @@ tbody tr:last-child td { border-bottom: none; }
 .empty { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 10px; color: var(--mid); text-align: center; padding: 40px; }
 .empty i { font-size: 36px; opacity: 0.25; }
 .empty h3 { font-size: 15px; font-weight: 500; color: var(--dark); }
+
+/* ── MOBILE RESPONSIVE ── */
+@media (max-width: 768px) {
+  .shell { grid-template-columns: 1fr; grid-template-rows: 54px 1fr 64px; }
+  .topbar { padding: 0 16px; }
+  .sidebar { display: none; }
+  .main { padding: 16px; padding-bottom: 80px; }
+  .mode-switcher { display: none; }
+  .scaling-row { gap: 8px; }
+  .num-input { width: 72px; }
+  table { font-size: 12px; }
+  thead th { padding: 4px; font-size: 9px; }
+  tbody td { padding: 6px 4px; }
+  .qty-field { width: 58px; }
+  .card { padding: 16px; }
+}
+
+/* ── BOTTOM NAV (mobile only) ── */
+.bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  height: 64px;
+  background: var(--white);
+  border-top: 1px solid var(--border);
+  z-index: 100;
+  grid-template-columns: repeat(4, 1fr);
+  align-items: stretch;
+}
+
+@media (max-width: 768px) {
+  .bottom-nav { display: grid; }
+}
+
+.bnav-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--mid);
+  cursor: pointer;
+  padding: 8px 4px;
+  transition: all 0.12s;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.bnav-btn i { font-size: 20px; }
+.bnav-btn.active { color: var(--orange); }
+.bnav-btn.active-lab { color: var(--sage); }
+
+/* ── HOME VIEW ── */
+.home-view {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 20px;
+}
+
+.home-welcome {
+  padding: 24px 0 8px;
+}
+
+.home-title {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.6px;
+  color: var(--dark);
+  line-height: 1.2;
+}
+
+.home-title span { color: var(--orange); }
+
+.home-sub {
+  font-size: 13px;
+  color: var(--mid);
+  margin-top: 4px;
+}
+
+/* Last recipe card */
+.last-recipe-card {
+  background: var(--dark);
+  border-radius: var(--r-lg);
+  padding: 20px;
+  color: white;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  position: relative;
+  overflow: hidden;
+}
+
+.last-recipe-card::before {
+  content: '';
+  position: absolute;
+  top: -20px; right: -20px;
+  width: 120px; height: 120px;
+  background: var(--orange);
+  border-radius: 50%;
+  opacity: 0.15;
+}
+
+.last-recipe-card:hover { opacity: 0.9; }
+.lrc-label { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.5; margin-bottom: 6px; }
+.lrc-name { font-size: 20px; font-weight: 600; letter-spacing: -0.3px; margin-bottom: 4px; }
+.lrc-meta { font-size: 12px; opacity: 0.6; }
+.lrc-actions { display: flex; gap: 8px; margin-top: 16px; }
+.lrc-btn {
+  flex: 1;
+  padding: 9px 12px;
+  border-radius: var(--r-sm);
+  border: none;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition: opacity 0.15s;
+}
+.lrc-btn:hover { opacity: 0.85; }
+.lrc-btn.lab { background: var(--sage); color: white; }
+.lrc-btn.prod { background: var(--orange); color: white; }
+
+/* Action grid */
+.home-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.home-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  padding: 20px 16px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 110px;
+  justify-content: space-between;
+}
+
+.home-card:hover { border-color: var(--orange); background: var(--orange-light); }
+.home-card.sage:hover { border-color: var(--sage); background: var(--sage-light); }
+
+.home-card i {
+  font-size: 28px;
+  color: var(--orange);
+}
+
+.home-card.sage i { color: var(--sage); }
+
+.home-card-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--dark);
+  letter-spacing: -0.2px;
+}
+
+.home-card-sub {
+  font-size: 11px;
+  color: var(--mid);
+  line-height: 1.4;
+}
+
+/* Recent recipes list */
+.recent-section { display: flex; flex-direction: column; gap: 8px; }
+.recent-label { font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--mid); }
+.recent-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.recent-item:hover { border-color: var(--orange); background: var(--orange-light); }
+.recent-icon { width: 36px; height: 36px; border-radius: var(--r-sm); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.recent-icon.dolci { background: var(--orange-light); color: var(--orange); }
+.recent-icon.basi { background: var(--sage-light); color: var(--sage); }
+.recent-icon.salato { background: #FFF8E8; color: #C4960A; }
+.recent-name { font-size: 13px; font-weight: 500; color: var(--dark); flex: 1; }
+.recent-meta { font-size: 11px; color: var(--mid); }
+.recent-arrow { color: var(--mid); opacity: 0.4; font-size: 14px; }
+
+/* Desktop sidebar mobile nav header */
+.mobile-header-nav {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobile-header-nav { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .mhn-btn {
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: none;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    background: var(--sage-light);
+    color: var(--sage);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.12s;
+  }
+  .mhn-btn.active { background: var(--orange); color: white; }
+  .mode-switcher { display: none; }
+}
+
+.mobile-only-flex { display: none; }
+@media (max-width: 768px) {
+  .mobile-only-flex { display: flex !important; }
+  .logo-sub { display: none !important; }
+}
 </style>
 </head>
 <body>
@@ -230,8 +458,8 @@ const SUB_KW = ['crema pasticcera','besciamella','pasta frolla','pasta sfoglia',
 const isSub = n => SUB_KW.some(k => n.toLowerCase().includes(k));
 
 let S = {
-  view: 'recipe', // 'recipe' | 'load'
-  mode: 'produzione', selectedId: 'r1', showModal: false,
+  view: 'home', // 'home' | 'recipe' | 'load'
+  mode: 'produzione', selectedId: 'r1', lastOpenedId: null, showModal: false,
   toast: null, toastTimer: null,
   pendingVariantName: '',
   addIng: { name:'', qty:'', unit:'g' },
@@ -318,7 +546,7 @@ async function sendAi(){
   const ingList=v.ingredients.map(i=>`${i.name}: ${i.qty}${i.unit}`).join(', ');
   const sys=`Sei un consulente tecnico di cucina professionale in Khub, nel LAB di "${recipe.name}". Ingredienti: ${ingList}. Porzioni: ${v.portionsCount}, g/porzione: ${v.gramsPerPortion}g. Rispondi in italiano, conciso. Se suggerisci modifica specifica concludi con: SUGGERIMENTO:{"ingredientName":"nome attuale","newName":"nuovo nome o stesso","newQty":numero,"unit":"unità","reason":"motivo"}`;
   try{
-    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:800,system:sys,messages:[...(S.aiMsgs[S.selectedId]||[]).slice(0,-1).map(m=>({role:m.role==='user'?'user':'assistant',content:m.text})),{role:'user',content:msg}]})});
+    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:800,system:sys,messages:[...(S.aiMsgs[S.selectedId]||[]).slice(0,-1).map(m=>({role:m.role==='user'?'user':'assistant',content:m.text})),{role:'user',content:msg}]})});
     const data=await res.json();let text=(data.content||[]).map(c=>c.text||'').join('');
     let sugg=null;const m=text.match(/SUGGERIMENTO:(\{[^}]+\})/);
     if(m){try{sugg=JSON.parse(m[1]);}catch(e){}text=text.replace(/SUGGERIMENTO:\{[^}]+\}/,'').trim();}
@@ -370,7 +598,7 @@ async function extractFromSource(type, payload) {
   }
 
   try {
-    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:1500,messages})});
+    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:1500,messages})});
     const data=await res.json();
     let text=(data.content||[]).map(c=>c.text||'').join('').trim();
     text=text.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
@@ -501,7 +729,7 @@ function savePreview() {
   };
   S.recipes = [...S.recipes, mainRecipe, ...recipesToAdd];
 
-  S.selectedId=newId; S.view='recipe'; S.loadPreview=null;
+  S.selectedId=newId; S.lastOpenedId=newId; S.view='recipe'; S.loadPreview=null;
   S.loadImageB64=null; S.loadImagePreviewUrl=null; S.loadUrl=''; S.loadText='';
 
   const totalSubs = recipesToAdd.length + recipeUpdates.length;
@@ -646,6 +874,110 @@ function submitModal(){
 }
 
 /* ── RENDER ── */
+
+function renderBottomNav() {
+  const isHome = S.view === 'home';
+  const isLoad = S.view === 'load';
+  const isLab = S.view === 'recipe' && S.mode === 'lab';
+  const isProd = S.view === 'recipe' && S.mode === 'produzione';
+  return `<nav class="bottom-nav">
+    <button class="bnav-btn ${isHome?'active':''}" id="bnav-home">
+      <i class="ti ti-home"></i>Home
+    </button>
+    <button class="bnav-btn ${isLoad?'active':''}" id="bnav-load">
+      <i class="ti ti-upload"></i>Carica
+    </button>
+    <button class="bnav-btn ${isLab?'active-lab':''}" id="bnav-lab">
+      <i class="ti ti-flask"></i>LAB
+    </button>
+    <button class="bnav-btn ${isProd?'active':''}" id="bnav-prod">
+      <i class="ti ti-settings-2"></i>Produzione
+    </button>
+  </nav>`;
+}
+
+function renderHome() {
+  const lastRecipe = S.lastOpenedId ? R(S.lastOpenedId) : (S.recipes.length > 0 ? S.recipes[0] : null);
+  const recentRecipes = S.recipes.slice(0, 5);
+  const icons = {Basi:'ti-tool', Dolci:'ti-cookie', Salato:'ti-soup', Altro:'ti-star'};
+  const iconClass = {Basi:'basi', Dolci:'dolci', Salato:'salato', Altro:'dolci'};
+
+  return `<div class="home-view">
+    <div class="home-welcome">
+      <div class="home-title">K<span>hub</span></div>
+      <div class="home-sub">Dall'idea alla ricetta che funziona...sempre!</div>
+    </div>
+
+    ${lastRecipe ? `
+    <div class="last-recipe-card" id="lrc-open" data-recipe="${lastRecipe.id}">
+      <div class="lrc-label">Ultima ricetta aperta</div>
+      <div class="lrc-name">${lastRecipe.name}</div>
+      <div class="lrc-meta">${lastRecipe.category} · ${lastRecipe.validatedVariants.length} variant${lastRecipe.validatedVariants.length!==1?'i':'e'}</div>
+      <div class="lrc-actions">
+        <button class="lrc-btn lab" id="lrc-lab" data-recipe="${lastRecipe.id}">
+          <i class="ti ti-flask" style="font-size:13px"></i> LAB
+        </button>
+        <button class="lrc-btn prod" id="lrc-prod" data-recipe="${lastRecipe.id}">
+          <i class="ti ti-settings-2" style="font-size:13px"></i> Produzione
+        </button>
+      </div>
+    </div>` : ''}
+
+    <div class="home-grid">
+      <div class="home-card" id="home-ricette">
+        <i class="ti ti-book-2"></i>
+        <div>
+          <div class="home-card-title">Ricette</div>
+          <div class="home-card-sub">${S.recipes.length} ricett${S.recipes.length!==1?'e':'a'} in archivio</div>
+        </div>
+      </div>
+      <div class="home-card" id="home-carica">
+        <i class="ti ti-upload"></i>
+        <div>
+          <div class="home-card-title">Carica</div>
+          <div class="home-card-sub">Foto, link o testo</div>
+        </div>
+      </div>
+      <div class="home-card sage" id="home-lab">
+        <i class="ti ti-flask"></i>
+        <div>
+          <div class="home-card-title">LAB</div>
+          <div class="home-card-sub">Sperimenta e testa</div>
+        </div>
+      </div>
+      <div class="home-card" id="home-prod">
+        <i class="ti ti-settings-2"></i>
+        <div>
+          <div class="home-card-title">Produzione</div>
+          <div class="home-card-sub">Ricette validate</div>
+        </div>
+      </div>
+    </div>
+
+    ${recentRecipes.length > 0 ? `
+    <div class="recent-section">
+      <div class="recent-label">Archivio ricette</div>
+      ${recentRecipes.map(r => `
+        <div class="recent-item" data-nav="${r.id}">
+          <div class="recent-icon ${iconClass[r.category]||'dolci'}">
+            <i class="ti ${icons[r.category]||'ti-star'}" style="font-size:16px"></i>
+          </div>
+          <div style="flex:1">
+            <div class="recent-name">${r.name}</div>
+            <div class="recent-meta">${r.category}${r.validatedVariants.length>0?' · '+r.validatedVariants.length+' varianti':''}</div>
+          </div>
+          <i class="ti ti-chevron-right recent-arrow"></i>
+        </div>`).join('')}
+      ${S.recipes.length > 5 ? `<button class="load-btn-side" id="home-all-recipes" style="margin-top:4px">Vedi tutte le ${S.recipes.length} ricette</button>` : ''}
+    </div>` : `
+    <div style="text-align:center;padding:32px 20px;background:var(--white);border-radius:var(--r-lg);border:1px dashed var(--border)">
+      <i class="ti ti-chef-hat" style="font-size:32px;color:var(--mid);opacity:0.3;display:block;margin-bottom:10px"></i>
+      <div style="font-size:14px;font-weight:500;color:var(--dark);margin-bottom:4px">Nessuna ricetta ancora</div>
+      <div style="font-size:12px;color:var(--mid)">Carica la tua prima ricetta per iniziare</div>
+    </div>`}
+  </div>`;
+}
+
 function render(){
   const app=document.getElementById('app'),recipe=R(S.selectedId);
   const cats={Basi:[],Dolci:[],Salato:[],Altro:[]};
@@ -685,22 +1017,30 @@ function render(){
   </div>`;
 
   let mainContent = '';
-  if (S.view==='load') { mainContent = renderLoad(); }
+  if (S.view==='home') { mainContent = renderHome(); }
+  else if (S.view==='load') { mainContent = renderLoad(); }
   else if (recipe) { mainContent = renderRecipe(recipe); }
   else { mainContent = '<div class="empty"><i class="ti ti-chef-hat"></i><h3>Seleziona una ricetta</h3></div>'; }
 
   app.innerHTML=`
     <div class="topbar">
-      <div><div class="logo">K<span>hub</span></div><div class="logo-sub">Dall'idea alla ricetta che funziona...sempre!</div></div>
+      ${S.view!=='home'?`<button id="btn-back-home" style="background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:4px;color:var(--mid);font-family:inherit;font-size:13px;padding:0;margin-right:4px;flex-shrink:0" class="mobile-only-flex"><i class="ti ti-arrow-left"></i></button>`:''}
+      <div><div class="logo">K<span>hub</span></div><div class="logo-sub" style="display:none" class="desktop-only">Dall'idea alla ricetta che funziona...sempre!</div></div>
       <div class="mode-switcher">
         <button class="mode-btn ${S.mode==='produzione'?'active-prod':''}" id="btn-prod"><i class="ti ti-settings-2"></i> Produzione</button>
         <button class="mode-btn ${S.mode==='lab'?'active-lab':''}" id="btn-lab"><i class="ti ti-flask"></i> LAB</button>
       </div>
+      ${S.view==='recipe'?`<div class="mobile-header-nav">
+        <button class="mhn-btn ${S.mode==='produzione'?'active':''}" id="mhn-prod"><i class="ti ti-settings-2" style="font-size:13px"></i> Prod</button>
+        <button class="mhn-btn ${S.mode==='lab'?'active':''}" id="mhn-lab" style="${S.mode==='lab'?'background:var(--sage);color:white':''}"><i class="ti ti-flask" style="font-size:13px"></i> LAB</button>
+      </div>`:''}
+      ${S.view==='load'?`<div class="mobile-header-nav"><span style="font-size:13px;font-weight:500;color:var(--dark)">Carica ricetta</span></div>`:''}
     </div>
     ${sidebar}
     <div class="main">${mainContent}</div>
     ${S.showModal?renderModal():''}
     ${S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:''}
+    ${renderBottomNav()}
   `;
   bind();
 }
@@ -1010,10 +1350,73 @@ function renderModal(){
 }
 
 function bind(){
+  // BOTTOM NAV
+  const bnavHome = document.getElementById('bnav-home');
+  const bnavLoad = document.getElementById('bnav-load');
+  const bnavLab = document.getElementById('bnav-lab');
+  const bnavProd = document.getElementById('bnav-prod');
+  if(bnavHome) bnavHome.addEventListener('click', () => { S.view='home'; render(); });
+  if(bnavLoad) bnavLoad.addEventListener('click', () => { S.view='load'; S.loadPreview=null; render(); });
+  if(bnavLab) bnavLab.addEventListener('click', () => {
+    const rid = S.lastOpenedId || (S.recipes[0]?.id);
+    if(rid) { S.selectedId=rid; S.view='recipe'; S.mode='lab'; S.aiSugg=null; render(); }
+    else { S.view='load'; S.loadPreview=null; render(); }
+  });
+  if(bnavProd) bnavProd.addEventListener('click', () => {
+    const rid = S.lastOpenedId || (S.recipes[0]?.id);
+    if(rid) { S.selectedId=rid; S.view='recipe'; S.mode='produzione'; S.aiSugg=null; render(); }
+    else { S.view='load'; S.loadPreview=null; render(); }
+  });
+
+  // HOME CARDS
+  const homeRicette = document.getElementById('home-ricette');
+  const homeCarica = document.getElementById('home-carica');
+  const homeLab = document.getElementById('home-lab');
+  const homeProd = document.getElementById('home-prod');
+  const homeAllRecipes = document.getElementById('home-all-recipes');
+  const lrcOpen = document.getElementById('lrc-open');
+  const lrcLab = document.getElementById('lrc-lab');
+  const lrcProd = document.getElementById('lrc-prod');
+
+  if(homeRicette) homeRicette.addEventListener('click', () => {
+    const rid = S.lastOpenedId || (S.recipes[0]?.id);
+    if(rid) { S.selectedId=rid; S.view='recipe'; S.mode='produzione'; render(); }
+    else { S.showModal=true; render(); }
+  });
+  if(homeCarica) homeCarica.addEventListener('click', () => { S.view='load'; S.loadPreview=null; render(); });
+  if(homeLab) homeLab.addEventListener('click', () => {
+    const rid = S.lastOpenedId || (S.recipes[0]?.id);
+    if(rid) { S.selectedId=rid; S.view='recipe'; S.mode='lab'; S.aiSugg=null; render(); }
+    else { S.view='load'; S.loadPreview=null; render(); }
+  });
+  if(homeProd) homeProd.addEventListener('click', () => {
+    const rid = S.lastOpenedId || (S.recipes[0]?.id);
+    if(rid) { S.selectedId=rid; S.view='recipe'; S.mode='produzione'; render(); }
+    else { S.view='load'; S.loadPreview=null; render(); }
+  });
+  if(homeAllRecipes) homeAllRecipes.addEventListener('click', () => {
+    const rid = S.recipes[0]?.id;
+    if(rid) { S.selectedId=rid; S.view='recipe'; S.mode='produzione'; render(); }
+  });
+  if(lrcLab) lrcLab.addEventListener('click', e => {
+    e.stopPropagation();
+    const rid = lrcLab.dataset.recipe;
+    S.selectedId=rid; S.lastOpenedId=rid; S.view='recipe'; S.mode='lab'; S.aiSugg=null; render();
+  });
+  if(lrcProd) lrcProd.addEventListener('click', e => {
+    e.stopPropagation();
+    const rid = lrcProd.dataset.recipe;
+    S.selectedId=rid; S.lastOpenedId=rid; S.view='recipe'; S.mode='produzione'; render();
+  });
+  if(lrcOpen) lrcOpen.addEventListener('click', () => {
+    const rid = lrcOpen.dataset.recipe;
+    S.selectedId=rid; S.lastOpenedId=rid; S.view='recipe'; S.mode='produzione'; render();
+  });
+
   document.querySelectorAll('[data-nav]').forEach(el=>el.addEventListener('click',e=>{
     e.stopPropagation();
     if (el.dataset.goLab) { S.selectedId=el.dataset.nav; S.view='recipe'; S.selectedVariantId=null; S.mode='lab'; S.aiSugg=null; S.addIng={name:'',qty:'',unit:'g'}; render(); return; }
-    S.selectedId=el.dataset.nav; S.view='recipe'; S.selectedVariantId=null; S.aiSugg=null; S.addIng={name:'',qty:'',unit:'g'};
+    S.selectedId=el.dataset.nav; S.lastOpenedId=el.dataset.nav; S.view='recipe'; S.selectedVariantId=null; S.aiSugg=null; S.addIng={name:'',qty:'',unit:'g'};
     // Auto-expand recipe in sidebar
     S.expandedRecipes = {...(S.expandedRecipes||{}), [el.dataset.nav]: true};
     render();
@@ -1023,6 +1426,12 @@ function bind(){
     S.selectedId=el.dataset.recipe; S.selectedVariantId=el.dataset.navVariant;
     S.view='recipe'; S.aiSugg=null; render();
   }));
+  const bbh = document.getElementById('btn-back-home');
+  if(bbh) bbh.addEventListener('click', () => { S.view='home'; render(); });
+  const mhnProd = document.getElementById('mhn-prod');
+  const mhnLab = document.getElementById('mhn-lab');
+  if(mhnProd) mhnProd.addEventListener('click', () => { S.mode='produzione'; render(); });
+  if(mhnLab) mhnLab.addEventListener('click', () => { S.mode='lab'; render(); });
   const bp=document.getElementById('btn-prod'),bl=document.getElementById('btn-lab');
   if(bp)bp.addEventListener('click',()=>{S.mode='produzione';render();});
   if(bl)bl.addEventListener('click',()=>{S.mode='lab';render();});
