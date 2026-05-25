@@ -448,6 +448,45 @@ tbody tr:last-child td { border-bottom: none; }
   .mobile-only-flex { display: flex !important; }
   .logo-sub { display: none !important; }
 }
+
+/* INGREDIENT GROUP LABEL */
+.ing-group-label {
+  background: var(--sage-light);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sage);
+  letter-spacing: 0.04em;
+}
+.ing-group-label td {
+  padding: 8px 6px 5px !important;
+  border-bottom: none !important;
+}
+.ing-group-label .group-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--sage);
+}
+.ing-group-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--sage);
+  color: white;
+  font-size: 9px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+  margin-left: auto;
+  transition: opacity 0.12s;
+}
+.ing-group-btn:hover { opacity: 0.8; }
+.ing-grouped td { background: rgba(138,158,136,0.04); }
 </style>
 </head>
 <body>
@@ -500,7 +539,7 @@ let S = {
 
 const R = id => S.recipes.find(r=>r.id===id);
 const curLab = r => r.labVersions[r.currentLabIdx];
-const totQty = v => v.ingredients.reduce((s,i)=>s+(parseFloat(i.qty)||0),0);
+const totQty = v => v.ingredients.reduce((s,i)=>s+(i.isGroupLabel?0:(parseFloat(i.qty)||0)),0);
 
 function toast(msg, icon='ti-check') {
   if (S.toastTimer) clearTimeout(S.toastTimer);
@@ -570,10 +609,10 @@ async function extractFromSource(type, payload) {
   if (type==='image') {
     messages=[{role:'user',content:[
       {type:'image',source:{type:'base64',media_type:payload.mediaType,data:payload.b64}},
-      {type:'text',text:'Estrai la ricetta da questa immagine. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes e nella ricetta madre metti solo il riferimento come ingrediente con isSubRecipe:true. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.'}
+      {type:'text',text:'Estrai la ricetta da questa immagine. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes con tutti i loro ingredienti. Nella ricetta madre NON mettere un ingrediente aggregato come \"Pasta frolla 300g\" - lascia ingredients vuoto o con solo ingredienti che non appartengono a nessuna sub-ricetta. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.'}
     ]}];
   } else if (type==='text') {
-    messages=[{role:'user',content:`Estrai la ricetta dal seguente testo. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes e nella ricetta madre metti solo il riferimento come ingrediente con isSubRecipe:true. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.\n\nTESTO:\n${payload}`}];
+    messages=[{role:'user',content:`Estrai la ricetta dal seguente testo. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes con tutti i loro ingredienti. Nella ricetta madre NON mettere un ingrediente aggregato come \"Pasta frolla 300g\" - lascia ingredients vuoto o con solo ingredienti che non appartengono a nessuna sub-ricetta. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.\n\nTESTO:\n${payload}`}];
   } else if (type==='url') {
     // Usa il nostro proxy /api/chat per leggere il contenuto della pagina
     let pageText = '';
@@ -594,7 +633,7 @@ async function extractFromSource(type, payload) {
     const urlContent = pageText
       ? 'Estrai la ricetta dal seguente testo (fonte: ' + payload + ').\n\nTESTO:\n' + pageText
       : 'Estrai la ricetta da questo URL: ' + payload + '. Usa il nome nell URL per dedurre la ricetta.';
-    messages=[{role:'user',content: urlContent + '\n\nRispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes e nella ricetta madre metti solo il riferimento come ingrediente con isSubRecipe:true. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.'}];
+    messages=[{role:'user',content: urlContent + '\n\nRispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes con tutti i loro ingredienti. Nella ricetta madre NON mettere un ingrediente aggregato come \"Pasta frolla 300g\" - lascia ingredients vuoto o con solo ingredienti che non appartengono a nessuna sub-ricetta. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.'}];
   }
 
   try {
@@ -658,13 +697,25 @@ function savePreview() {
         });
       }
 
-      // Collega nella ricetta madre
-      const existing_ing = p.ingredients.find(i =>
-        i.name.toLowerCase().includes(sr.name.toLowerCase()) ||
-        sr.name.toLowerCase().includes(i.name.toLowerCase())
+      // Rimuovi eventuale ingrediente aggregato dalla madre (es "Pasta frolla 300g")
+      p.ingredients = p.ingredients.filter(i =>
+        !i.name.toLowerCase().includes(sr.name.toLowerCase()) &&
+        !sr.name.toLowerCase().includes(i.name.toLowerCase())
       );
-      if (existing_ing) { existing_ing.isSubRecipe=true; existing_ing.subRecipeId=targetId; }
-      else { p.ingredients.push({id:'psr'+idx,name:sr.name,qty:srTot,unit:'g',isSubRecipe:true,subRecipeId:targetId}); }
+
+      // Aggiungi gli ingredienti reali della sub-ricetta nella madre con gruppo
+      const groupLabel = {
+        id:'grp'+idx+'_label',
+        name:'── ' + sr.name + ' ──',
+        qty:0, unit:'', isSubRecipe:false, subRecipeId:null,
+        isGroupLabel:true, groupRecipeId:targetId
+      };
+      const expandedIngs = srIngs.map((i,j) => ({
+        ...i,
+        id:'exp'+idx+'_'+j,
+        groupOf:targetId
+      }));
+      p.ingredients.push(groupLabel, ...expandedIngs);
     });
   }
 
@@ -1265,12 +1316,26 @@ function renderRecipe(recipe){
       <thead><tr><th style="width:38%">Ingrediente</th><th>Quantità</th><th>Unità</th><th>%</th>${isLab?'<th></th>':''}</tr></thead>
       <tbody>
         ${v.ingredients.map(ing=>{
+          // GROUP LABEL ROW
+          if (ing.isGroupLabel) {
+            const grpR = ing.groupRecipeId ? R(ing.groupRecipeId) : null;
+            return `<tr class="ing-group-label">
+              <td colspan="${isLab?5:4}">
+                <div class="group-name">
+                  <i class="ti ti-tool" style="font-size:11px"></i>
+                  ${ing.name.replace(/──/g,'').trim()}
+                  ${grpR?`<button class="ing-group-btn" data-nav="${grpR.id}"><i class="ti ti-arrow-right" style="font-size:9px"></i> apri ricetta</button>`:''}
+                </div>
+              </td>
+            </tr>`;
+          }
           const pct=tot>0?(parseFloat(ing.qty)/tot*100):0;
           const subR=ing.isSubRecipe&&ing.subRecipeId?R(ing.subRecipeId):null;
-          return `<tr>
+          const isGrouped = !!ing.groupOf;
+          return `<tr class="${isGrouped?'ing-grouped':''}">
             <td><div class="ing-name-cell">
               ${isLab?`<input class="editable-text" data-ing-name="${ing.id}" data-recipe="${recipe.id}" value="${ing.name}">`:
-              `<span style="font-weight:500">${ing.name}</span>`}
+              `<span style="font-weight:${isGrouped?400:500};padding-left:${isGrouped?'12px':'0'}">${ing.name}</span>`}
               ${subR?`<button class="nav-link" data-nav="${subR.id}" style="flex-shrink:0"><i class="ti ti-arrow-right" style="font-size:9px"></i>${subR.name}</button>`:''}
             </div></td>
             <td><input class="qty-field ${isLab?'lab':''}" data-ing="${ing.id}" data-recipe="${recipe.id}" type="number" min="0" step="0.1" value="${ing.qty}"></td>
