@@ -497,7 +497,7 @@ const SUB_KW = ['crema pasticcera','besciamella','pasta frolla','pasta sfoglia',
 const isSub = n => SUB_KW.some(k => n.toLowerCase().includes(k));
 
 let S = {
-  view: 'home', // 'home' | 'recipe' | 'load'
+  view: 'home', // 'home' | 'recipe' | 'load' | 'recipes-lab' | 'recipes-prod'
   mode: 'produzione', selectedId: 'r1', lastOpenedId: null, showModal: false,
   toast: null, toastTimer: null,
   pendingVariantName: '',
@@ -929,8 +929,8 @@ function submitModal(){
 function renderBottomNav() {
   const isHome = S.view === 'home';
   const isLoad = S.view === 'load';
-  const isLab = S.view === 'recipe' && S.mode === 'lab';
-  const isProd = S.view === 'recipe' && S.mode === 'produzione';
+  const isLab = (S.view === 'recipe' && S.mode === 'lab') || S.view === 'recipes-lab';
+  const isProd = (S.view === 'recipe' && S.mode === 'produzione') || S.view === 'recipes-prod';
   return `<nav class="bottom-nav">
     <button class="bnav-btn ${isHome?'active':''}" id="bnav-home">
       <i class="ti ti-home"></i>Home
@@ -945,6 +945,58 @@ function renderBottomNav() {
       <i class="ti ti-settings-2"></i>Produzione
     </button>
   </nav>`;
+}
+
+
+function renderRecipesList(mode) {
+  const isLab = mode === 'lab';
+  const icons = {Basi:'ti-tool', Dolci:'ti-cookie', Salato:'ti-soup', Altro:'ti-star'};
+  const iconClass = {Basi:'basi', Dolci:'dolci', Salato:'salato', Altro:'dolci'};
+  const cats = {Basi:[], Dolci:[], Salato:[], Altro:[]};
+  S.recipes.forEach(r => { (cats[r.category]?cats[r.category]:cats['Altro']).push(r); });
+
+  return `<div class="home-view">
+    <div class="home-welcome">
+      <div style="display:flex;align-items:center;gap:10px">
+        <button id="btn-back-list" style="background:none;border:none;cursor:pointer;color:var(--mid);display:flex;align-items:center;gap:4px;font-family:inherit;font-size:13px;padding:0">
+          <i class="ti ti-arrow-left"></i>
+        </button>
+        <div>
+          <div class="home-title" style="font-size:22px">
+            ${isLab ? '<i class="ti ti-flask" style="color:var(--sage);font-size:20px;margin-right:6px"></i>LAB' : '<i class="ti ti-settings-2" style="color:var(--orange);font-size:20px;margin-right:6px"></i>Produzione'}
+          </div>
+          <div class="home-sub">Scegli una ricetta</div>
+        </div>
+      </div>
+    </div>
+
+    ${Object.entries(cats).map(([cat, items]) => !items.length ? '' : `
+      <div class="recent-section">
+        <div class="recent-label">${cat}</div>
+        ${items.map(r => {
+          const prodV = r.productionVariantId ? r.validatedVariants.find(v=>v.id===r.productionVariantId) : null;
+          return `<div class="recent-item" data-pick-recipe="${r.id}" data-pick-mode="${mode}">
+            <div class="recent-icon ${iconClass[r.category]||'dolci'}">
+              <i class="ti ${icons[r.category]||'ti-star'}" style="font-size:16px"></i>
+            </div>
+            <div style="flex:1">
+              <div class="recent-name">${r.name}</div>
+              <div class="recent-meta">
+                ${r.validatedVariants.length > 0 ? r.validatedVariants.length + ' varianti validate' : 'Nessuna variante validata'}
+                ${prodV ? ' · Prod: ' + prodV.name : ''}
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              ${isLab
+                ? `<span class="badge" style="background:var(--sage-light);color:var(--sage);font-size:10px">LAB</span>`
+                : `<span class="badge" style="background:var(--orange-light);color:var(--orange);font-size:10px">PROD</span>`
+              }
+              <i class="ti ti-chevron-right recent-arrow"></i>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`).join('')}
+  </div>`;
 }
 
 function renderHome() {
@@ -1069,6 +1121,8 @@ function render(){
 
   let mainContent = '';
   if (S.view==='home') { mainContent = renderHome(); }
+  else if (S.view==='recipes-lab') { mainContent = renderRecipesList('lab'); }
+  else if (S.view==='recipes-prod') { mainContent = renderRecipesList('produzione'); }
   else if (S.view==='load') { mainContent = renderLoad(); }
   else if (recipe) { mainContent = renderRecipe(recipe); }
   else { mainContent = '<div class="empty"><i class="ti ti-chef-hat"></i><h3>Seleziona una ricetta</h3></div>'; }
@@ -1450,14 +1504,12 @@ function bind(){
   });
   if(homeCarica) homeCarica.addEventListener('click', () => { S.view='load'; S.loadPreview=null; render(); });
   if(homeLab) homeLab.addEventListener('click', () => {
-    const rid = S.lastOpenedId || (S.recipes[0]?.id);
-    if(rid) { S.selectedId=rid; S.view='recipe'; S.mode='lab'; S.aiSugg=null; render(); }
-    else { S.view='load'; S.loadPreview=null; render(); }
+    if(S.recipes.length === 0) { S.view='load'; S.loadPreview=null; render(); return; }
+    S.view='recipes-lab'; render();
   });
   if(homeProd) homeProd.addEventListener('click', () => {
-    const rid = S.lastOpenedId || (S.recipes[0]?.id);
-    if(rid) { S.selectedId=rid; S.view='recipe'; S.mode='produzione'; render(); }
-    else { S.view='load'; S.loadPreview=null; render(); }
+    if(S.recipes.length === 0) { S.view='load'; S.loadPreview=null; render(); return; }
+    S.view='recipes-prod'; render();
   });
   if(homeAllRecipes) homeAllRecipes.addEventListener('click', () => {
     const rid = S.recipes[0]?.id;
@@ -1570,6 +1622,15 @@ function bind(){
   document.querySelectorAll('[data-ing-unit]').forEach(el=>el.addEventListener('change',e=>onIngUnit(e.target.dataset.recipe,e.target.dataset.ingUnit,e.target.value)));
   document.querySelectorAll('.rm-ing-btn[data-rm-ing]').forEach(el=>el.addEventListener('click',()=>onRmIng(el.dataset.recipe,el.dataset.rmIng)));
   document.querySelectorAll('[data-set-prod]').forEach(el=>el.addEventListener('click',()=>setProd(el.dataset.recipe,el.dataset.setProd)));
+
+  // RECIPE LIST PICKS
+  document.querySelectorAll('[data-pick-recipe]').forEach(el=>el.addEventListener('click',()=>{
+    const rid = el.dataset.pickRecipe;
+    const mode = el.dataset.pickMode;
+    S.selectedId=rid; S.lastOpenedId=rid; S.view='recipe'; S.mode=mode; S.aiSugg=null; render();
+  }));
+  const btnBackList = document.getElementById('btn-back-list');
+  if(btnBackList) btnBackList.addEventListener('click',()=>{ S.view='home'; render(); });
   document.querySelectorAll('[data-go-lab-from-variant]').forEach(el=>el.addEventListener('click',()=>{
     S.selectedId=el.dataset.goLabFromVariant; S.selectedVariantId=null; S.mode='lab'; S.view='recipe'; render();
   }));
