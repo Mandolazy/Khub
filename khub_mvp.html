@@ -497,7 +497,7 @@ const SUB_KW = ['crema pasticcera','besciamella','pasta frolla','pasta sfoglia',
 const isSub = n => SUB_KW.some(k => n.toLowerCase().includes(k));
 
 let S = {
-  view: 'home', // 'home' | 'recipe' | 'load'
+  view: 'home', // 'home' | 'recipe' | 'load' | 'recipes-lab' | 'recipes-prod'
   mode: 'produzione', selectedId: 'r1', lastOpenedId: null, showModal: false,
   toast: null, toastTimer: null,
   pendingVariantName: '',
@@ -571,7 +571,13 @@ function onValidate(id){
   const r=R(id),v=curLab(r);
   const nv={id:'vv'+Date.now(),name,validatedAt:new Date().toLocaleDateString('it-IT'),portionsCount:v.portionsCount,gramsPerPortion:v.gramsPerPortion,ingredients:v.ingredients.map(i=>({...i}))};
   upRec(id,r=>({...r,validatedVariants:[...r.validatedVariants,nv],productionVariantId:r.productionVariantId||nv.id,labVersions:[{id:'v'+Date.now(),label:'Versione 1',note:'Nuovo test',portionsCount:v.portionsCount,gramsPerPortion:v.gramsPerPortion,ingredients:v.ingredients.map(i=>({...i}))}],currentLabIdx:0}));
-  S.pendingVariantName='';S.mode='produzione';toast(`"${name}" validata`,'ti-circle-check');
+  S.pendingVariantName='';S.mode='produzione';
+  // Save updated recipe to Supabase
+  setTimeout(() => {
+    const updatedRecipe = R(id);
+    if(updatedRecipe) saveRecipeToSupabase(updatedRecipe);
+  }, 100);
+  toast(`"${name}" validata`,'ti-circle-check');
 }
 function setProd(rid,vid){upRec(rid,r=>({...r,productionVariantId:vid}));toast('Versione di produzione aggiornata','ti-settings-2');}
 
@@ -609,10 +615,10 @@ async function extractFromSource(type, payload) {
   if (type==='image') {
     messages=[{role:'user',content:[
       {type:'image',source:{type:'base64',media_type:payload.mediaType,data:payload.b64}},
-      {type:'text',text:'Estrai la ricetta da questa immagine. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes con tutti i loro ingredienti dettagliati. In ingredients della ricetta madre metti SOLO gli ingredienti che non appartengono a nessuna sub-ricetta (es: confettura, decorazioni). NON mettere ingredienti aggregati come \"Pasta frolla 300g\" in ingredients. Se tutti gli ingredienti appartengono a sub-ricette, ingredients può essere un array vuoto []. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.'}
+      {type:'text',text:'Estrai la ricetta da questa immagine. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes e nella ricetta madre metti solo il riferimento come ingrediente con isSubRecipe:true. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.'}
     ]}];
   } else if (type==='text') {
-    messages=[{role:'user',content:`Estrai la ricetta dal seguente testo. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes con tutti i loro ingredienti dettagliati. In ingredients della ricetta madre metti SOLO gli ingredienti che non appartengono a nessuna sub-ricetta (es: confettura, decorazioni). NON mettere ingredienti aggregati come \"Pasta frolla 300g\" in ingredients. Se tutti gli ingredienti appartengono a sub-ricette, ingredients può essere un array vuoto []. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.\n\nTESTO:\n${payload}`}];
+    messages=[{role:'user',content:`Estrai la ricetta dal seguente testo. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes e nella ricetta madre metti solo il riferimento come ingrediente con isSubRecipe:true. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.\n\nTESTO:\n${payload}`}];
   } else if (type==='url') {
     // Usa il nostro proxy /api/chat per leggere il contenuto della pagina
     let pageText = '';
@@ -633,7 +639,7 @@ async function extractFromSource(type, payload) {
     const urlContent = pageText
       ? 'Estrai la ricetta dal seguente testo (fonte: ' + payload + ').\n\nTESTO:\n' + pageText
       : 'Estrai la ricetta da questo URL: ' + payload + '. Usa il nome nell URL per dedurre la ricetta.';
-    messages=[{role:'user',content: urlContent + '\n\nRispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes con tutti i loro ingredienti dettagliati. In ingredients della ricetta madre metti SOLO gli ingredienti che non appartengono a nessuna sub-ricetta (es: confettura, decorazioni). NON mettere ingredienti aggregati come \"Pasta frolla 300g\" in ingredients. Se tutti gli ingredienti appartengono a sub-ricette, ingredients può essere un array vuoto []. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.'}];
+    messages=[{role:'user',content: urlContent + '\n\nRispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes e nella ricetta madre metti solo il riferimento come ingrediente con isSubRecipe:true. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.'}];
   }
 
   try {
@@ -652,112 +658,143 @@ async function extractFromSource(type, payload) {
 
 function savePreview() {
   const p=S.loadPreview; if(!p) return;
-  const newId='r'+Date.now();
   const ts = Date.now();
   const recipesToAdd = [];
-  const recipeUpdates = []; // { id, newLabVersion }
+  const recipeUpdates = []; // ricette esistenti a cui aggiungere versione LAB
 
-  // Helper: cerca ricetta esistente per nome (case-insensitive, fuzzy)
-  function findExistingRecipe(name) {
+  // Helper: cerca ricetta esistente per nome
+  function findExisting(name) {
     const nl = name.toLowerCase().trim();
-    return S.recipes.find(r => r.name.toLowerCase().trim() === nl ||
-      r.name.toLowerCase().includes(nl) || nl.includes(r.name.toLowerCase()));
+    return S.recipes.find(r =>
+      r.name.toLowerCase().trim() === nl ||
+      r.name.toLowerCase().includes(nl) ||
+      nl.includes(r.name.toLowerCase())
+    );
   }
 
-  // 1. Processa sub-ricette esplicite dall'AI (subRecipes array)
-  if (p.subRecipes && p.subRecipes.length) {
-    p.subRecipes.forEach((sr, idx) => {
-      const srIngs = (sr.ingredients||[]).map((i,j) => ({
-        id:'sri'+idx+'_'+j, name:i.name, qty:parseFloat(i.qty)||0,
-        unit:i.unit||'g', isSubRecipe:false, subRecipeId:null
-      }));
-      const srTot = srIngs.reduce((s,i)=>s+(parseFloat(i.qty)||0),0);
-      const newLabVersion = {
-        id:'lv'+ts+'_'+idx, label:'Versione 1',
-        note:'Da '+p.name,
-        portionsCount:1, gramsPerPortion:srTot||500,
-        ingredients: srIngs
-      };
+  // Helper: crea nuova versione LAB da ingredienti
+  function makeLabVersion(name, ings, idx2) {
+    return {
+      id: 'lv'+ts+'_'+idx2,
+      label: 'Versione ' + (Date.now()%1000),
+      note: 'Da ' + p.name,
+      portionsCount: 1,
+      gramsPerPortion: ings.reduce((s,i)=>s+(parseFloat(i.qty)||0),0) || 500,
+      ingredients: ings
+    };
+  }
 
-      // Cerca se esiste già una ricetta con questo nome
-      const existing = findExistingRecipe(sr.name);
-      let targetId;
+  // 1. Processa ricetta madre — cerca se esiste già
+  const existingMain = findExisting(p.name);
+  let mainId;
 
-      if (existing) {
-        // Aggiunge come nuova versione LAB alla ricetta esistente
-        targetId = existing.id;
-        recipeUpdates.push({ id: existing.id, newLabVersion });
-      } else {
-        // Crea nuova ricetta
-        targetId = 'r'+(ts+idx+1);
-        recipesToAdd.push({
-          id: targetId, name: sr.name, category:'Basi', department:'Cucina',
-          parentRecipeId: newId, productionVariantId:null, validatedVariants:[],
-          currentLabIdx:0, labVersions:[newLabVersion]
-        });
-      }
-
-      // Rimuovi eventuale ingrediente aggregato dalla madre (es "Pasta frolla 300g")
-      p.ingredients = p.ingredients.filter(i =>
-        !i.name.toLowerCase().includes(sr.name.toLowerCase()) &&
-        !sr.name.toLowerCase().includes(i.name.toLowerCase())
-      );
-
-      // Aggiungi gli ingredienti reali della sub-ricetta nella madre con gruppo
-      const groupLabel = {
-        id:'grp'+idx+'_label',
-        name:'── ' + sr.name + ' ──',
-        qty:0, unit:'', isSubRecipe:false, subRecipeId:null,
-        isGroupLabel:true, groupRecipeId:targetId
-      };
-      const expandedIngs = srIngs.map((i,j) => ({
-        ...i,
-        id:'exp'+idx+'_'+j,
-        groupOf:targetId
-      }));
-      p.ingredients.push(groupLabel, ...expandedIngs);
+  if (existingMain) {
+    // Aggiunge versione LAB alla ricetta esistente
+    mainId = existingMain.id;
+    const newLab = {
+      id: 'lv'+ts+'_main',
+      label: 'Versione ' + (existingMain.labVersions.length + 1),
+      note: 'Importata',
+      portionsCount: parseInt(p.portionsCount)||4,
+      gramsPerPortion: parseFloat(p.gramsPerPortion)||200,
+      ingredients: p.ingredients.map((i,j) => ({...i, id:'pi'+ts+'_'+j}))
+    };
+    recipeUpdates.push({ id: mainId, newLabVersion: newLab });
+  } else {
+    // Crea nuova ricetta madre
+    mainId = 'r'+ts;
+    recipesToAdd.push({
+      id: mainId, name: p.name, category: p.category||'Altro', department:'Cucina',
+      productionVariantId:null, validatedVariants:[], currentLabIdx:0,
+      labVersions:[{
+        id:'lv'+ts+'_main', label:'Versione 1', note:'Importata',
+        portionsCount:parseInt(p.portionsCount)||4,
+        gramsPerPortion:parseFloat(p.gramsPerPortion)||200,
+        ingredients:p.ingredients.map((i,j)=>({...i, id:'pi'+ts+'_'+j}))
+      }]
     });
   }
 
-  // 2. Sub-ricette rilevate da keyword negli ingredienti (fallback)
-  p.ingredients.forEach((ing, idx) => {
-    if (ing.isSubRecipe && !ing.subRecipeId) {
-      const existing = findExistingRecipe(ing.name);
-      if (existing) {
-        ing.subRecipeId = existing.id;
-        // Aggiunge versione LAB vuota con placeholder
-        recipeUpdates.push({
-          id: existing.id,
-          newLabVersion: {
-            id:'lv'+ts+'k'+idx, label:'Versione 1', note:'Da '+p.name,
-            portionsCount:1, gramsPerPortion:parseFloat(ing.qty)||500,
-            ingredients:[
-              {id:'si1',name:'Ingrediente 1',qty:200,unit:'g',isSubRecipe:false},
-              {id:'si2',name:'Ingrediente 2',qty:150,unit:'g',isSubRecipe:false}
-            ]
-          }
-        });
+  // 2. Processa sub-ricette esplicite dall'AI
+  if (p.subRecipes && p.subRecipes.length) {
+    p.subRecipes.forEach((sr, idx2) => {
+      const srIngs = (sr.ingredients||[]).map((i,j) => ({
+        id:'sri'+ts+'_'+idx2+'_'+j, name:i.name,
+        qty:parseFloat(i.qty)||0, unit:i.unit||'g',
+        isSubRecipe:false, subRecipeId:null
+      }));
+      const existingSR = findExisting(sr.name);
+      let targetId;
+
+      if (existingSR) {
+        // Aggiunge versione LAB alla ricetta esistente
+        targetId = existingSR.id;
+        const newLab = makeLabVersion(sr.name, srIngs, idx2);
+        newLab.label = 'Versione ' + (existingSR.labVersions.length + 1);
+        recipeUpdates.push({ id: targetId, newLabVersion: newLab });
       } else {
-        const sid = 'r'+(ts+100+idx);
-        ing.subRecipeId = sid;
+        // Crea nuova sub-ricetta
+        targetId = 'r'+(ts+idx2+1);
         recipesToAdd.push({
-          id:sid, name:ing.name.charAt(0).toUpperCase()+ing.name.slice(1),
-          category:'Basi', department:'Cucina', parentRecipeId:newId,
-          productionVariantId:null, validatedVariants:[], currentLabIdx:0,
-          labVersions:[{
-            id:'v1', label:'Versione 1', note:'Da '+p.name,
-            portionsCount:1, gramsPerPortion:parseFloat(ing.qty)||500,
-            ingredients:[
-              {id:'si1',name:'Ingrediente 1',qty:200,unit:'g',isSubRecipe:false},
-              {id:'si2',name:'Ingrediente 2',qty:150,unit:'g',isSubRecipe:false}
-            ]
-          }]
+          id:targetId, name:sr.name, category:'Basi', department:'Cucina',
+          parentRecipeId:mainId, productionVariantId:null, validatedVariants:[],
+          currentLabIdx:0, labVersions:[makeLabVersion(sr.name, srIngs, idx2)]
         });
       }
-    }
-  });
 
-  // 3. Applica aggiornamenti alle ricette esistenti (nuova versione LAB)
+      // Aggiorna ingrediente nella ricetta madre
+      const getMainLab = () => {
+        const main = existingMain || recipesToAdd.find(r=>r.id===mainId);
+        if (!main) return null;
+        return main.labVersions[existingMain ? recipeUpdates.find(u=>u.id===mainId) ? main.labVersions.length : main.currentLabIdx : 0];
+      };
+      const mainLab = getMainLab();
+      if (mainLab) {
+        const existing_ing = mainLab.ingredients.find(i =>
+          i.name.toLowerCase().includes(sr.name.toLowerCase()) ||
+          sr.name.toLowerCase().includes(i.name.toLowerCase())
+        );
+        if (existing_ing) { existing_ing.isSubRecipe=true; existing_ing.subRecipeId=targetId; }
+      }
+    });
+  }
+
+  // 3. Sub-ricette da keyword negli ingredienti (fallback)
+  const mainLabToCheck = existingMain
+    ? (recipeUpdates.find(u=>u.id===mainId)?.newLabVersion)
+    : recipesToAdd.find(r=>r.id===mainId)?.labVersions[0];
+
+  if (mainLabToCheck) {
+    mainLabToCheck.ingredients.forEach((ing, idx2) => {
+      if (isSub(ing.name) && !ing.subRecipeId) {
+        const existingSR = findExisting(ing.name);
+        if (existingSR) {
+          ing.subRecipeId = existingSR.id;
+          const newLab = makeLabVersion(ing.name, [
+            {id:'si1',name:'Ingrediente 1',qty:200,unit:'g',isSubRecipe:false},
+            {id:'si2',name:'Ingrediente 2',qty:150,unit:'g',isSubRecipe:false}
+          ], idx2+100);
+          newLab.label = 'Versione ' + (existingSR.labVersions.length + 1);
+          recipeUpdates.push({ id: existingSR.id, newLabVersion: newLab });
+        } else {
+          const sid = 'r'+(ts+100+idx2);
+          ing.subRecipeId = sid;
+          ing.isSubRecipe = true;
+          recipesToAdd.push({
+            id:sid, name:ing.name.charAt(0).toUpperCase()+ing.name.slice(1),
+            category:'Basi', department:'Cucina', parentRecipeId:mainId,
+            productionVariantId:null, validatedVariants:[], currentLabIdx:0,
+            labVersions:[makeLabVersion(ing.name,[
+              {id:'si1',name:'Ingrediente 1',qty:200,unit:'g',isSubRecipe:false},
+              {id:'si2',name:'Ingrediente 2',qty:150,unit:'g',isSubRecipe:false}
+            ], idx2+100)]
+          });
+        }
+      }
+    });
+  }
+
+  // 4. Applica aggiornamenti alle ricette esistenti
   if (recipeUpdates.length) {
     S.recipes = S.recipes.map(r => {
       const upd = recipeUpdates.find(u => u.id === r.id);
@@ -767,30 +804,42 @@ function savePreview() {
     });
   }
 
-  // 4. Salva ricetta madre + nuove sub-ricette
-  const mainRecipe = {
-    id:newId, name:p.name, category:p.category||'Altro', department:'Cucina',
-    productionVariantId:null, validatedVariants:[], currentLabIdx:0,
-    labVersions:[{
-      id:'v1', label:'Versione 1', note:'Importata',
-      portionsCount:parseInt(p.portionsCount)||4,
-      gramsPerPortion:parseFloat(p.gramsPerPortion)||200,
-      ingredients:p.ingredients
-    }]
-  };
-  S.recipes = [...S.recipes, mainRecipe, ...recipesToAdd];
+  // 5. Aggiungi nuove ricette
+  S.recipes = [...S.recipes, ...recipesToAdd];
 
-  S.selectedId=newId; S.lastOpenedId=newId; S.view='recipe'; S.loadPreview=null;
+  // 6. Naviga alla ricetta principale
+  const finalMainId = existingMain ? existingMain.id : mainId;
+  S.selectedId=finalMainId; S.lastOpenedId=finalMainId;
+  S.view='recipe'; S.loadPreview=null;
   S.loadImageB64=null; S.loadImagePreviewUrl=null; S.loadUrl=''; S.loadText='';
 
-  const totalSubs = recipesToAdd.length + recipeUpdates.length;
-  if (recipeUpdates.length) {
-    const names = recipeUpdates.map(u => S.recipes.find(r=>r.id===u.id)?.name||'').filter(Boolean);
-    toast(`"${p.name}" importata — nuova versione aggiunta a: ${names.join(', ')}`, 'ti-sparkles');
-  } else if (recipesToAdd.length) {
-    toast(`"${p.name}" importata + ${recipesToAdd.length} sub-ricett${recipesToAdd.length>1?'e':'a'} creat${recipesToAdd.length>1?'e':'a'}`, 'ti-sparkles');
+  // 7. Salva su Supabase
+  setTimeout(() => {
+    const allIds = [finalMainId, ...recipesToAdd.map(r=>r.id)];
+    // Salva anche le ricette aggiornate
+    recipeUpdates.forEach(u => {
+      const r = S.recipes.find(x=>x.id===u.id);
+      if(r) saveRecipeToSupabase(r);
+    });
+    allIds.forEach(rid => {
+      const r = S.recipes.find(x=>x.id===rid);
+      if(r) saveRecipeToSupabase(r);
+    });
+  }, 300);
+
+  // 8. Toast
+  const subCount = recipesToAdd.filter(r=>r.id!==mainId).length;
+  const updCount = recipeUpdates.filter(u=>u.id!==mainId).length;
+
+  if (existingMain) {
+    toast(`Nuova versione aggiunta a "${existingMain.name}"`, 'ti-plus');
+  } else if (subCount > 0) {
+    toast(`"${p.name}" importata + ${subCount} sub-ricett${subCount>1?'e':'a'}`, 'ti-sparkles');
   } else {
-    toast(`"${p.name}" importata con successo`, 'ti-circle-check');
+    toast(`"${p.name}" importata`, 'ti-circle-check');
+  }
+  if (updCount > 0) {
+    setTimeout(() => toast(`${updCount} sub-ricett${updCount>1?'e':'a'} aggiornate con nuova versione`, 'ti-git-branch'), 1500);
   }
 }
 
@@ -929,8 +978,8 @@ function submitModal(){
 function renderBottomNav() {
   const isHome = S.view === 'home';
   const isLoad = S.view === 'load';
-  const isLab = S.view === 'recipe' && S.mode === 'lab';
-  const isProd = S.view === 'recipe' && S.mode === 'produzione';
+  const isLab = (S.view === 'recipe' && S.mode === 'lab') || S.view === 'recipes-lab';
+  const isProd = (S.view === 'recipe' && S.mode === 'produzione') || S.view === 'recipes-prod';
   return `<nav class="bottom-nav">
     <button class="bnav-btn ${isHome?'active':''}" id="bnav-home">
       <i class="ti ti-home"></i>Home
@@ -945,6 +994,58 @@ function renderBottomNav() {
       <i class="ti ti-settings-2"></i>Produzione
     </button>
   </nav>`;
+}
+
+
+function renderRecipesList(mode) {
+  const isLab = mode === 'lab';
+  const icons = {Basi:'ti-tool', Dolci:'ti-cookie', Salato:'ti-soup', Altro:'ti-star'};
+  const iconClass = {Basi:'basi', Dolci:'dolci', Salato:'salato', Altro:'dolci'};
+  const cats = {Basi:[], Dolci:[], Salato:[], Altro:[]};
+  S.recipes.forEach(r => { (cats[r.category]?cats[r.category]:cats['Altro']).push(r); });
+
+  return `<div class="home-view">
+    <div class="home-welcome">
+      <div style="display:flex;align-items:center;gap:10px">
+        <button id="btn-back-list" style="background:none;border:none;cursor:pointer;color:var(--mid);display:flex;align-items:center;gap:4px;font-family:inherit;font-size:13px;padding:0">
+          <i class="ti ti-arrow-left"></i>
+        </button>
+        <div>
+          <div class="home-title" style="font-size:22px">
+            ${isLab ? '<i class="ti ti-flask" style="color:var(--sage);font-size:20px;margin-right:6px"></i>LAB' : '<i class="ti ti-settings-2" style="color:var(--orange);font-size:20px;margin-right:6px"></i>Produzione'}
+          </div>
+          <div class="home-sub">Scegli una ricetta</div>
+        </div>
+      </div>
+    </div>
+
+    ${Object.entries(cats).map(([cat, items]) => !items.length ? '' : `
+      <div class="recent-section">
+        <div class="recent-label">${cat}</div>
+        ${items.map(r => {
+          const prodV = r.productionVariantId ? r.validatedVariants.find(v=>v.id===r.productionVariantId) : null;
+          return `<div class="recent-item" data-pick-recipe="${r.id}" data-pick-mode="${mode}">
+            <div class="recent-icon ${iconClass[r.category]||'dolci'}">
+              <i class="ti ${icons[r.category]||'ti-star'}" style="font-size:16px"></i>
+            </div>
+            <div style="flex:1">
+              <div class="recent-name">${r.name}</div>
+              <div class="recent-meta">
+                ${r.validatedVariants.length > 0 ? r.validatedVariants.length + ' varianti validate' : 'Nessuna variante validata'}
+                ${prodV ? ' · Prod: ' + prodV.name : ''}
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              ${isLab
+                ? `<span class="badge" style="background:var(--sage-light);color:var(--sage);font-size:10px">LAB</span>`
+                : `<span class="badge" style="background:var(--orange-light);color:var(--orange);font-size:10px">PROD</span>`
+              }
+              <i class="ti ti-chevron-right recent-arrow"></i>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`).join('')}
+  </div>`;
 }
 
 function renderHome() {
@@ -1030,6 +1131,158 @@ function renderHome() {
 }
 
 
+/* ── SUPABASE ── */
+
+async function deleteRecipe(id) {
+  if (!confirm('Eliminare questa ricetta? L\'operazione non è reversibile.')) return;
+  // Remove from Supabase
+  try {
+    const SB_URL = '/api/chat';
+    await fetch(SB_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ supabaseAction: 'delete', table: 'recipes', id })
+    });
+  } catch(e) { console.error('Delete error:', e); }
+  // Remove from state
+  S.recipes = S.recipes.filter(r => r.id !== id);
+  if (S.selectedId === id) {
+    S.selectedId = S.recipes[0]?.id || null;
+    S.lastOpenedId = S.selectedId;
+  }
+  toast('Ricetta eliminata', 'ti-trash');
+  render();
+}
+
+async function saveRecipeToSupabase(recipe) {
+  try {
+    const variants = recipe.labVersions.map((lv, idx) => ({
+      id: lv.id, recipe_id: recipe.id,
+      name: lv.label, label: lv.label, note: lv.note || '',
+      status: 'lab',
+      portions_count: lv.portionsCount,
+      grams_per_portion: lv.gramsPerPortion
+    }));
+    recipe.validatedVariants.forEach(vv => {
+      variants.push({
+        id: vv.id, recipe_id: recipe.id,
+        name: vv.name, label: vv.name, note: '',
+        status: 'validated',
+        portions_count: vv.portionsCount,
+        grams_per_portion: vv.gramsPerPortion,
+        validated_at: new Date().toISOString()
+      });
+    });
+    const allIngredients = [];
+    [...recipe.labVersions, ...recipe.validatedVariants].forEach(v => {
+      (v.ingredients || []).forEach((ing, idx) => {
+        // Usa ID univoco basato su variant_id + sort_order per evitare collisioni
+        const uniqueId = v.id + '_ing_' + idx;
+        allIngredients.push({
+          id: uniqueId, variant_id: v.id,
+          name: ing.name, qty: parseFloat(ing.qty) || 0, unit: ing.unit || 'g',
+          is_sub_recipe: ing.isSubRecipe || false,
+          sub_recipe_id: ing.subRecipeId || null,
+          sort_order: idx,
+          is_group_label: ing.isGroupLabel || false,
+          group_recipe_id: ing.groupRecipeId || null,
+          group_of: ing.groupOf || null
+        });
+      });
+    });
+    const recipeData = {
+      id: recipe.id, name: recipe.name,
+      category: recipe.category, department: recipe.department || 'Cucina',
+      parent_recipe_id: recipe.parentRecipeId || null,
+      production_variant_id: recipe.productionVariantId || null
+    };
+    await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        supabaseAction: 'save',
+        data: { recipe: recipeData, variants, ingredients: allIngredients }
+      })
+    });
+  } catch(e) {
+    console.error('Supabase save error:', e);
+  }
+}
+
+async function loadFromSupabase() {
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ supabaseAction: 'load' })
+    });
+    const data = await res.json();
+    if (!data.recipes || !Array.isArray(data.recipes)) return false;
+    if (data.recipes.length === 0) return true; // DB vuoto, ok
+
+    // Ricostruisci S.recipes dall'array piatto
+    const recipes = data.recipes.map(r => {
+      const rVariants = (data.variants || []).filter(v => v.recipe_id === r.id);
+      const labVersions = rVariants
+        .filter(v => v.status === 'lab')
+        .map(v => ({
+          id: v.id, label: v.label || v.name || 'Versione 1', note: v.note || '',
+          portionsCount: v.portions_count || 4,
+          gramsPerPortion: parseFloat(v.grams_per_portion) || 200,
+          ingredients: (data.ingredients || [])
+            .filter(i => i.variant_id === v.id)
+            .sort((a,b) => a.sort_order - b.sort_order)
+            .map(i => ({
+              id: i.id, name: i.name, qty: parseFloat(i.qty) || 0, unit: i.unit || 'g',
+              isSubRecipe: i.is_sub_recipe || false,
+              subRecipeId: i.sub_recipe_id || null,
+              isGroupLabel: i.is_group_label || false,
+              groupRecipeId: i.group_recipe_id || null,
+              groupOf: i.group_of || null
+            }))
+        }));
+
+      const validatedVariants = rVariants
+        .filter(v => v.status === 'validated')
+        .map(v => ({
+          id: v.id, name: v.name || v.label || 'Variante',
+          validatedAt: v.validated_at ? new Date(v.validated_at).toLocaleDateString('it-IT') : '',
+          portionsCount: v.portions_count || 4,
+          gramsPerPortion: parseFloat(v.grams_per_portion) || 200,
+          ingredients: (data.ingredients || [])
+            .filter(i => i.variant_id === v.id)
+            .sort((a,b) => a.sort_order - b.sort_order)
+            .map(i => ({
+              id: i.id, name: i.name, qty: parseFloat(i.qty) || 0, unit: i.unit || 'g',
+              isSubRecipe: i.is_sub_recipe || false,
+              subRecipeId: i.sub_recipe_id || null
+            }))
+        }));
+
+      return {
+        id: r.id, name: r.name, category: r.category || 'Altro',
+        department: r.department || 'Cucina',
+        parentRecipeId: r.parent_recipe_id || null,
+        productionVariantId: r.production_variant_id || null,
+        validatedVariants,
+        labVersions: labVersions.length > 0 ? labVersions : [{
+          id: 'v_default_'+r.id, label: 'Versione 1', note: '',
+          portionsCount: 4, gramsPerPortion: 200, ingredients: []
+        }],
+        currentLabIdx: 0
+      };
+    });
+
+    S.recipes = recipes;
+    if (recipes.length > 0) S.selectedId = recipes[0].id;
+    return true;
+  } catch(e) {
+    console.error('Supabase load error:', e);
+    return false;
+  }
+}
+
+
 async function deleteRecipe(id) {
   if (!confirm('Eliminare questa ricetta?')) return;
   try {
@@ -1043,6 +1296,7 @@ async function deleteRecipe(id) {
   if (S.selectedId === id) {
     S.selectedId = S.recipes[0] ? S.recipes[0].id : null;
     S.lastOpenedId = S.selectedId;
+    S.view = S.recipes.length > 0 ? 'home' : 'load';
   }
   toast('Ricetta eliminata', 'ti-trash');
   render();
@@ -1088,6 +1342,8 @@ function render(){
 
   let mainContent = '';
   if (S.view==='home') { mainContent = renderHome(); }
+  else if (S.view==='recipes-lab') { mainContent = renderRecipesList('lab'); }
+  else if (S.view==='recipes-prod') { mainContent = renderRecipesList('produzione'); }
   else if (S.view==='load') { mainContent = renderLoad(); }
   else if (recipe) { mainContent = renderRecipe(recipe); }
   else { mainContent = '<div class="empty"><i class="ti ti-chef-hat"></i><h3>Seleziona una ricetta</h3></div>'; }
@@ -1312,6 +1568,7 @@ function renderRecipe(recipe){
     <div style="margin-bottom:14px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <div class="recipe-name">${recipe.name}</div>
+        <button onclick="deleteRecipe('${recipe.id}')" title="Elimina" style="background:none;border:none;cursor:pointer;color:#ccc;font-size:14px;padding:2px 5px;border-radius:6px;transition:color 0.12s" onmouseover="this.style.color='#c0392b'" onmouseout="this.style.color='#ccc'"><i class="ti ti-trash"></i></button>
         ${isLab?'<span class="badge badge-orange"><i class="ti ti-flask" style="font-size:10px;margin-right:2px"></i>LAB</span>':''}
         ${prodV?`<span class="badge" style="background:var(--sage-light);color:var(--sage)">Prod: ${prodV.name}</span>`:''}
       </div>
@@ -1469,14 +1726,12 @@ function bind(){
   });
   if(homeCarica) homeCarica.addEventListener('click', () => { S.view='load'; S.loadPreview=null; render(); });
   if(homeLab) homeLab.addEventListener('click', () => {
-    const rid = S.lastOpenedId || (S.recipes[0]?.id);
-    if(rid) { S.selectedId=rid; S.view='recipe'; S.mode='lab'; S.aiSugg=null; render(); }
-    else { S.view='load'; S.loadPreview=null; render(); }
+    if(S.recipes.length === 0) { S.view='load'; S.loadPreview=null; render(); return; }
+    S.view='recipes-lab'; render();
   });
   if(homeProd) homeProd.addEventListener('click', () => {
-    const rid = S.lastOpenedId || (S.recipes[0]?.id);
-    if(rid) { S.selectedId=rid; S.view='recipe'; S.mode='produzione'; render(); }
-    else { S.view='load'; S.loadPreview=null; render(); }
+    if(S.recipes.length === 0) { S.view='load'; S.loadPreview=null; render(); return; }
+    S.view='recipes-prod'; render();
   });
   if(homeAllRecipes) homeAllRecipes.addEventListener('click', () => {
     const rid = S.recipes[0]?.id;
@@ -1589,6 +1844,15 @@ function bind(){
   document.querySelectorAll('[data-ing-unit]').forEach(el=>el.addEventListener('change',e=>onIngUnit(e.target.dataset.recipe,e.target.dataset.ingUnit,e.target.value)));
   document.querySelectorAll('.rm-ing-btn[data-rm-ing]').forEach(el=>el.addEventListener('click',()=>onRmIng(el.dataset.recipe,el.dataset.rmIng)));
   document.querySelectorAll('[data-set-prod]').forEach(el=>el.addEventListener('click',()=>setProd(el.dataset.recipe,el.dataset.setProd)));
+
+  // RECIPE LIST PICKS
+  document.querySelectorAll('[data-pick-recipe]').forEach(el=>el.addEventListener('click',()=>{
+    const rid = el.dataset.pickRecipe;
+    const mode = el.dataset.pickMode;
+    S.selectedId=rid; S.lastOpenedId=rid; S.view='recipe'; S.mode=mode; S.aiSugg=null; render();
+  }));
+  const btnBackList = document.getElementById('btn-back-list');
+  if(btnBackList) btnBackList.addEventListener('click',()=>{ S.view='home'; render(); });
   document.querySelectorAll('[data-go-lab-from-variant]').forEach(el=>el.addEventListener('click',()=>{
     S.selectedId=el.dataset.goLabFromVariant; S.selectedVariantId=null; S.mode='lab'; S.view='recipe'; render();
   }));
@@ -1634,7 +1898,17 @@ function bind(){
   }
 }
 
-render();
+// Load from Supabase on startup (solo su Vercel, non in locale)
+if (window.location.protocol !== 'file:') {
+  loadFromSupabase().then(loaded => {
+    if (loaded) {
+      S.view = S.recipes.length > 0 ? 'home' : 'load';
+    }
+    render();
+  });
+} else {
+  render();
+}
 </script>
 </body>
 </html>
