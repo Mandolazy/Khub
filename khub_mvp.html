@@ -1134,11 +1134,10 @@ function renderHome() {
 /* ── SUPABASE ── */
 async function saveRecipeToSupabase(recipe) {
   try {
-    const v = curLab(recipe);
     const variants = recipe.labVersions.map((lv, idx) => ({
       id: lv.id, recipe_id: recipe.id,
-      name: lv.label, label: lv.label, note: lv.note,
-      status: idx === recipe.currentLabIdx ? 'lab' : 'lab',
+      name: lv.label, label: lv.label, note: lv.note || '',
+      status: 'lab',
       portions_count: lv.portionsCount,
       grams_per_portion: lv.gramsPerPortion
     }));
@@ -1155,9 +1154,11 @@ async function saveRecipeToSupabase(recipe) {
     const allIngredients = [];
     [...recipe.labVersions, ...recipe.validatedVariants].forEach(v => {
       (v.ingredients || []).forEach((ing, idx) => {
+        // Usa ID univoco basato su variant_id + sort_order per evitare collisioni
+        const uniqueId = v.id + '_ing_' + idx;
         allIngredients.push({
-          id: ing.id, variant_id: v.id,
-          name: ing.name, qty: ing.qty || 0, unit: ing.unit || 'g',
+          id: uniqueId, variant_id: v.id,
+          name: ing.name, qty: parseFloat(ing.qty) || 0, unit: ing.unit || 'g',
           is_sub_recipe: ing.isSubRecipe || false,
           sub_recipe_id: ing.subRecipeId || null,
           sort_order: idx,
@@ -1194,7 +1195,8 @@ async function loadFromSupabase() {
       body: JSON.stringify({ supabaseAction: 'load' })
     });
     const data = await res.json();
-    if (!data.recipes || !Array.isArray(data.recipes) || data.recipes.length === 0) return false;
+    if (!data.recipes || !Array.isArray(data.recipes)) return false;
+    if (data.recipes.length === 0) return true; // DB vuoto, ok
 
     // Ricostruisci S.recipes dall'array piatto
     const recipes = data.recipes.map(r => {
