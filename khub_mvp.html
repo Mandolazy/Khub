@@ -1029,6 +1029,25 @@ function renderHome() {
   </div>`;
 }
 
+
+async function deleteRecipe(id) {
+  if (!confirm('Eliminare questa ricetta?')) return;
+  try {
+    await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ supabaseAction: 'delete', table: 'recipes', id })
+    });
+  } catch(e) { console.error('Delete error:', e); }
+  S.recipes = S.recipes.filter(r => r.id !== id);
+  if (S.selectedId === id) {
+    S.selectedId = S.recipes[0] ? S.recipes[0].id : null;
+    S.lastOpenedId = S.selectedId;
+  }
+  toast('Ricetta eliminata', 'ti-trash');
+  render();
+}
+
 function render(){
   const app=document.getElementById('app'),recipe=R(S.selectedId);
   const cats={Basi:[],Dolci:[],Salato:[],Altro:[]};
