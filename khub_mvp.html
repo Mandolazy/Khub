@@ -658,112 +658,143 @@ async function extractFromSource(type, payload) {
 
 function savePreview() {
   const p=S.loadPreview; if(!p) return;
-  const newId='r'+Date.now();
   const ts = Date.now();
   const recipesToAdd = [];
-  const recipeUpdates = []; // { id, newLabVersion }
+  const recipeUpdates = []; // ricette esistenti a cui aggiungere versione LAB
 
-  // Helper: cerca ricetta esistente per nome (case-insensitive, fuzzy)
-  function findExistingRecipe(name) {
+  // Helper: cerca ricetta esistente per nome
+  function findExisting(name) {
     const nl = name.toLowerCase().trim();
-    return S.recipes.find(r => r.name.toLowerCase().trim() === nl ||
-      r.name.toLowerCase().includes(nl) || nl.includes(r.name.toLowerCase()));
+    return S.recipes.find(r =>
+      r.name.toLowerCase().trim() === nl ||
+      r.name.toLowerCase().includes(nl) ||
+      nl.includes(r.name.toLowerCase())
+    );
   }
 
-  // 1. Processa sub-ricette esplicite dall'AI (subRecipes array)
-  if (p.subRecipes && p.subRecipes.length) {
-    p.subRecipes.forEach((sr, idx) => {
-      const srIngs = (sr.ingredients||[]).map((i,j) => ({
-        id:'sri'+idx+'_'+j, name:i.name, qty:parseFloat(i.qty)||0,
-        unit:i.unit||'g', isSubRecipe:false, subRecipeId:null
-      }));
-      const srTot = srIngs.reduce((s,i)=>s+(parseFloat(i.qty)||0),0);
-      const newLabVersion = {
-        id:'lv'+ts+'_'+idx, label:'Versione 1',
-        note:'Da '+p.name,
-        portionsCount:1, gramsPerPortion:srTot||500,
-        ingredients: srIngs
-      };
+  // Helper: crea nuova versione LAB da ingredienti
+  function makeLabVersion(name, ings, idx2) {
+    return {
+      id: 'lv'+ts+'_'+idx2,
+      label: 'Versione ' + (Date.now()%1000),
+      note: 'Da ' + p.name,
+      portionsCount: 1,
+      gramsPerPortion: ings.reduce((s,i)=>s+(parseFloat(i.qty)||0),0) || 500,
+      ingredients: ings
+    };
+  }
 
-      // Cerca se esiste già una ricetta con questo nome
-      const existing = findExistingRecipe(sr.name);
-      let targetId;
+  // 1. Processa ricetta madre — cerca se esiste già
+  const existingMain = findExisting(p.name);
+  let mainId;
 
-      if (existing) {
-        // Aggiunge come nuova versione LAB alla ricetta esistente
-        targetId = existing.id;
-        recipeUpdates.push({ id: existing.id, newLabVersion });
-      } else {
-        // Crea nuova ricetta
-        targetId = 'r'+(ts+idx+1);
-        recipesToAdd.push({
-          id: targetId, name: sr.name, category:'Basi', department:'Cucina',
-          parentRecipeId: newId, productionVariantId:null, validatedVariants:[],
-          currentLabIdx:0, labVersions:[newLabVersion]
-        });
-      }
-
-      // Rimuovi eventuale ingrediente aggregato dalla madre (es "Pasta frolla 300g")
-      p.ingredients = p.ingredients.filter(i =>
-        !i.name.toLowerCase().includes(sr.name.toLowerCase()) &&
-        !sr.name.toLowerCase().includes(i.name.toLowerCase())
-      );
-
-      // Aggiungi gli ingredienti reali della sub-ricetta nella madre con gruppo
-      const groupLabel = {
-        id:'grp'+idx+'_label',
-        name:'── ' + sr.name + ' ──',
-        qty:0, unit:'', isSubRecipe:false, subRecipeId:null,
-        isGroupLabel:true, groupRecipeId:targetId
-      };
-      const expandedIngs = srIngs.map((i,j) => ({
-        ...i,
-        id:'exp'+idx+'_'+j,
-        groupOf:targetId
-      }));
-      p.ingredients.push(groupLabel, ...expandedIngs);
+  if (existingMain) {
+    // Aggiunge versione LAB alla ricetta esistente
+    mainId = existingMain.id;
+    const newLab = {
+      id: 'lv'+ts+'_main',
+      label: 'Versione ' + (existingMain.labVersions.length + 1),
+      note: 'Importata',
+      portionsCount: parseInt(p.portionsCount)||4,
+      gramsPerPortion: parseFloat(p.gramsPerPortion)||200,
+      ingredients: p.ingredients.map((i,j) => ({...i, id:'pi'+ts+'_'+j}))
+    };
+    recipeUpdates.push({ id: mainId, newLabVersion: newLab });
+  } else {
+    // Crea nuova ricetta madre
+    mainId = 'r'+ts;
+    recipesToAdd.push({
+      id: mainId, name: p.name, category: p.category||'Altro', department:'Cucina',
+      productionVariantId:null, validatedVariants:[], currentLabIdx:0,
+      labVersions:[{
+        id:'lv'+ts+'_main', label:'Versione 1', note:'Importata',
+        portionsCount:parseInt(p.portionsCount)||4,
+        gramsPerPortion:parseFloat(p.gramsPerPortion)||200,
+        ingredients:p.ingredients.map((i,j)=>({...i, id:'pi'+ts+'_'+j}))
+      }]
     });
   }
 
-  // 2. Sub-ricette rilevate da keyword negli ingredienti (fallback)
-  p.ingredients.forEach((ing, idx) => {
-    if (ing.isSubRecipe && !ing.subRecipeId) {
-      const existing = findExistingRecipe(ing.name);
-      if (existing) {
-        ing.subRecipeId = existing.id;
-        // Aggiunge versione LAB vuota con placeholder
-        recipeUpdates.push({
-          id: existing.id,
-          newLabVersion: {
-            id:'lv'+ts+'k'+idx, label:'Versione 1', note:'Da '+p.name,
-            portionsCount:1, gramsPerPortion:parseFloat(ing.qty)||500,
-            ingredients:[
-              {id:'si1',name:'Ingrediente 1',qty:200,unit:'g',isSubRecipe:false},
-              {id:'si2',name:'Ingrediente 2',qty:150,unit:'g',isSubRecipe:false}
-            ]
-          }
-        });
+  // 2. Processa sub-ricette esplicite dall'AI
+  if (p.subRecipes && p.subRecipes.length) {
+    p.subRecipes.forEach((sr, idx2) => {
+      const srIngs = (sr.ingredients||[]).map((i,j) => ({
+        id:'sri'+ts+'_'+idx2+'_'+j, name:i.name,
+        qty:parseFloat(i.qty)||0, unit:i.unit||'g',
+        isSubRecipe:false, subRecipeId:null
+      }));
+      const existingSR = findExisting(sr.name);
+      let targetId;
+
+      if (existingSR) {
+        // Aggiunge versione LAB alla ricetta esistente
+        targetId = existingSR.id;
+        const newLab = makeLabVersion(sr.name, srIngs, idx2);
+        newLab.label = 'Versione ' + (existingSR.labVersions.length + 1);
+        recipeUpdates.push({ id: targetId, newLabVersion: newLab });
       } else {
-        const sid = 'r'+(ts+100+idx);
-        ing.subRecipeId = sid;
+        // Crea nuova sub-ricetta
+        targetId = 'r'+(ts+idx2+1);
         recipesToAdd.push({
-          id:sid, name:ing.name.charAt(0).toUpperCase()+ing.name.slice(1),
-          category:'Basi', department:'Cucina', parentRecipeId:newId,
-          productionVariantId:null, validatedVariants:[], currentLabIdx:0,
-          labVersions:[{
-            id:'v1', label:'Versione 1', note:'Da '+p.name,
-            portionsCount:1, gramsPerPortion:parseFloat(ing.qty)||500,
-            ingredients:[
-              {id:'si1',name:'Ingrediente 1',qty:200,unit:'g',isSubRecipe:false},
-              {id:'si2',name:'Ingrediente 2',qty:150,unit:'g',isSubRecipe:false}
-            ]
-          }]
+          id:targetId, name:sr.name, category:'Basi', department:'Cucina',
+          parentRecipeId:mainId, productionVariantId:null, validatedVariants:[],
+          currentLabIdx:0, labVersions:[makeLabVersion(sr.name, srIngs, idx2)]
         });
       }
-    }
-  });
 
-  // 3. Applica aggiornamenti alle ricette esistenti (nuova versione LAB)
+      // Aggiorna ingrediente nella ricetta madre
+      const getMainLab = () => {
+        const main = existingMain || recipesToAdd.find(r=>r.id===mainId);
+        if (!main) return null;
+        return main.labVersions[existingMain ? recipeUpdates.find(u=>u.id===mainId) ? main.labVersions.length : main.currentLabIdx : 0];
+      };
+      const mainLab = getMainLab();
+      if (mainLab) {
+        const existing_ing = mainLab.ingredients.find(i =>
+          i.name.toLowerCase().includes(sr.name.toLowerCase()) ||
+          sr.name.toLowerCase().includes(i.name.toLowerCase())
+        );
+        if (existing_ing) { existing_ing.isSubRecipe=true; existing_ing.subRecipeId=targetId; }
+      }
+    });
+  }
+
+  // 3. Sub-ricette da keyword negli ingredienti (fallback)
+  const mainLabToCheck = existingMain
+    ? (recipeUpdates.find(u=>u.id===mainId)?.newLabVersion)
+    : recipesToAdd.find(r=>r.id===mainId)?.labVersions[0];
+
+  if (mainLabToCheck) {
+    mainLabToCheck.ingredients.forEach((ing, idx2) => {
+      if (isSub(ing.name) && !ing.subRecipeId) {
+        const existingSR = findExisting(ing.name);
+        if (existingSR) {
+          ing.subRecipeId = existingSR.id;
+          const newLab = makeLabVersion(ing.name, [
+            {id:'si1',name:'Ingrediente 1',qty:200,unit:'g',isSubRecipe:false},
+            {id:'si2',name:'Ingrediente 2',qty:150,unit:'g',isSubRecipe:false}
+          ], idx2+100);
+          newLab.label = 'Versione ' + (existingSR.labVersions.length + 1);
+          recipeUpdates.push({ id: existingSR.id, newLabVersion: newLab });
+        } else {
+          const sid = 'r'+(ts+100+idx2);
+          ing.subRecipeId = sid;
+          ing.isSubRecipe = true;
+          recipesToAdd.push({
+            id:sid, name:ing.name.charAt(0).toUpperCase()+ing.name.slice(1),
+            category:'Basi', department:'Cucina', parentRecipeId:mainId,
+            productionVariantId:null, validatedVariants:[], currentLabIdx:0,
+            labVersions:[makeLabVersion(ing.name,[
+              {id:'si1',name:'Ingrediente 1',qty:200,unit:'g',isSubRecipe:false},
+              {id:'si2',name:'Ingrediente 2',qty:150,unit:'g',isSubRecipe:false}
+            ], idx2+100)]
+          });
+        }
+      }
+    });
+  }
+
+  // 4. Applica aggiornamenti alle ricette esistenti
   if (recipeUpdates.length) {
     S.recipes = S.recipes.map(r => {
       const upd = recipeUpdates.find(u => u.id === r.id);
@@ -773,38 +804,42 @@ function savePreview() {
     });
   }
 
-  // 4. Salva ricetta madre + nuove sub-ricette
-  const mainRecipe = {
-    id:newId, name:p.name, category:p.category||'Altro', department:'Cucina',
-    productionVariantId:null, validatedVariants:[], currentLabIdx:0,
-    labVersions:[{
-      id:'v1', label:'Versione 1', note:'Importata',
-      portionsCount:parseInt(p.portionsCount)||4,
-      gramsPerPortion:parseFloat(p.gramsPerPortion)||200,
-      ingredients:p.ingredients
-    }]
-  };
-  S.recipes = [...S.recipes, mainRecipe, ...recipesToAdd];
+  // 5. Aggiungi nuove ricette
+  S.recipes = [...S.recipes, ...recipesToAdd];
 
-  S.selectedId=newId; S.lastOpenedId=newId; S.view='recipe'; S.loadPreview=null;
-  // Save to Supabase
+  // 6. Naviga alla ricetta principale
+  const finalMainId = existingMain ? existingMain.id : mainId;
+  S.selectedId=finalMainId; S.lastOpenedId=finalMainId;
+  S.view='recipe'; S.loadPreview=null;
+  S.loadImageB64=null; S.loadImagePreviewUrl=null; S.loadUrl=''; S.loadText='';
+
+  // 7. Salva su Supabase
   setTimeout(() => {
-    const allNewIds = [newId, ...recipesToAdd.map(r=>r.id)];
-    allNewIds.forEach(rid => {
+    const allIds = [finalMainId, ...recipesToAdd.map(r=>r.id)];
+    // Salva anche le ricette aggiornate
+    recipeUpdates.forEach(u => {
+      const r = S.recipes.find(x=>x.id===u.id);
+      if(r) saveRecipeToSupabase(r);
+    });
+    allIds.forEach(rid => {
       const r = S.recipes.find(x=>x.id===rid);
       if(r) saveRecipeToSupabase(r);
     });
-  }, 200);
-  S.loadImageB64=null; S.loadImagePreviewUrl=null; S.loadUrl=''; S.loadText='';
+  }, 300);
 
-  const totalSubs = recipesToAdd.length + recipeUpdates.length;
-  if (recipeUpdates.length) {
-    const names = recipeUpdates.map(u => S.recipes.find(r=>r.id===u.id)?.name||'').filter(Boolean);
-    toast(`"${p.name}" importata — nuova versione aggiunta a: ${names.join(', ')}`, 'ti-sparkles');
-  } else if (recipesToAdd.length) {
-    toast(`"${p.name}" importata + ${recipesToAdd.length} sub-ricett${recipesToAdd.length>1?'e':'a'} creat${recipesToAdd.length>1?'e':'a'}`, 'ti-sparkles');
+  // 8. Toast
+  const subCount = recipesToAdd.filter(r=>r.id!==mainId).length;
+  const updCount = recipeUpdates.filter(u=>u.id!==mainId).length;
+
+  if (existingMain) {
+    toast(`Nuova versione aggiunta a "${existingMain.name}"`, 'ti-plus');
+  } else if (subCount > 0) {
+    toast(`"${p.name}" importata + ${subCount} sub-ricett${subCount>1?'e':'a'}`, 'ti-sparkles');
   } else {
-    toast(`"${p.name}" importata con successo`, 'ti-circle-check');
+    toast(`"${p.name}" importata`, 'ti-circle-check');
+  }
+  if (updCount > 0) {
+    setTimeout(() => toast(`${updCount} sub-ricett${updCount>1?'e':'a'} aggiornate con nuova versione`, 'ti-git-branch'), 1500);
   }
 }
 
