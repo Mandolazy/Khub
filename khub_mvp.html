@@ -450,6 +450,12 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* INGREDIENT GROUP LABEL */
+.recipe-variants { display: flex; flex-direction: column; gap: 1px; margin-bottom: 4px; }
+.variant-sidebar-btn { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 9px 5px 22px; border: none; border-radius: var(--r-sm); background: transparent; font-family: inherit; font-size: 11px; color: var(--dark); cursor: pointer; text-align: left; transition: background 0.1s; }
+.variant-sidebar-btn:hover { background: var(--sage-light); }
+.variant-sidebar-btn.active { background: var(--orange-light); color: var(--orange); font-weight: 500; }
+.variant-sidebar-btn.prod-dot::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--orange); flex-shrink: 0; margin-right: 2px; }
+.variant-sidebar-btn.other-dot::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--sage); flex-shrink: 0; margin-right: 2px; }
 .ing-group-label {
   background: var(--sage-light);
   font-size: 11px;
@@ -574,9 +580,9 @@ function onValidate(id){
   S.pendingVariantName='';S.mode='produzione';
   // Save updated recipe to Supabase
   setTimeout(() => {
-    const updatedRecipe = R(id);
+    const updatedRecipe = S.recipes.find(r => r.id === id);
     if(updatedRecipe) saveRecipeToSupabase(updatedRecipe);
-  }, 100);
+  }, 150);
   toast(`"${name}" validata`,'ti-circle-check');
 }
 function setProd(rid,vid){upRec(rid,r=>({...r,productionVariantId:vid}));toast('Versione di produzione aggiornata','ti-settings-2');}
@@ -1190,11 +1196,12 @@ async function saveRecipeToSupabase(recipe) {
         });
       });
     });
+    var freshRec = S.recipes.find(function(r){ return r.id === recipe.id; }) || recipe;
     const recipeData = {
-      id: recipe.id, name: recipe.name,
-      category: recipe.category, department: recipe.department || 'Cucina',
-      parent_recipe_id: recipe.parentRecipeId || null,
-      production_variant_id: recipe.productionVariantId || null
+      id: freshRec.id, name: freshRec.name,
+      category: freshRec.category, department: freshRec.department || 'Cucina',
+      parent_recipe_id: freshRec.parentRecipeId || null,
+      production_variant_id: freshRec.productionVariantId || null
     };
     await fetch('/api/chat', {
       method: 'POST',
@@ -1527,6 +1534,29 @@ function onVariantGpp(recipeId, variantId, newGpp) {
   render();
 }
 
+function deleteVariant(recipeId, variantId) {
+  var recipe = R(recipeId);
+  var vv = recipe && recipe.validatedVariants.find(function(v){ return v.id === variantId; });
+  if (!vv) return;
+  if (!confirm('Eliminare la variante "' + vv.name + '"? L\'operazione non è reversibile.')) return;
+  upRec(recipeId, function(r) {
+    var newVariants = r.validatedVariants.filter(function(v){ return v.id !== variantId; });
+    var newProdId = r.productionVariantId === variantId
+      ? (newVariants.length > 0 ? newVariants[newVariants.length - 1].id : null)
+      : r.productionVariantId;
+    return Object.assign({}, r, { validatedVariants: newVariants, productionVariantId: newProdId });
+  });
+  if (S.selectedVariantId === variantId) S.selectedVariantId = null;
+  setTimeout(function() {
+    var updated = S.recipes.find(function(r){ return r.id === recipeId; });
+    if (updated) saveRecipeToSupabase(updated);
+    fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ supabaseAction: 'delete', table: 'variants', id: variantId })
+    }).catch(function(e){ console.error('Delete variant error:', e); });
+  }, 150);
+  toast('Variante "' + vv.name + '" eliminata', 'ti-trash');
+}
+
 function renderVariantDetail(recipe, vv) {
   const tot = vv.ingredients.reduce((s,i)=>s+(parseFloat(i.qty)||0),0);
   const isProd = vv.id === recipe.productionVariantId;
@@ -1549,6 +1579,7 @@ function renderVariantDetail(recipe, vv) {
         <button class="add-ing-btn" style="padding:7px 14px" data-go-lab-from-variant="${recipe.id}">
           <i class="ti ti-flask"></i> Testa nel LAB
         </button>
+        <button onclick="deleteVariant('${recipe.id}','${vv.id}')" title="Elimina variante" style="padding:7px 10px;background:transparent;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;color:var(--mid);font-size:13px;transition:all 0.12s" onmouseover="this.style.color='#c0392b';this.style.borderColor='#c0392b'" onmouseout="this.style.color='var(--mid)';this.style.borderColor='var(--border)'"><i class="ti ti-trash"></i></button>
       </div>
     </div>
 
@@ -1684,6 +1715,7 @@ function renderRecipe(recipe){
         <div class="vc-dot ${isProd?'production':''}"></div>
         <div style="flex:1"><div class="vc-name">${vv.name}</div><div class="vc-meta">${vv.portionsCount} porzioni · ${vv.gramsPerPortion}g/porz · ${vv.validatedAt}</div></div>
         ${isProd?'<span class="vc-prod-badge">Produzione</span>':`<button class="set-prod-btn" data-set-prod="${vv.id}" data-recipe="${recipe.id}">→ Produzione</button>`}
+        <button onclick="deleteVariant('${recipe.id}','${vv.id}')" title="Elimina" style="background:none;border:none;cursor:pointer;color:#ccc;font-size:13px;padding:2px 5px;border-radius:6px;transition:color 0.12s" onmouseover="this.style.color='#c0392b'" onmouseout="this.style.color='#ccc'"><i class="ti ti-trash"></i></button>
       </div>`;}).join('')}
     </div>
   </div>`:''}
