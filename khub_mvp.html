@@ -1483,6 +1483,50 @@ function renderPreview(){
 }
 
 
+
+function onVariantIngQty(recipeId, variantId, ingIdx, newQty) {
+  const q = parseFloat(newQty)||0;
+  S.recipes = S.recipes.map(r => {
+    if (r.id !== recipeId) return r;
+    const variants = r.validatedVariants.map(vv => {
+      if (vv.id !== variantId) return vv;
+      const ratio = q / (vv.ingredients[ingIdx].qty||1);
+      const ings = vv.ingredients.map((i,idx) => idx===ingIdx ? {...i,qty:q} : {...i,qty:parseFloat((i.qty*ratio).toFixed(2))});
+      const tot = ings.reduce((s,i)=>s+(parseFloat(i.qty)||0),0);
+      return {...vv, ingredients:ings, gramsPerPortion: vv.portionsCount>0 ? parseFloat((tot/vv.portionsCount).toFixed(1)) : vv.gramsPerPortion};
+    });
+    return {...r, validatedVariants:variants};
+  });
+  render();
+}
+function onVariantPortions(recipeId, variantId, newPortions) {
+  const n = parseInt(newPortions)||1;
+  S.recipes = S.recipes.map(r => {
+    if (r.id !== recipeId) return r;
+    const variants = r.validatedVariants.map(vv => {
+      if (vv.id !== variantId) return vv;
+      const tot = vv.ingredients.reduce((s,i)=>s+(parseFloat(i.qty)||0),0);
+      return {...vv, portionsCount:n, gramsPerPortion: n>0 ? parseFloat((tot/n).toFixed(1)) : vv.gramsPerPortion};
+    });
+    return {...r, validatedVariants:variants};
+  });
+  render();
+}
+function onVariantGpp(recipeId, variantId, newGpp) {
+  const g = parseFloat(newGpp)||1;
+  S.recipes = S.recipes.map(r => {
+    if (r.id !== recipeId) return r;
+    const variants = r.validatedVariants.map(vv => {
+      if (vv.id !== variantId) return vv;
+      const oldTot = vv.ingredients.reduce((s,i)=>s+(parseFloat(i.qty)||0),0);
+      const ratio = oldTot>0 ? (g*vv.portionsCount)/oldTot : 1;
+      return {...vv, gramsPerPortion:g, ingredients:vv.ingredients.map(i=>({...i,qty:parseFloat((i.qty*ratio).toFixed(2))}))};
+    });
+    return {...r, validatedVariants:variants};
+  });
+  render();
+}
+
 function renderVariantDetail(recipe, vv) {
   const tot = vv.ingredients.reduce((s,i)=>s+(parseFloat(i.qty)||0),0);
   const isProd = vv.id === recipe.productionVariantId;
@@ -1508,10 +1552,10 @@ function renderVariantDetail(recipe, vv) {
       </div>
     </div>
 
-    <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+    <div class="scaling-row">
+      <div class="field-group"><div class="field-label">Porzioni</div><input class="num-input" id="vd-portions" data-vd-recipe="${recipe.id}" data-vd-variant="${vv.id}" type="number" min="1" value="${vv.portionsCount}"></div>
+      <div class="field-group"><div class="field-label">g / porzione</div><input class="num-input" id="vd-gpp" data-vd-recipe="${recipe.id}" data-vd-variant="${vv.id}" type="number" min="1" step="0.1" value="${vv.gramsPerPortion}"></div>
       <div class="total-pill"><span class="tp-label">Peso totale</span><span class="tp-val">${Math.round(tot)} g</span></div>
-      <div class="total-pill"><span class="tp-label">Porzioni</span><span class="tp-val">${vv.portionsCount}</span></div>
-      <div class="total-pill"><span class="tp-label">g/porzione</span><span class="tp-val">${vv.gramsPerPortion}</span></div>
     </div>
 
     <div class="card-label"><i class="ti ti-list-details"></i> Ingredienti</div>
@@ -1523,7 +1567,10 @@ function renderVariantDetail(recipe, vv) {
           ${ing.name}
           ${subR?`<button class="nav-link" data-nav="${subR.id}" style="margin-left:6px"><i class="ti ti-arrow-right" style="font-size:9px"></i>${subR.name}</button>`:''}
         </div>
-        <div class="variant-ing-qty">${ing.qty} ${ing.unit}</div>
+        <div style="display:flex;align-items:center;gap:5px">
+          <input class="qty-field" data-vd-ing="${idx}" data-vd-recipe="${recipe.id}" data-vd-variant="${vv.id}" type="number" min="0" step="0.1" value="${ing.qty}" style="width:70px">
+          <span style="font-size:11px;color:var(--mid);font-family:monospace">${ing.unit}</span>
+        </div>
         <div class="variant-pct-wrap">
           <div class="pct-bar-bg"><div class="pct-bar-fill" style="width:${Math.min(pct,100)}%"></div></div>
           <span class="pct-text">${pct.toFixed(1)}%</span>
@@ -1844,6 +1891,14 @@ function bind(){
   document.querySelectorAll('[data-ing-unit]').forEach(el=>el.addEventListener('change',e=>onIngUnit(e.target.dataset.recipe,e.target.dataset.ingUnit,e.target.value)));
   document.querySelectorAll('.rm-ing-btn[data-rm-ing]').forEach(el=>el.addEventListener('click',()=>onRmIng(el.dataset.recipe,el.dataset.rmIng)));
   document.querySelectorAll('[data-set-prod]').forEach(el=>el.addEventListener('click',()=>setProd(el.dataset.recipe,el.dataset.setProd)));
+  const vdP=document.getElementById('vd-portions');
+  const vdG=document.getElementById('vd-gpp');
+  if(vdP) vdP.addEventListener('change',e=>onVariantPortions(e.target.dataset.vdRecipe,e.target.dataset.vdVariant,e.target.value));
+  if(vdG) vdG.addEventListener('change',e=>onVariantGpp(e.target.dataset.vdRecipe,e.target.dataset.vdVariant,e.target.value));
+  document.querySelectorAll('.qty-field[data-vd-ing]').forEach(el=>{
+    el.addEventListener('keydown',e=>{if(e.key==='Enter')e.target.blur();});
+    el.addEventListener('blur',e=>onVariantIngQty(e.target.dataset.vdRecipe,e.target.dataset.vdVariant,parseInt(e.target.dataset.vdIng),e.target.value));
+  });
 
   // RECIPE LIST PICKS
   document.querySelectorAll('[data-pick-recipe]').forEach(el=>el.addEventListener('click',()=>{
