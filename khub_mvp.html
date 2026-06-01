@@ -672,7 +672,7 @@ async function extractFromSource(type, payload) {
     const urlContent = pageText
       ? 'Estrai la ricetta dal seguente testo (fonte: ' + payload + '). Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. Elenca TUTTI gli ingredienti uno per uno con le quantità numeriche esatte nella ricetta principale (ingredients). Se la ricetta contiene preparazioni distinte (es: pasta choux, crema pasticcera, frolla, besciamella, ecc.), elencale anche in subRecipes con i loro ingredienti e passi separati — ma tienile ANCHE in ingredients con le quantità reali. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome ingrediente","qty":250,"unit":"g"}],"subRecipes":[{"name":"Nome Preparazione","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo 1"]}],"steps":["passo 1","passo 2"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl. Includi tutti i passi del procedimento nell\'array steps.\n\nTESTO:\n' + pageText
       : 'Estrai la ricetta da questo URL: ' + payload + '. Usa il nome nell URL per dedurre la ricetta.';
-    messages=[{role:'user',content: urlContent + '}];
+    messages=[{role:'user',content: urlContent}];
   }
 
   try {
