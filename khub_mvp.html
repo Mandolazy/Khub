@@ -681,7 +681,8 @@ async function extractFromSource(type, payload) {
     let text=(data.content||[]).map(c=>c.text||'').join('').trim();
     text=text.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
     const parsed=JSON.parse(text);
-    parsed.ingredients=parsed.ingredients.map((i,idx)=>({...i,id:'pi'+idx,isSubRecipe:isSub(i.name),subRecipeId:null,qty:parseFloat(i.qty)||0,unit:UNITS.includes(i.unit)?i.unit:'g'}));
+    parsed.ingredients=parsed.ingredients.map((i,idx)=>({...i,id:'pi'+idx,isSubRecipe:false,subRecipeId:null,qty:parseFloat(i.qty)||0,unit:UNITS.includes(i.unit)?i.unit:'g'}));
+    parsed.subRecipes = []; // ignora sub-ricette dall'AI
     S.loadPreview=parsed;
   } catch(e) {
     toast('Errore nella lettura. Riprova o usa il testo libero.','ti-alert-circle');
@@ -691,23 +692,15 @@ async function extractFromSource(type, payload) {
 
 function savePreview() {
   const p=S.loadPreview; if(!p) return;
-  // Cerca famiglia simile
-  var similar = findSimilarFamily(p.name);
-  if (similar && similar.recipe) {
-    // Mostra dialog di conferma
-    S.familyDialog = { preview: p, matchedRecipe: similar.recipe };
-    render();
-    return;
-  }
-  // Nessuna famiglia simile — salva come nuova
   doSavePreview(p, null);
-  // (continua in doSavePreview)
 }
 
 function doSavePreview(p, targetFamily) {
   const ts = Date.now();
   const recipesToAdd = [];
-  const recipeUpdates = []; // ricette esistenti a cui aggiungere versione LAB
+  const recipeUpdates = [];
+  // Import sempre piatto: niente sub-ricette automatiche
+  // La struttura famiglie/varianti si costruisce dal LAB dopo la validazione
 
   // Helper: cerca ricetta esistente per nome
   function findExisting(name) {
@@ -764,8 +757,8 @@ function doSavePreview(p, targetFamily) {
     });
   }
 
-  // 2. Processa sub-ricette esplicite dall'AI
-  if (p.subRecipes && p.subRecipes.length) {
+  // Sub-ricette esplicite AI disabilitate — import sempre piatto
+  if (false && p.subRecipes && p.subRecipes.length) {
     p.subRecipes.forEach((sr, idx2) => {
       const srIngs = (sr.ingredients||[]).map((i,j) => ({
         id:'sri'+ts+'_'+idx2+'_'+j, name:i.name,
@@ -808,40 +801,7 @@ function doSavePreview(p, targetFamily) {
     });
   }
 
-  // 3. Sub-ricette da keyword negli ingredienti (fallback)
-  const mainLabToCheck = existingMain
-    ? (recipeUpdates.find(u=>u.id===mainId)?.newLabVersion)
-    : recipesToAdd.find(r=>r.id===mainId)?.labVersions[0];
-
-  if (mainLabToCheck) {
-    mainLabToCheck.ingredients.forEach((ing, idx2) => {
-      if (isSub(ing.name) && !ing.subRecipeId) {
-        const existingSR = findExisting(ing.name);
-        if (existingSR) {
-          ing.subRecipeId = existingSR.id;
-          const newLab = makeLabVersion(ing.name, [
-            {id:'si1',name:'Ingrediente 1',qty:200,unit:'g',isSubRecipe:false},
-            {id:'si2',name:'Ingrediente 2',qty:150,unit:'g',isSubRecipe:false}
-          ], idx2+100);
-          newLab.label = 'Versione ' + (existingSR.labVersions.length + 1);
-          recipeUpdates.push({ id: existingSR.id, newLabVersion: newLab });
-        } else {
-          const sid = 'r'+(ts+100+idx2);
-          ing.subRecipeId = sid;
-          ing.isSubRecipe = true;
-          recipesToAdd.push({
-            id:sid, name:ing.name.charAt(0).toUpperCase()+ing.name.slice(1),
-            category:'Basi', department:'Cucina', parentRecipeId:mainId,
-            productionVariantId:null, validatedVariants:[], currentLabIdx:0,
-            labVersions:[makeLabVersion(ing.name,[
-              {id:'si1',name:'Ingrediente 1',qty:200,unit:'g',isSubRecipe:false},
-              {id:'si2',name:'Ingrediente 2',qty:150,unit:'g',isSubRecipe:false}
-            ], idx2+100)]
-          });
-        }
-      }
-    });
-  }
+  // Sub-ricette da keyword disabilitate — import sempre piatto
 
   // 3b. Se targetFamily: aggiungi versione LAB alla famiglia scelta
   if (targetFamily) {
@@ -1537,7 +1497,6 @@ function renderPreview(){
           <div class="preview-ing-row">
             <div class="preview-ing-name">
               ${ing.name}
-              ${ing.isSubRecipe?'<span class="preview-sub-badge">sub-ricetta</span>':''}
             </div>
             <input class="preview-ing-qty" data-pidx="${idx}" type="number" min="0" step="0.1" value="${ing.qty}">
             <select class="preview-ing-unit" data-pidx="${idx}">
@@ -1553,11 +1512,6 @@ function renderPreview(){
           ${p.steps.map(s=>`<li style="font-size:13px;color:var(--dark);line-height:1.5">${s}</li>`).join('')}
         </ol>`:''}
 
-      ${p.ingredients.some(i=>i.isSubRecipe)?`
-        <div style="margin-top:14px;background:var(--orange-light);border:1px solid var(--orange-border);border-radius:var(--r-sm);padding:9px 13px;font-size:12px;color:var(--orange)">
-          <i class="ti ti-sparkles" style="margin-right:5px"></i>
-          Khub creerà automaticamente le schede per: <strong>${p.ingredients.filter(i=>i.isSubRecipe).map(i=>i.name).join(', ')}</strong>
-        </div>`:''}
 
       <div class="preview-actions">
         <button class="btn-discard" id="btn-discard">Scarta</button>
