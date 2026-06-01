@@ -502,11 +502,38 @@ const UNITS = ['g','ml','kg','l','n','tbsp','tsp','cl'];
 const SUB_KW = ['crema pasticcera','besciamella','pasta frolla','pasta sfoglia','pan di spagna','crema chantilly','crema al burro','ganache','caramello','ragù','brodo','pesto','maionese','coulis','composta','meringa','pasta brisée','pasta choux','crema diplomatica','crema inglese','frangipane','namelaka'];
 const isSub = n => SUB_KW.some(k => n.toLowerCase().includes(k));
 
+// Calcola similarità tra due nomi (0-1)
+function nameSimilarity(a, b) {
+  const na = a.toLowerCase().trim();
+  const nb = b.toLowerCase().trim();
+  if (na === nb) return 1;
+  if (na.includes(nb) || nb.includes(na)) return 0.85;
+  // Parole in comune
+  const wa = na.split(/\s+/).filter(w => w.length > 3);
+  const wb = nb.split(/\s+/).filter(w => w.length > 3);
+  if (wa.length === 0 || wb.length === 0) return 0;
+  const common = wa.filter(w => wb.some(w2 => w2.includes(w) || w.includes(w2)));
+  return common.length / Math.max(wa.length, wb.length);
+}
+
+// Trova la famiglia più simile tra le ricette esistenti
+function findSimilarFamily(name) {
+  var best = null, bestScore = 0;
+  S.recipes.forEach(function(r) {
+    if (r.parentRecipeId) return; // salta sub-ricette
+    var score = nameSimilarity(name, r.name);
+    if (score > bestScore) { bestScore = score; best = r; }
+  });
+  return bestScore >= 0.6 ? { recipe: best, score: bestScore } : null;
+}
+
 let S = {
   view: 'home', // 'home' | 'recipe' | 'load' | 'recipes-lab' | 'recipes-prod'
   mode: 'produzione', selectedId: 'r1', lastOpenedId: null, showModal: false,
   toast: null, toastTimer: null,
   pendingVariantName: '',
+  familyDialog: null, // { preview, matchedRecipe } — dialog conferma famiglia
+
   addIng: { name:'', qty:'', unit:'g' },
   aiMsgs: {}, aiLoading: false, aiSugg: null,
   selectedVariantId: null, expandedRecipes: {},
@@ -664,6 +691,20 @@ async function extractFromSource(type, payload) {
 
 function savePreview() {
   const p=S.loadPreview; if(!p) return;
+  // Cerca famiglia simile
+  var similar = findSimilarFamily(p.name);
+  if (similar && similar.recipe) {
+    // Mostra dialog di conferma
+    S.familyDialog = { preview: p, matchedRecipe: similar.recipe };
+    render();
+    return;
+  }
+  // Nessuna famiglia simile — salva come nuova
+  doSavePreview(p, null);
+  // (continua in doSavePreview)
+}
+
+function doSavePreview(p, targetFamily) {
   const ts = Date.now();
   const recipesToAdd = [];
   const recipeUpdates = []; // ricette esistenti a cui aggiungere versione LAB
@@ -703,7 +744,8 @@ function savePreview() {
       note: 'Importata',
       portionsCount: parseInt(p.portionsCount)||4,
       gramsPerPortion: parseFloat(p.gramsPerPortion)||200,
-      ingredients: p.ingredients.map((i,j) => ({...i, id:'pi'+ts+'_'+j}))
+      ingredients: p.ingredients.map((i,j) => ({...i, id:'pi'+ts+'_'+j})),
+      steps: p.steps || []
     };
     recipeUpdates.push({ id: mainId, newLabVersion: newLab });
   } else {
@@ -716,7 +758,8 @@ function savePreview() {
         id:'lv'+ts+'_main', label:'Versione 1', note:'Importata',
         portionsCount:parseInt(p.portionsCount)||4,
         gramsPerPortion:parseFloat(p.gramsPerPortion)||200,
-        ingredients:p.ingredients.map((i,j)=>({...i, id:'pi'+ts+'_'+j}))
+        ingredients:p.ingredients.map((i,j)=>({...i, id:'pi'+ts+'_'+j})),
+        steps: p.steps || []
       }]
     });
   }
@@ -798,6 +841,38 @@ function savePreview() {
         }
       }
     });
+  }
+
+  // 3b. Se targetFamily: aggiungi versione LAB alla famiglia scelta
+  if (targetFamily) {
+    const newLab = {
+      id: 'lv'+ts+'_main',
+      label: 'Versione ' + (targetFamily.labVersions.length + 1),
+      note: 'Importata',
+      portionsCount: parseInt(p.portionsCount)||4,
+      gramsPerPortion: parseFloat(p.gramsPerPortion)||200,
+      ingredients: p.ingredients.map(function(i,j){ return Object.assign({}, i, {id:'pi'+ts+'_'+j}); }),
+      steps: p.steps || []
+    };
+    S.recipes = S.recipes.map(function(r) {
+      if (r.id !== targetFamily.id) return r;
+      var newVersions = r.labVersions.concat([newLab]);
+      return Object.assign({}, r, { labVersions: newVersions, currentLabIdx: newVersions.length - 1 });
+    });
+    S.selectedId = targetFamily.id;
+    S.lastOpenedId = targetFamily.id;
+    S.view = 'recipe';
+    S.mode = 'lab';
+    S.loadPreview = null;
+    S.familyDialog = null;
+    S.loadImageB64 = null; S.loadImagePreviewUrl = null; S.loadUrl = ''; S.loadText = '';
+    setTimeout(function() {
+      var r = S.recipes.find(function(x){ return x.id === targetFamily.id; });
+      if (r) saveRecipeToSupabase(r);
+    }, 300);
+    toast('Nuova versione LAB aggiunta a "' + targetFamily.name + '"', 'ti-plus');
+    render();
+    return;
   }
 
   // 4. Applica aggiornamenti alle ricette esistenti
@@ -1167,7 +1242,8 @@ async function saveRecipeToSupabase(recipe) {
       name: lv.label, label: lv.label, note: lv.note || '',
       status: 'lab',
       portions_count: lv.portionsCount,
-      grams_per_portion: lv.gramsPerPortion
+      grams_per_portion: lv.gramsPerPortion,
+      steps: JSON.stringify(lv.steps || [])
     }));
     recipe.validatedVariants.forEach(vv => {
       variants.push({
@@ -1246,7 +1322,8 @@ async function loadFromSupabase() {
               isGroupLabel: i.is_group_label || false,
               groupRecipeId: i.group_recipe_id || null,
               groupOf: i.group_of || null
-            }))
+            })),
+          steps: v.steps ? (Array.isArray(v.steps) ? v.steps : JSON.parse(v.steps)) : []
         }));
 
       const validatedVariants = rVariants
@@ -1372,7 +1449,8 @@ function render(){
     ${sidebar}
     <div class="main">${mainContent}</div>
     ${S.showModal?renderModal():''}
-    ${S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:''}
+    ${S.familyDialog ? renderFamilyDialog() : ''}
+  ${S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:''}
     ${renderBottomNav()}
   `;
   bind();
@@ -1720,6 +1798,14 @@ function renderRecipe(recipe){
     </div>
   </div>`:''}
 
+  ${(()=>{ const steps = v.steps && v.steps.length ? v.steps : []; return steps.length ? `
+  <div class="card">
+    <div class="card-label"><i class="ti ti-list-numbers"></i> Procedimento</div>
+    <ol style="padding-left:20px;display:flex;flex-direction:column;gap:10px;margin-top:4px">
+      ${steps.map(s=>`<li style="font-size:13px;color:var(--dark);line-height:1.6">${s}</li>`).join('')}
+    </ol>
+  </div>` : ''; })()}
+
   ${isLab?`
   ${renderVoicePanel(recipe.id)}
   <div class="ai-panel">
@@ -1743,6 +1829,30 @@ function renderRecipe(recipe){
       <i class="ti ti-circle-check"></i> Valida come "${S.pendingVariantName.trim()||'...'}"
     </button>
   </div>`:''}`;
+}
+
+function renderFamilyDialog() {
+  var d = S.familyDialog;
+  if (!d) return '';
+  return `<div class="overlay" id="family-dialog-overlay">
+    <div class="modal" style="max-width:420px">
+      <div class="modal-title" style="font-size:16px">Ho trovato una famiglia simile</div>
+      <div style="font-size:13px;color:var(--mid);line-height:1.6">
+        Stai importando <strong>${d.preview.name}</strong>.<br>
+        In archivio esiste già <strong>${d.matchedRecipe.name}</strong>.
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:4px">
+        <button class="btn-ok" id="fd-same-family" style="text-align:left;padding:14px 16px;border-radius:var(--r-md)">
+          <div style="font-weight:600;margin-bottom:2px">Aggiungi a "${d.matchedRecipe.name}"</div>
+          <div style="font-size:11px;font-weight:400;opacity:0.8">Entra in LAB come nuova versione della stessa famiglia</div>
+        </button>
+        <button class="btn-cancel" id="fd-new-family" style="text-align:left;padding:14px 16px;border-radius:var(--r-md);border:1px solid var(--border)">
+          <div style="font-weight:600;margin-bottom:2px">Crea famiglia separata "${d.preview.name}"</div>
+          <div style="font-size:11px;font-weight:400;opacity:0.7">Ricetta indipendente con proprie varianti</div>
+        </button>
+      </div>
+    </div>
+  </div>`;
 }
 
 function renderModal(){
@@ -1968,6 +2078,21 @@ function bind(){
   const ap=document.getElementById('apply-sugg');if(ap)ap.addEventListener('click',applyAiSugg);
 
   // MODAL
+  // FAMILY DIALOG
+  var fdSame = document.getElementById('fd-same-family');
+  var fdNew = document.getElementById('fd-new-family');
+  if (fdSame) fdSame.addEventListener('click', function() {
+    var d = S.familyDialog;
+    if (!d) return;
+    doSavePreview(d.preview, d.matchedRecipe);
+  });
+  if (fdNew) fdNew.addEventListener('click', function() {
+    var d = S.familyDialog;
+    if (!d) return;
+    S.familyDialog = null;
+    doSavePreview(d.preview, null);
+  });
+
   const ov=document.getElementById('overlay');
   if(ov){
     ov.addEventListener('click',e=>{if(e.target===ov){S.showModal=false;render();}});
