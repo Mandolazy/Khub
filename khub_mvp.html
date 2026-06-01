@@ -602,7 +602,7 @@ function addIngLab(rid){
 function onValidate(id){
   const name=S.pendingVariantName.trim();if(!name)return;
   const r=R(id),v=curLab(r);
-  const nv={id:'vv'+Date.now(),name,validatedAt:new Date().toLocaleDateString('it-IT'),portionsCount:v.portionsCount,gramsPerPortion:v.gramsPerPortion,ingredients:v.ingredients.map(i=>({...i}))};
+  const nv={id:'vv'+Date.now(),name,validatedAt:new Date().toLocaleDateString('it-IT'),portionsCount:v.portionsCount,gramsPerPortion:v.gramsPerPortion,ingredients:v.ingredients.map(i=>({...i})),steps:v.steps||[]};
   upRec(id,r=>({...r,validatedVariants:[...r.validatedVariants,nv],productionVariantId:r.productionVariantId||nv.id,labVersions:[{id:'v'+Date.now(),label:'Versione 1',note:'Nuovo test',portionsCount:v.portionsCount,gramsPerPortion:v.gramsPerPortion,ingredients:v.ingredients.map(i=>({...i}))}],currentLabIdx:0}));
   S.pendingVariantName='';S.mode='produzione';
   // Save updated recipe to Supabase
@@ -648,10 +648,10 @@ async function extractFromSource(type, payload) {
   if (type==='image') {
     messages=[{role:'user',content:[
       {type:'image',source:{type:'base64',media_type:payload.mediaType,data:payload.b64}},
-      {type:'text',text:'Estrai la ricetta da questa immagine. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. Elenca TUTTI gli ingredienti uno per uno con le quantità numeriche esatte in grammi o ml, anche se appartengono a preparazioni diverse (pasta choux, crema, ecc). NON usare riferimenti a preparazioni come ingredienti. NON creare subRecipes. Ogni ingrediente deve avere qty numerica reale (es: 250, non 1). Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome ingrediente","qty":250,"unit":"g"}],"steps":["passo 1","passo 2"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl. Includi tutti i passi del procedimento nell\'array steps.'}
+      {type:'text',text:'Estrai la ricetta da questa immagine. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. Elenca TUTTI gli ingredienti uno per uno con le quantità numeriche esatte nella ricetta principale (ingredients). Se la ricetta contiene preparazioni distinte (es: pasta choux, crema pasticcera, frolla, besciamella, ecc.), elencale anche in subRecipes con i loro ingredienti e passi separati — ma tienile ANCHE in ingredients con le quantità reali. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome ingrediente","qty":250,"unit":"g"}],"subRecipes":[{"name":"Nome Preparazione","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo 1"]}],"steps":["passo 1","passo 2"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl. Includi tutti i passi del procedimento nell\'array steps.'}
     ]}];
   } else if (type==='text') {
-    messages=[{role:'user',content:`Estrai la ricetta dal seguente testo. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. Elenca TUTTI gli ingredienti uno per uno con le quantità numeriche esatte in grammi o ml, anche se appartengono a preparazioni diverse (pasta choux, crema, ecc). NON usare riferimenti a preparazioni come ingredienti. NON creare subRecipes. Ogni ingrediente deve avere qty numerica reale (es: 250, non 1). Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome ingrediente","qty":250,"unit":"g"}],"steps":["passo 1","passo 2"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl. Includi tutti i passi del procedimento nell\'array steps.\n\nTESTO:\n${payload}`}];
+    messages=[{role:'user',content:`Estrai la ricetta dal seguente testo. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. Elenca TUTTI gli ingredienti uno per uno con le quantità numeriche esatte nella ricetta principale (ingredients). Se la ricetta contiene preparazioni distinte (es: pasta choux, crema pasticcera, frolla, besciamella, ecc.), elencale anche in subRecipes con i loro ingredienti e passi separati — ma tienile ANCHE in ingredients con le quantità reali. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome ingrediente","qty":250,"unit":"g"}],"subRecipes":[{"name":"Nome Preparazione","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo 1"]}],"steps":["passo 1","passo 2"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl. Includi tutti i passi del procedimento nell\'array steps.\n\nTESTO:\n${payload}`}];
   } else if (type==='url') {
     // Usa il nostro proxy /api/chat per leggere il contenuto della pagina
     let pageText = '';
@@ -670,9 +670,9 @@ async function extractFromSource(type, payload) {
       }
     } catch(e) { pageText = ''; }
     const urlContent = pageText
-      ? 'Estrai la ricetta dal seguente testo (fonte: ' + payload + '). Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. Elenca TUTTI gli ingredienti uno per uno con le quantità numeriche esatte in grammi o ml, anche se appartengono a preparazioni diverse (pasta choux, crema, ecc). NON usare riferimenti a preparazioni come ingredienti. NON creare subRecipes. Ogni ingrediente deve avere qty numerica reale (es: 250, non 1). Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome ingrediente","qty":250,"unit":"g"}],"steps":["passo 1","passo 2"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl. Includi tutti i passi del procedimento nell\'array steps.\n\nTESTO:\n' + pageText
+      ? 'Estrai la ricetta dal seguente testo (fonte: ' + payload + '). Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. Rispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. Elenca TUTTI gli ingredienti uno per uno con le quantità numeriche esatte nella ricetta principale (ingredients). Se la ricetta contiene preparazioni distinte (es: pasta choux, crema pasticcera, frolla, besciamella, ecc.), elencale anche in subRecipes con i loro ingredienti e passi separati — ma tienile ANCHE in ingredients con le quantità reali. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome ingrediente","qty":250,"unit":"g"}],"subRecipes":[{"name":"Nome Preparazione","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo 1"]}],"steps":["passo 1","passo 2"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl. Includi tutti i passi del procedimento nell\'array steps.\n\nTESTO:\n' + pageText
       : 'Estrai la ricetta da questo URL: ' + payload + '. Usa il nome nell URL per dedurre la ricetta.';
-    messages=[{role:'user',content: urlContent + '\n\nRispondi SOLO con JSON valido, nessun testo prima o dopo, nessun markdown. REGOLE IMPORTANTI: 1) Se la ricetta contiene preparazioni separate (es: \"per la frolla\", \"per la crema\", \"per il ripieno\" ecc.), mettile in subRecipes e nella ricetta madre metti solo il riferimento come ingrediente con isSubRecipe:true. 2) Se tutti gli ingredienti sono in un unico blocco senza distinzioni, mettili tutti in ingredients. Formato JSON: {"name":"nome ricetta","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g","isSubRecipe":false}],"subRecipes":[{"name":"nome sub","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo sub"]}],"steps":["passo 1"]}. Unità solo tra: g, ml, kg, l, n, tbsp, tsp, cl.'}];
+    messages=[{role:'user',content: urlContent + '}];
   }
 
   try {
@@ -682,7 +682,7 @@ async function extractFromSource(type, payload) {
     text=text.replace(/```json\n?/g,'').replace(/```\n?/g,'').trim();
     const parsed=JSON.parse(text);
     parsed.ingredients=parsed.ingredients.map((i,idx)=>({...i,id:'pi'+idx,isSubRecipe:false,subRecipeId:null,qty:parseFloat(i.qty)||0,unit:UNITS.includes(i.unit)?i.unit:'g'}));
-    parsed.subRecipes = []; // ignora sub-ricette dall'AI
+    // subRecipes mantenute — verranno create come schede parallele in doSavePreview
     S.loadPreview=parsed;
   } catch(e) {
     toast('Errore nella lettura. Riprova o usa il testo libero.','ti-alert-circle');
@@ -757,8 +757,8 @@ function doSavePreview(p, targetFamily) {
     });
   }
 
-  // Sub-ricette esplicite AI disabilitate — import sempre piatto
-  if (false && p.subRecipes && p.subRecipes.length) {
+  // Sub-ricette parallele: crea schede separate senza toccare gli ingredienti madre
+  if (p.subRecipes && p.subRecipes.length) {
     p.subRecipes.forEach((sr, idx2) => {
       const srIngs = (sr.ingredients||[]).map((i,j) => ({
         id:'sri'+ts+'_'+idx2+'_'+j, name:i.name,
@@ -769,11 +769,22 @@ function doSavePreview(p, targetFamily) {
       let targetId;
 
       if (existingSR) {
-        // Aggiunge versione LAB alla ricetta esistente
+        // Controlla se gli ingredienti sono simili — se sì, non duplicare
+        const existingIngs = existingSR.labVersions.length > 0
+          ? existingSR.labVersions[existingSR.currentLabIdx || 0].ingredients.map(function(i){ return i.name.toLowerCase(); })
+          : [];
+        const newIngNames = srIngs.map(function(i){ return i.name.toLowerCase(); });
+        const commonCount = newIngNames.filter(function(n){ return existingIngs.some(function(e){ return e.includes(n) || n.includes(e); }); }).length;
+        const similarity = existingIngs.length > 0 ? commonCount / Math.max(existingIngs.length, newIngNames.length) : 0;
+        if (similarity < 0.6) {
+          // Ingredienti abbastanza diversi — aggiungi come nuova versione LAB
+          targetId = existingSR.id;
+          const newLab = makeLabVersion(sr.name, srIngs, idx2);
+          newLab.label = 'Versione ' + (existingSR.labVersions.length + 1);
+          recipeUpdates.push({ id: targetId, newLabVersion: newLab });
+        }
+        // Se ingredienti simili (>60%) — non creare duplicato
         targetId = existingSR.id;
-        const newLab = makeLabVersion(sr.name, srIngs, idx2);
-        newLab.label = 'Versione ' + (existingSR.labVersions.length + 1);
-        recipeUpdates.push({ id: targetId, newLabVersion: newLab });
       } else {
         // Crea nuova sub-ricetta
         targetId = 'r'+(ts+idx2+1);
@@ -784,20 +795,7 @@ function doSavePreview(p, targetFamily) {
         });
       }
 
-      // Aggiorna ingrediente nella ricetta madre
-      const getMainLab = () => {
-        const main = existingMain || recipesToAdd.find(r=>r.id===mainId);
-        if (!main) return null;
-        return main.labVersions[existingMain ? recipeUpdates.find(u=>u.id===mainId) ? main.labVersions.length : main.currentLabIdx : 0];
-      };
-      const mainLab = getMainLab();
-      if (mainLab) {
-        const existing_ing = mainLab.ingredients.find(i =>
-          i.name.toLowerCase().includes(sr.name.toLowerCase()) ||
-          sr.name.toLowerCase().includes(i.name.toLowerCase())
-        );
-        if (existing_ing) { existing_ing.isSubRecipe=true; existing_ing.subRecipeId=targetId; }
-      }
+      // La ricetta madre NON viene modificata — gli ingredienti restano piatti
     });
   }
 
@@ -1566,6 +1564,62 @@ function onVariantGpp(recipeId, variantId, newGpp) {
   render();
 }
 
+function shareVariant(recipeId, variantId) {
+  var recipe = R(recipeId);
+  var vv = recipe && recipe.validatedVariants.find(function(v){ return v.id === variantId; });
+  if (!vv) return;
+  // Genera link pubblico con parametri nella URL
+  var shareData = {
+    n: recipe.name,
+    v: vv.name,
+    p: vv.portionsCount,
+    g: vv.gramsPerPortion,
+    i: vv.ingredients.map(function(i){ return i.name + ':' + i.qty + i.unit; }).join('|'),
+    s: (vv.steps || []).join('§')
+  };
+  var encoded = btoa(encodeURIComponent(JSON.stringify(shareData)));
+  var shareUrl = window.location.origin + '/shared.html?r=' + encoded;
+  if (navigator.share) {
+    navigator.share({ title: recipe.name + ' — ' + vv.name, url: shareUrl });
+  } else {
+    navigator.clipboard.writeText(shareUrl).then(function() {
+      toast('Link copiato negli appunti', 'ti-link');
+    }).catch(function() {
+      prompt('Copia questo link:', shareUrl);
+    });
+  }
+}
+
+function exportVariantPDF(recipeId, variantId) {
+  var recipe = R(recipeId);
+  var vv = recipe && recipe.validatedVariants.find(function(v){ return v.id === variantId; });
+  if (!vv) return;
+  var steps = vv.steps || [];
+  var tot = vv.ingredients.reduce(function(s,i){ return s + (parseFloat(i.qty)||0); }, 0);
+  var ingRows = vv.ingredients.map(function(i) {
+    var pct = tot > 0 ? (parseFloat(i.qty)/tot*100).toFixed(1) : '0.0';
+    return '<tr><td>' + i.name + '</td><td style="text-align:right">' + i.qty + ' ' + i.unit + '</td><td style="text-align:right;color:#888">' + pct + '%</td></tr>';
+  }).join('');
+  var stepsHtml = steps.length ? '<h3 style="margin-top:24px">Procedimento</h3><ol>' + steps.map(function(s){ return '<li style="margin-bottom:6px">' + s + '</li>'; }).join('') + '</ol>' : '';
+  var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + recipe.name + ' — ' + vv.name + '</title>' +
+    '<style>body{font-family:Georgia,serif;max-width:700px;margin:40px auto;padding:0 20px;color:#222}h1{font-size:28px;margin-bottom:4px}h2{font-size:18px;color:#888;font-weight:normal;margin-top:0}table{width:100%;border-collapse:collapse;margin-top:16px}th{text-align:left;border-bottom:2px solid #333;padding:6px 4px;font-size:13px}td{padding:5px 4px;border-bottom:1px solid #eee;font-size:14px}.meta{color:#888;font-size:13px;margin:8px 0 20px}.badge{display:inline-block;background:#f90;color:white;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;margin-left:8px}@media print{body{margin:20px}}</style>' +
+    '</head><body>' +
+    '<h1>' + recipe.name + '<span class="badge">' + vv.name + '</span></h1>' +
+    '<div class="meta">Validata il ' + vv.validatedAt + ' · ' + vv.portionsCount + ' porzioni · ' + vv.gramsPerPortion + 'g/porzione · Peso totale: ' + Math.round(tot) + 'g</div>' +
+    '<table><thead><tr><th>Ingrediente</th><th style="text-align:right">Quantità</th><th style="text-align:right">%</th></tr></thead><tbody>' + ingRows + '</tbody></table>' +
+    stepsHtml +
+    '<div style="margin-top:40px;font-size:11px;color:#ccc;border-top:1px solid #eee;padding-top:12px">Generato da Khub · khub-gold.vercel.app</div>' +
+    '</body></html>';
+  var blob = new Blob([html], {type: 'text/html'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = recipe.name.replace(/\s+/g,'_') + '__' + vv.name.replace(/\s+/g,'_') + '.html';
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('PDF pronto da stampare', 'ti-file-type-pdf');
+}
+
 function deleteVariant(recipeId, variantId) {
   var recipe = R(recipeId);
   var vv = recipe && recipe.validatedVariants.find(function(v){ return v.id === variantId; });
@@ -1611,6 +1665,8 @@ function renderVariantDetail(recipe, vv) {
         <button class="add-ing-btn" style="padding:7px 14px" data-go-lab-from-variant="${recipe.id}">
           <i class="ti ti-flask"></i> Testa nel LAB
         </button>
+        <button onclick="shareVariant('${recipe.id}','${vv.id}')" title="Condividi" style="padding:7px 10px;background:transparent;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;color:var(--mid);font-size:13px;transition:all 0.12s" onmouseover="this.style.color='var(--orange)';this.style.borderColor='var(--orange)'" onmouseout="this.style.color='var(--mid)';this.style.borderColor='var(--border)'"><i class="ti ti-share"></i></button>
+        <button onclick="exportVariantPDF('${recipe.id}','${vv.id}')" title="Scarica PDF" style="padding:7px 10px;background:transparent;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;color:var(--mid);font-size:13px;transition:all 0.12s" onmouseover="this.style.color='var(--sage)';this.style.borderColor='var(--sage)'" onmouseout="this.style.color='var(--mid)';this.style.borderColor='var(--border)'"><i class="ti ti-file-type-pdf"></i></button>
         <button onclick="deleteVariant('${recipe.id}','${vv.id}')" title="Elimina variante" style="padding:7px 10px;background:transparent;border:1px solid var(--border);border-radius:var(--r-sm);cursor:pointer;color:var(--mid);font-size:13px;transition:all 0.12s" onmouseover="this.style.color='#c0392b';this.style.borderColor='#c0392b'" onmouseout="this.style.color='var(--mid)';this.style.borderColor='var(--border)'"><i class="ti ti-trash"></i></button>
       </div>
     </div>
