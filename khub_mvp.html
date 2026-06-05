@@ -1229,16 +1229,19 @@ async function saveRecipeToSupabase(recipe) {
         status: 'validated',
         portions_count: vv.portionsCount,
         grams_per_portion: vv.gramsPerPortion,
-        validated_at: new Date().toISOString()
+        validated_at: new Date().toISOString(),
+        steps: JSON.stringify(vv.steps || [])
       });
     });
     const allIngredients = [];
     [...recipe.labVersions, ...recipe.validatedVariants].forEach(v => {
       (v.ingredients || []).forEach((ing, idx) => {
-        // Usa ID univoco basato su variant_id + sort_order per evitare collisioni
-        const uniqueId = v.id + '_ing_' + idx;
+        // Usa l'ID originale dell'ingrediente se disponibile, altrimenti genera uno stabile
+        const stableId = (ing.id && !ing.id.startsWith('pi') && ing.id.length > 5)
+          ? ing.id
+          : (v.id + '_i' + idx + '_' + (ing.name || '').replace(/\s+/g,'').slice(0,8).toLowerCase());
         allIngredients.push({
-          id: uniqueId, variant_id: v.id,
+          id: stableId, variant_id: v.id,
           name: ing.name, qty: parseFloat(ing.qty) || 0, unit: ing.unit || 'g',
           is_sub_recipe: ing.isSubRecipe || false,
           sub_recipe_id: ing.subRecipeId || null,
@@ -1247,6 +1250,8 @@ async function saveRecipeToSupabase(recipe) {
           group_recipe_id: ing.groupRecipeId || null,
           group_of: ing.groupOf || null
         });
+        // Aggiorna ID nell'ingrediente in memoria per coerenza futura
+        ing.id = stableId;
       });
     });
     var freshRec = S.recipes.find(function(r){ return r.id === recipe.id; }) || recipe;
@@ -1317,7 +1322,8 @@ async function loadFromSupabase() {
               id: i.id, name: i.name, qty: parseFloat(i.qty) || 0, unit: i.unit || 'g',
               isSubRecipe: i.is_sub_recipe || false,
               subRecipeId: i.sub_recipe_id || null
-            }))
+            })),
+          steps: v.steps ? (Array.isArray(v.steps) ? v.steps : (() => { try { return JSON.parse(v.steps); } catch(e) { return []; } })()) : []
         }));
 
       return {
@@ -1330,7 +1336,7 @@ async function loadFromSupabase() {
           id: 'v_default_'+r.id, label: 'Versione 1', note: '',
           portionsCount: 4, gramsPerPortion: 200, ingredients: []
         }],
-        currentLabIdx: 0
+        currentLabIdx: labVersions.length > 1 ? labVersions.length - 1 : 0
       };
     });
 
