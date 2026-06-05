@@ -22,9 +22,17 @@ export default async function handler(req, res) {
     }
     if (body.supabaseAction === 'save') {
       const { recipe, variants, ingredients } = body.data;
-      await fetch(SB+'/rest/v1/recipes', { method: 'POST', headers: SH, body: JSON.stringify(recipe) });
-      if (variants && variants.length) await fetch(SB+'/rest/v1/variants', { method: 'POST', headers: SH, body: JSON.stringify(variants) });
-      if (ingredients && ingredients.length) await fetch(SB+'/rest/v1/ingredients', { method: 'POST', headers: SH, body: JSON.stringify(ingredients) });
+      await fetch(SB+'/rest/v1/recipes', { method: 'POST', headers: SH_UPSERT, body: JSON.stringify(recipe) });
+      if (variants && variants.length) await fetch(SB+'/rest/v1/variants', { method: 'POST', headers: SH_UPSERT, body: JSON.stringify(variants) });
+      if (ingredients && ingredients.length) {
+        // Elimina ingredienti esistenti per le varianti coinvolte, poi reinserisce
+        const variantIds = [...new Set(ingredients.map(i => i.variant_id))];
+        const delH = { apikey: SK, Authorization: 'Bearer ' + SK };
+        await Promise.all(variantIds.map(vid =>
+          fetch(SB+'/rest/v1/ingredients?variant_id=eq.'+vid, { method: 'DELETE', headers: delH })
+        ));
+        await fetch(SB+'/rest/v1/ingredients', { method: 'POST', headers: SH, body: JSON.stringify(ingredients) });
+      }
       return res.status(200).json({ ok: true });
     }
     if (body.supabaseAction === 'update') {
