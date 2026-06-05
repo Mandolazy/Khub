@@ -1018,6 +1018,7 @@ function renderBottomNav() {
   const isHome = S.view === 'home';
   const isLoad = S.view === 'load';
   const isLab = (S.view === 'recipe' && S.mode === 'lab') || S.view === 'recipes-lab';
+  const isAll = S.view === 'recipes-all';
   const isProd = (S.view === 'recipe' && S.mode === 'produzione') || S.view === 'recipes-prod';
   return `<nav class="bottom-nav">
     <button class="bnav-btn ${isHome?'active':''}" id="bnav-home">
@@ -1037,6 +1038,24 @@ function renderBottomNav() {
 
 
 function renderRecipesList(mode) {
+  if (mode === 'all') {
+    const sorted = [...S.recipes].filter(r => !r.parentRecipeId).sort((a,b) => a.name.localeCompare(b.name));
+    return `<div class="recipes-list-view">
+      <div style="padding:20px 24px 8px;font-size:13px;font-weight:600;color:var(--mid);text-transform:uppercase;letter-spacing:.05em">Tutte le ricette (${sorted.length})</div>
+      ${sorted.map(r => {
+        const hasProd = r.productionVariantId;
+        const varCount = r.validatedVariants ? r.validatedVariants.length : 0;
+        return `<div class="recipe-list-item" data-nav="${r.id}" style="display:flex;align-items:center;gap:14px;padding:14px 24px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.1s" onmouseover="this.style.background='var(--cream)'" onmouseout="this.style.background='transparent'">
+          <div style="width:36px;height:36px;border-radius:50%;background:var(--sage-light);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">${r.category==='Dolci'?'🍰':r.category==='Basi'?'🧱':r.category==='Salato'?'🍳':'📋'}</div>
+          <div style="flex:1">
+            <div style="font-size:14px;font-weight:500;color:var(--dark)">${r.name}</div>
+            <div style="font-size:11px;color:var(--mid);margin-top:2px">${r.category} · ${varCount} variant${varCount!==1?'i':'e'}${hasProd?' · <span style="color:var(--orange);font-weight:500">In produzione</span>':''}</div>
+          </div>
+          <i class="ti ti-chevron-right" style="color:var(--border);font-size:14px"></i>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
   const isLab = mode === 'lab';
   const icons = {Basi:'ti-tool', Dolci:'ti-cookie', Salato:'ti-soup', Altro:'ti-star'};
   const iconClass = {Basi:'basi', Dolci:'dolci', Salato:'salato', Altro:'dolci'};
@@ -1384,6 +1403,7 @@ function render(){
 
   let mainContent = '';
   if (S.view==='home') { mainContent = renderHome(); }
+  else if (S.view==='recipes-all') { mainContent = renderRecipesList('all'); }
   else if (S.view==='recipes-lab') { mainContent = renderRecipesList('lab'); }
   else if (S.view==='recipes-prod') { mainContent = renderRecipesList('produzione'); }
   else if (S.view==='load') { mainContent = renderLoad(); }
@@ -1919,9 +1939,7 @@ function bind(){
   const lrcProd = document.getElementById('lrc-prod');
 
   if(homeRicette) homeRicette.addEventListener('click', () => {
-    const rid = S.lastOpenedId || (S.recipes[0]?.id);
-    if(rid) { S.selectedId=rid; S.view='recipe'; S.mode='produzione'; render(); }
-    else { S.showModal=true; render(); }
+    S.view='recipes-all'; render();
   });
   if(homeCarica) homeCarica.addEventListener('click', () => { S.view='load'; S.loadPreview=null; render(); });
   if(homeLab) homeLab.addEventListener('click', () => {
