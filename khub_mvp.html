@@ -580,7 +580,15 @@ function toast(msg, icon='ti-check') {
   S.toastTimer=setTimeout(()=>{S.toast=null;render();},3000);
 }
 
-function upRec(id,fn){S.recipes=S.recipes.map(r=>r.id===id?fn({...r}):r);render();}
+let _saveTimer = {};
+function autosave(id) {
+  if (_saveTimer[id]) clearTimeout(_saveTimer[id]);
+  _saveTimer[id] = setTimeout(function() {
+    var r = S.recipes.find(function(x){ return x.id === id; });
+    if (r) saveRecipeToSupabase(r);
+  }, 2000);
+}
+function upRec(id,fn){S.recipes=S.recipes.map(r=>r.id===id?fn({...r}):r);render();autosave(id);}
 function upLab(id,fn){upRec(id,r=>{const lv=r.labVersions.map((v,i)=>i===r.currentLabIdx?fn({...v,ingredients:[...v.ingredients]}):v);return{...r,labVersions:lv};});}
 
 function onPortions(id,val){upLab(id,v=>{const n=parseInt(val)||1,t=totQty(v);return{...v,portionsCount:n,gramsPerPortion:n>0?parseFloat((t/n).toFixed(1)):v.gramsPerPortion};});}
