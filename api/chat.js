@@ -22,12 +22,12 @@ export default async function handler(req, res) {
     }
     if (body.supabaseAction === 'save') {
       const { recipe, variants, ingredients } = body.data;
-      await fetch(SB+'/rest/v1/recipes', { method: 'POST', headers: SH_UPSERT, body: JSON.stringify(recipe) });
-      if (variants && variants.length) await fetch(SB+'/rest/v1/variants', { method: 'POST', headers: SH_UPSERT, body: JSON.stringify(variants) });
+      await fetch(SB+'/rest/v1/recipes', { method: 'POST', headers: SH, body: JSON.stringify(recipe) });
+      if (variants && variants.length) await fetch(SB+'/rest/v1/variants', { method: 'POST', headers: SH, body: JSON.stringify(variants) });
       if (ingredients && ingredients.length) {
         // Elimina ingredienti esistenti per le varianti coinvolte, poi reinserisce
         const variantIds = [...new Set(ingredients.map(i => i.variant_id))];
-        const delH = { apikey: SK, Authorization: 'Bearer ' + SK };
+        const delH = { apikey: SK, Authorization: 'Bearer ' + SK, 'Content-Type': 'application/json' };
         await Promise.all(variantIds.map(vid =>
           fetch(SB+'/rest/v1/ingredients?variant_id=eq.'+vid, { method: 'DELETE', headers: delH })
         ));
