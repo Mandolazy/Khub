@@ -159,7 +159,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
 .voice-btn{display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:var(--r-md);border:1px solid var(--border);background:var(--cream);font-family:inherit;font-size:13px;color:var(--mid);cursor:pointer;transition:all 0.15s;}
 .voice-btn:hover{background:var(--sage-light);color:var(--sage-dark);}
 .voice-btn.recording{background:var(--orange);color:white;border-color:var(--orange);}
-.voice-note{font-size:12px;color:var(--mid);background:var(--cream);border-radius:var(--r-md);padding:8px 12px;flex:1;}
+.voice-note{font-size:13px;color:var(--dark);background:var(--cream);border-radius:var(--r-md);padding:10px 14px;line-height:1.6;}
+.voice-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+.note-area{width:100%;background:var(--cream);border:1px solid var(--border);border-radius:var(--r-md);padding:10px 14px;font-family:inherit;font-size:13px;color:var(--dark);outline:none;resize:vertical;min-height:80px;line-height:1.6;transition:border-color 0.12s;}
+.note-area:focus{border-color:var(--sage);background:var(--white);}
 
 /* ── LOAD ── */
 .load-tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
@@ -310,6 +313,7 @@ const S = {
   recording: false,
   mediaRecorder: null,
   voiceNotes: {},
+  pendingVoiceText: {},
   isLoading: false,
 };
 
@@ -391,6 +395,7 @@ async function loadFromSupabase(){
         currentLabIdx:0,
         mediaUrl:r.media_url||null,
         videoUrl:r.video_url||null,
+        notes:r.notes||'',
       };
     });
     if(S.recipes.length>0&&!S.selectedId)S.selectedId=S.recipes[0].id;
@@ -413,6 +418,7 @@ async function saveToSupabase(recipe){
       id:recipe.id,name:recipe.name,category:recipe.category,department:recipe.department||'Cucina',
       production_variant_id:recipe.productionVariantId||null,
       media_url:recipe.mediaUrl||null,video_url:recipe.videoUrl||null,
+      notes:recipe.notes||'',
     };
     const allVariants=[];
     const allIngredients=[];
@@ -706,6 +712,51 @@ function applyAISugg(recipeId){
 // ══════════════════════════════════════════════════════════
 // VOICE
 // ══════════════════════════════════════════════════════════
+function voiceToIngredients(recipeId){
+  const text=S.pendingVoiceText[recipeId];if(!text)return;
+  // Usa AI per estrarre ingredienti dalla nota
+  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    model:'claude-sonnet-4-5',max_tokens:400,
+    messages:[{role:'user',content:'Dal seguente testo estrai gli ingredienti e rispondi SOLO con JSON array: [{"name":"nome","qty":100,"unit":"g"}]. Testo: '+text}]
+  })}).then(r=>r.json()).then(data=>{
+    const t=(data.content||[]).map(c=>c.text||'').join('').replace(/```json|```/g,'').trim();
+    try{
+      const ings=JSON.parse(t);
+      ings.forEach(i=>upLab(recipeId,v=>({...v,ingredients:[...v.ingredients,{id:uid(),name:i.name,qty:parseFloat(i.qty)||0,unit:i.unit||'g',isSubRecipe:false,subRecipeId:null}]})));
+      delete S.pendingVoiceText[recipeId];
+      toast('Ingredienti aggiunti dalla nota','ti-list-details');
+    }catch(e){toast('Non ho trovato ingredienti nella nota','ti-alert-circle');}
+  }).catch(()=>toast('Errore','ti-alert-circle'));
+}
+
+function voiceToSteps(recipeId){
+  const text=S.pendingVoiceText[recipeId];if(!text)return;
+  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+    model:'claude-sonnet-4-5',max_tokens:400,
+    messages:[{role:'user',content:'Dal seguente testo estrai i passi del procedimento e rispondi SOLO con JSON array di stringhe: ["passo 1","passo 2"]. Testo: '+text}]
+  })}).then(r=>r.json()).then(data=>{
+    const t=(data.content||[]).map(c=>c.text||'').join('').replace(/```json|```/g,'').trim();
+    try{
+      const steps=JSON.parse(t);
+      upLab(recipeId,v=>({...v,steps:[...v.steps,...steps]}));
+      delete S.pendingVoiceText[recipeId];
+      toast('Passi aggiunti al procedimento','ti-list-numbers');
+    }catch(e){toast('Non ho trovato passi nella nota','ti-alert-circle');}
+  }).catch(()=>toast('Errore','ti-alert-circle'));
+}
+
+function voiceToNotes(recipeId){
+  const text=S.pendingVoiceText[recipeId];if(!text)return;
+  upRec(recipeId,r=>({...r,notes:(r.notes?r.notes+'\n':'')+'[Nota vocale] '+text}));
+  delete S.pendingVoiceText[recipeId];
+  toast('Nota salvata negli appunti','ti-notebook');
+}
+
+function aiMsgToNotes(recipeId,text){
+  upRec(recipeId,r=>({...r,notes:(r.notes?r.notes+'\n':'')+'[AI] '+text}));
+  toast('Risposta AI salvata negli appunti','ti-notebook');
+}
+
 async function toggleRecording(recipeId){
   if(S.recording){
     S.mediaRecorder?.stop();S.recording=false;render();return;
@@ -724,8 +775,8 @@ async function toggleRecording(recipeId){
           const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:300,messages:[{role:'user',content:[{type:'text',text:'Trascrivi questa nota vocale in italiano. Rispondi solo con il testo trascritto.'},{type:'image',source:{type:'base64',media_type:'audio/webm',data:b64}}]}]})});
           const data=await res.json();
           const text=(data.content||[]).map(c=>c.text||'').join('').trim();
-          S.voiceNotes[recipeId]=text||'Nota vocale salvata';
-        }catch(e){S.voiceNotes[recipeId]='Nota vocale salvata';}
+          S.pendingVoiceText[recipeId]=text||'Nota vocale salvata';
+        }catch(e){S.pendingVoiceText[recipeId]='Nota vocale salvata';}
         render();
       };
       reader.readAsDataURL(blob);
@@ -1073,7 +1124,10 @@ function renderLabRecipe(recipe){
     <div class="card-label"><i class="ti ti-robot"></i> Consulente AI</div>
     <div class="ai-panel">
       <div class="ai-msgs" id="ai-msgs">
-        ${(S.aiMsgs[recipe.id]||[]).map(m=>`<div class="ai-msg ${m.role}">${m.text}</div>`).join('')}
+        ${(S.aiMsgs[recipe.id]||[]).map(m=>`
+          <div class="ai-msg ${m.role}" style="position:relative">${m.text}
+          ${m.role==='bot'?`<button onclick="aiMsgToNotes('${recipe.id}',`${m.text.replace(/`/g,"'")}`)" title="Salva come appunto" style="position:absolute;top:4px;right:4px;background:none;border:none;cursor:pointer;color:var(--light);font-size:11px;opacity:0.6;transition:opacity 0.12s" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=0.6"><i class="ti ti-notebook"></i></button>`:''}
+          </div>`).join('')}
       </div>
       ${S.aiSugg?`<div class="ai-sugg"><i class="ti ti-sparkles"></i><span>Modifica suggerita: <strong>${S.aiSugg.ingName}</strong> → ${S.aiSugg.newQty}${S.aiSugg.newName?', rinomina in "'+S.aiSugg.newName+'"':''}</span><button class="btn btn-lab btn-sm" onclick="applyAISugg('${recipe.id}')">Applica</button><button class="btn btn-outline btn-sm" onclick="S.aiSugg=null;render()">Ignora</button></div>`:''}
       <div class="ai-input-row">
@@ -1090,8 +1144,25 @@ function renderLabRecipe(recipe){
         <i class="ti ti-${S.recording?'player-stop':'microphone'}"></i>
         ${S.recording?'Stop registrazione':'Registra nota'}
       </button>
-      ${S.voiceNotes[recipe.id]?`<div class="voice-note">${S.voiceNotes[recipe.id]}</div>`:''}
+      ${S.pendingVoiceText[recipe.id]?
+        `<div style="flex:1">
+          <div class="voice-note">${S.pendingVoiceText[recipe.id]}</div>
+          <div class="voice-actions">
+            <button class="btn btn-outline btn-sm" onclick="voiceToIngredients('${recipe.id}')"><i class="ti ti-list-details"></i> → Ingredienti</button>
+            <button class="btn btn-outline btn-sm" onclick="voiceToSteps('${recipe.id}')"><i class="ti ti-list-numbers"></i> → Procedimento</button>
+            <button class="btn btn-outline btn-sm" onclick="voiceToNotes('${recipe.id}')"><i class="ti ti-notebook"></i> → Appunti</button>
+            <button class="btn btn-outline btn-sm" onclick="delete S.pendingVoiceText['${recipe.id}'];render()"><i class="ti ti-x"></i></button>
+          </div>
+        </div>`
+      :''}
     </div>
+  </div>
+
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div class="card-label" style="margin-bottom:0"><i class="ti ti-notebook"></i> Appunti</div>
+    </div>
+    <textarea class="note-area" id="recipe-notes" placeholder="Appunti, osservazioni, idee per future varianti..." onchange="upRec('${recipe.id}',r=>({...r,notes:this.value}))">${recipe.notes||''}</textarea>
   </div>
 
   ${recipe.validatedVariants.length>0?`
@@ -1273,7 +1344,7 @@ function bindEvents(){
   if(btnNew)btnNew.addEventListener('click',()=>{
     const id='r'+Date.now();
     const lab=makeDefaultLab(id);
-    const r={id,name:'Nuova ricetta',category:'Dolci',department:'Cucina',productionVariantId:null,validatedVariants:[],currentLabIdx:0,labVersions:[lab],mediaUrl:null,videoUrl:null};
+    const r={id,name:'Nuova ricetta',category:'Dolci',department:'Cucina',productionVariantId:null,validatedVariants:[],currentLabIdx:0,labVersions:[lab],mediaUrl:null,videoUrl:null,notes:''};
     S.recipes=[...S.recipes,r];S.selectedId=id;S.view='recipe';S.mode='lab';render();
     saveToSupabase(r);
   });
