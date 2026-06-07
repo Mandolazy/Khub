@@ -513,7 +513,7 @@ async function extractRecipe(){
       toast('Inserisci contenuto da importare','ti-alert-circle');return;
     }
 
-    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:2000,messages})});
+    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:2000,messages})});
     const data=await res.json();
     const text=(data.content||[]).map(c=>c.text||'').join('');
     const clean=text.replace(/```json|```/g,'').trim();
@@ -683,7 +683,7 @@ async function sendAI(recipeId){
   if(inp)inp.value='';render();
   const sys=`Sei un consulente di cucina professionale. Stai analizzando la ricetta "${recipe.name}". Ingredienti attuali: ${(v?.ingredients||[]).map(i=>i.qty+i.unit+' '+i.name).join(', ')}. Rispondi in modo conciso e pratico. Se suggerisci una modifica a un ingrediente, termina con JSON su riga separata: {"action":"update","ingName":"nome","newQty":100,"newName":"nome opzionale"}`;
   try{
-    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:600,system:sys,messages:(S.aiMsgs[recipeId]||[]).map(m=>({role:m.role==='user'?'user':'assistant',content:m.text}))})});
+    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:600,system:sys,messages:(S.aiMsgs[recipeId]||[]).map(m=>({role:m.role==='user'?'user':'assistant',content:m.text}))})});
     const data=await res.json();
     const text=(data.content||[]).map(c=>c.text||'').join('');
     const lines=text.split('\n');
@@ -721,7 +721,7 @@ async function toggleRecording(recipeId){
       reader.onload=async()=>{
         const b64=reader.result.split(',')[1];
         try{
-          const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-20250514',max_tokens:300,messages:[{role:'user',content:[{type:'text',text:'Trascrivi questa nota vocale in italiano. Rispondi solo con il testo trascritto.'},{type:'image',source:{type:'base64',media_type:'audio/webm',data:b64}}]}]})});
+          const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:300,messages:[{role:'user',content:[{type:'text',text:'Trascrivi questa nota vocale in italiano. Rispondi solo con il testo trascritto.'},{type:'image',source:{type:'base64',media_type:'audio/webm',data:b64}}]}]})});
           const data=await res.json();
           const text=(data.content||[]).map(c=>c.text||'').join('').trim();
           S.voiceNotes[recipeId]=text||'Nota vocale salvata';
