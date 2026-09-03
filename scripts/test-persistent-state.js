@@ -83,9 +83,20 @@ test('migration: crea l2_items e l3_items', () => {
   assert.match(migration, /create table if not exists l3_items/);
 });
 
-test('migration: source_l2_item_id vincolato a provenance_type=handoff', () => {
-  assert.match(migration, /l2_items_source_only_handoff_chk/);
-  assert.match(migration, /source_l2_item_id is null or provenance_type = 'handoff'/);
+test('migration: esiste il constraint l2_items_handoff_iff_source_chk', () => {
+  assert.match(migration, /l2_items_handoff_iff_source_chk/);
+});
+
+test('migration: handoff <-> source_l2_item_id e\' bicondizionale', () => {
+  assert.match(migration, /check \(\(provenance_type = 'handoff'\) = \(source_l2_item_id is not null\)\)/);
+});
+
+test('migration: esiste il constraint l2_items_unengaged_implies_none_chk', () => {
+  assert.match(migration, /l2_items_unengaged_implies_none_chk/);
+});
+
+test('migration: unengaged implica decision_state=none (solo in quel verso)', () => {
+  assert.match(migration, /check \(operational_state <> 'unengaged' or decision_state = 'none'\)/);
 });
 
 test('migration: l3_items.origin_l2_item_id e\' NOT NULL (gate L3)', () => {
