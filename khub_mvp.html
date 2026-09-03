@@ -283,6 +283,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
   <nav class="bottom-nav" id="bottom-nav"></nav>
 </div>
 
+<script src="lib/baseline.js"></script>
 <script>
 'use strict';
 // ══════════════════════════════════════════════════════════
@@ -360,6 +361,12 @@ async function loadFromSupabase(){
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'load'})});
     const data=await res.json();
     if(!data.recipes||!Array.isArray(data.recipes))return;
+    const mapL2Items=(vid)=>(data.l2_items||[]).filter(x=>x.variant_id===vid).map(x=>({
+      id:x.id,operationalState:x.operational_state,decisionState:x.decision_state,
+      content:x.content,evidence:x.evidence||null,provenanceType:x.provenance_type,
+      sourceL2ItemId:x.source_l2_item_id||null,
+      baselineHash:x.baseline_hash,baselineContext:x.baseline_context,
+    }));
     S.recipes=data.recipes.map(r=>{
       const rVariants=(data.variants||[]).filter(v=>v.recipe_id===r.id);
       const labVersions=rVariants.filter(v=>v.status==='lab').map(v=>({
@@ -372,6 +379,9 @@ async function loadFromSupabase(){
         steps:parseSteps(v.steps),
         mediaUrl:v.media_url||null,
         videoUrl:v.video_url||null,
+        l2Items:mapL2Items(v.id),active:v.active||false,originVariantId:v.origin_variant_id||null,
+        intentionInitial:v.intention_initial||null,intentionCurrent:v.intention_current||null,
+        criteriaInitial:v.criteria_initial||null,criteriaCurrent:v.criteria_current||null,
       }));
       const validatedVariants=rVariants.filter(v=>v.status==='validated').map(v=>({
         id:v.id,name:v.name||v.label||'Variante',validatedAt:v.validated_at?new Date(v.validated_at).toLocaleDateString('it-IT'):'',
@@ -382,12 +392,20 @@ async function loadFromSupabase(){
         steps:parseSteps(v.steps),
         mediaUrl:v.media_url||null,
         videoUrl:v.video_url||null,
+        l2Items:mapL2Items(v.id),active:v.active||false,originVariantId:v.origin_variant_id||null,
+        intentionInitial:v.intention_initial||null,intentionCurrent:v.intention_current||null,
+        criteriaInitial:v.criteria_initial||null,criteriaCurrent:v.criteria_current||null,
+      }));
+      const l3Items=(data.l3_items||[]).filter(x=>x.recipe_id===r.id).map(x=>({
+        id:x.id,distilledContent:x.distilled_content,contextConditions:x.context_conditions||null,
+        knownLimits:x.known_limits||null,originL2ItemId:x.origin_l2_item_id,supersedesId:x.supersedes_id||null,
       }));
       return{
         id:r.id,name:r.name,category:r.category||'Altro',department:r.department||'Cucina',
         productionVariantId:r.production_variant_id||null,
         labVersions:labVersions.length>0?labVersions:[makeDefaultLab(r.id)],
         validatedVariants,
+        l3Items,
         currentLabIdx:0,
         mediaUrl:r.media_url||null,
         videoUrl:r.video_url||null,
@@ -404,7 +422,9 @@ function parseSteps(raw){
 }
 
 function makeDefaultLab(recipeId){
-  return{id:'lv_'+uid(),label:'Versione 1',note:'',portionsCount:4,gramsPerPortion:200,ingredients:[],steps:[],mediaUrl:null,videoUrl:null};
+  return{id:'lv_'+uid(),label:'Versione 1',note:'',portionsCount:4,gramsPerPortion:200,ingredients:[],steps:[],mediaUrl:null,videoUrl:null,
+    l2Items:[],active:false,originVariantId:null,
+    intentionInitial:null,intentionCurrent:null,criteriaInitial:null,criteriaCurrent:null};
 }
 
 async function saveToSupabase(recipe){
@@ -416,12 +436,27 @@ async function saveToSupabase(recipe){
     };
     const allVariants=[];
     const allIngredients=[];
+    const allL2Items=[];
+    const pushL2=(items,variantId)=>{
+      (items||[]).forEach(l2=>{
+        allL2Items.push({
+          id:l2.id,variant_id:variantId,
+          operational_state:l2.operationalState,decision_state:l2.decisionState,
+          content:l2.content,evidence:l2.evidence||null,provenance_type:l2.provenanceType,
+          source_l2_item_id:l2.sourceL2ItemId||null,
+          baseline_hash:l2.baselineHash,baseline_context:l2.baselineContext,
+        });
+      });
+    };
     recipe.labVersions.forEach(v=>{
       allVariants.push({
         id:v.id,recipe_id:recipe.id,name:v.label,label:v.label,note:v.note||'',
         status:'lab',portions_count:v.portionsCount,grams_per_portion:v.gramsPerPortion,
         steps:JSON.stringify(v.steps||[]),
         media_url:v.mediaUrl||null,video_url:v.videoUrl||null,
+        active:v.active||false,origin_variant_id:v.originVariantId||null,
+        intention_initial:v.intentionInitial||null,intention_current:v.intentionCurrent||null,
+        criteria_initial:v.criteriaInitial||null,criteria_current:v.criteriaCurrent||null,
       });
       (v.ingredients||[]).forEach((ing,idx)=>{
         allIngredients.push({
@@ -431,6 +466,7 @@ async function saveToSupabase(recipe){
           sort_order:idx,
         });
       });
+      pushL2(v.l2Items,v.id);
     });
     recipe.validatedVariants.forEach(vv=>{
       allVariants.push({
@@ -439,6 +475,9 @@ async function saveToSupabase(recipe){
         steps:JSON.stringify(vv.steps||[]),
         validated_at:new Date().toISOString(),
         media_url:vv.mediaUrl||null,video_url:vv.videoUrl||null,
+        active:vv.active||false,origin_variant_id:vv.originVariantId||null,
+        intention_initial:vv.intentionInitial||null,intention_current:vv.intentionCurrent||null,
+        criteria_initial:vv.criteriaInitial||null,criteria_current:vv.criteriaCurrent||null,
       });
       (vv.ingredients||[]).forEach((ing,idx)=>{
         allIngredients.push({
@@ -448,11 +487,25 @@ async function saveToSupabase(recipe){
           sort_order:idx,
         });
       });
+      pushL2(vv.l2Items,vv.id);
     });
-    await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      supabaseAction:'save',data:{recipe:recipeData,variants:allVariants,ingredients:allIngredients}
+    const allL3Items=(recipe.l3Items||[]).map(l3=>({
+      id:l3.id,recipe_id:recipe.id,
+      distilled_content:l3.distilledContent,context_conditions:l3.contextConditions||null,
+      known_limits:l3.knownLimits||null,origin_l2_item_id:l3.originL2ItemId,
+      supersedes_id:l3.supersedesId||null,
+    }));
+    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      supabaseAction:'save',data:{recipe:recipeData,variants:allVariants,ingredients:allIngredients,l2Items:allL2Items,l3Items:allL3Items}
     })});
-  }catch(e){console.error('Save error',e);}
+    const data=await res.json().catch(()=>null);
+    if(!res.ok||!data||!data.ok){
+      console.error('Save error',res.status,data);
+      toast('Salvataggio non riuscito','ti-alert-circle');
+      return false;
+    }
+    return true;
+  }catch(e){console.error('Save error',e);toast('Salvataggio non riuscito','ti-alert-circle');return false;}
 }
 
 async function deleteRecipe(id){
@@ -595,21 +648,30 @@ function onValidate(){
   if(!name){toast('Dai un nome alla variante','ti-alert-circle');return;}
   const id=S.selectedId;const recipe=R(id);if(!recipe)return;
   const v=curLab(recipe);if(!v)return;
-  const nv={
-    id:'vv'+Date.now(),name,
-    validatedAt:new Date().toLocaleDateString('it-IT'),
-    portionsCount:v.portionsCount,gramsPerPortion:v.gramsPerPortion,
-    ingredients:v.ingredients.map(i=>({...i,id:i.id||uid()})),
-    steps:[...v.steps],
-    mediaUrl:v.mediaUrl||null,videoUrl:v.videoUrl||null,
-  };
-  upRec(id,r=>({
-    ...r,
-    validatedVariants:[...r.validatedVariants,nv],
-    productionVariantId:nv.id,
-  }));
-  S.pendingVariantName='';S.showValidateBar=false;S.mode='produzione';S.selectedVariantId=nv.id;
-  toast(`"${name}" validata e in Produzione!`,'ti-circle-check');
+  const vId=v.id; // stesso variant.id lungo tutto il lifecycle: lab -> validated
+  upRec(id,r=>{
+    const remainingLab=r.labVersions.filter(x=>x.id!==vId);
+    const promoted={
+      id:vId,name,
+      validatedAt:new Date().toLocaleDateString('it-IT'),
+      portionsCount:v.portionsCount,gramsPerPortion:v.gramsPerPortion,
+      ingredients:v.ingredients.map(i=>({...i,id:i.id||uid()})),
+      steps:[...v.steps],
+      mediaUrl:v.mediaUrl||null,videoUrl:v.videoUrl||null,
+      // L2 e Intention/Criteria seguono la Ricetta senza essere copiati in una nuova identita'
+      l2Items:v.l2Items||[],active:v.active||false,originVariantId:v.originVariantId||null,
+      intentionInitial:v.intentionInitial||null,intentionCurrent:v.intentionCurrent||null,
+      criteriaInitial:v.criteriaInitial||null,criteriaCurrent:v.criteriaCurrent||null,
+    };
+    return{
+      ...r,
+      labVersions:remainingLab.length>0?remainingLab:[makeDefaultLab(r.id)],
+      validatedVariants:[...r.validatedVariants,promoted],
+      productionVariantId:vId,
+    };
+  });
+  S.pendingVariantName='';S.showValidateBar=false;S.mode='produzione';S.selectedVariantId=vId;
+  toast(`"${name}" validata (stesso ID di Ricetta)`,'ti-circle-check');
 }
 
 function addIngredient(recipeId){

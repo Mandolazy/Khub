@@ -19,59 +19,87 @@ export default async function handler(req, res) {
     }
 
     if (body.supabaseAction === 'load') {
-      const [r1, r2, r3] = await Promise.all([
+      const [r1, r2, r3, r4, r5] = await Promise.all([
         fetch(SB+'/rest/v1/recipes?select=*&order=created_at.asc', { headers: SH_READ }),
         fetch(SB+'/rest/v1/variants?select=*&order=created_at.asc', { headers: SH_READ }),
-        fetch(SB+'/rest/v1/ingredients?select=*&order=sort_order.asc', { headers: SH_READ })
+        fetch(SB+'/rest/v1/ingredients?select=*&order=sort_order.asc', { headers: SH_READ }),
+        fetch(SB+'/rest/v1/l2_items?select=*&order=created_at.asc', { headers: SH_READ }),
+        fetch(SB+'/rest/v1/l3_items?select=*&order=created_at.asc', { headers: SH_READ })
       ]);
-      const [recipes, variants, ingredients] = await Promise.all([r1.json(), r2.json(), r3.json()]);
-      return res.status(200).json({ recipes, variants, ingredients });
+      const [recipes, variants, ingredients, l2_items, l3_items] = await Promise.all([r1.json(), r2.json(), r3.json(), r4.json(), r5.json()]);
+      return res.status(200).json({ recipes, variants, ingredients, l2_items, l3_items });
     }
 
     if (body.supabaseAction === 'save') {
-      const { recipe, variants, ingredients } = body.data;
+      const { recipe, variants, ingredients, l2Items, l3Items } = body.data;
+
+      // Upsert honesto: propaga un errore reale invece di dichiarare ok:true
+      // quando Supabase risponde con un errore HTTP.
+      const write = async (table, payload, label) => {
+        const r = await fetch(SB+'/rest/v1/'+table, { method: 'POST', headers: SH_WRITE, body: JSON.stringify(payload) });
+        if (!r.ok) {
+          const detail = await r.text().catch(() => '');
+          throw new Error('Supabase write failed on '+label+' ('+r.status+'): '+detail);
+        }
+      };
 
       // 1. Upsert ricetta
-      await fetch(SB+'/rest/v1/recipes', {
-        method: 'POST', headers: SH_WRITE, body: JSON.stringify(recipe)
-      });
+      await write('recipes', recipe, 'recipes');
 
       // 2. Upsert varianti
       if (variants && variants.length) {
-        await fetch(SB+'/rest/v1/variants', {
-          method: 'POST', headers: SH_WRITE, body: JSON.stringify(variants)
-        });
+        await write('variants', variants, 'variants');
       }
 
       // 3. Ingredienti: delete per variant_id, poi insert pulito
+      //    (pattern valido solo per liste senza identita' stabile richiesta,
+      //    MAI usare questo pattern per l2_items/l3_items)
       if (ingredients && ingredients.length) {
         const variantIds = [...new Set(ingredients.map(i => i.variant_id))];
-        // Delete uno per uno
         for (const vid of variantIds) {
-          await fetch(SB+'/rest/v1/ingredients?variant_id=eq.'+vid, {
+          const dr = await fetch(SB+'/rest/v1/ingredients?variant_id=eq.'+vid, {
             method: 'DELETE', headers: SH_DEL
           });
+          if (!dr.ok) {
+            const detail = await dr.text().catch(() => '');
+            throw new Error('Supabase delete failed on ingredients ('+dr.status+'): '+detail);
+          }
         }
-        // Insert tutti insieme
-        await fetch(SB+'/rest/v1/ingredients', {
-          method: 'POST', headers: SH_WRITE, body: JSON.stringify(ingredients)
-        });
+        await write('ingredients', ingredients, 'ingredients');
+      }
+
+      // 4. L2Items: identita' stabile, sempre upsert per id, mai delete+insert
+      if (l2Items && l2Items.length) {
+        await write('l2_items', l2Items, 'l2_items');
+      }
+
+      // 5. L3Items: identita' stabile, sempre upsert per id, mai delete+insert
+      if (l3Items && l3Items.length) {
+        await write('l3_items', l3Items, 'l3_items');
       }
 
       return res.status(200).json({ ok: true });
     }
 
     if (body.supabaseAction === 'update') {
-      await fetch(SB+'/rest/v1/'+body.table, {
+      const r = await fetch(SB+'/rest/v1/'+body.table, {
         method: 'POST', headers: SH_WRITE, body: JSON.stringify(body.data)
       });
+      if (!r.ok) {
+        const detail = await r.text().catch(() => '');
+        throw new Error('Supabase update failed on '+body.table+' ('+r.status+'): '+detail);
+      }
       return res.status(200).json({ ok: true });
     }
 
     if (body.supabaseAction === 'delete') {
-      await fetch(SB+'/rest/v1/'+body.table+'?id=eq.'+body.id, {
+      const r = await fetch(SB+'/rest/v1/'+body.table+'?id=eq.'+body.id, {
         method: 'DELETE', headers: SH_DEL
       });
+      if (!r.ok) {
+        const detail = await r.text().catch(() => '');
+        throw new Error('Supabase delete failed on '+body.table+' ('+r.status+'): '+detail);
+      }
       return res.status(200).json({ ok: true });
     }
 
