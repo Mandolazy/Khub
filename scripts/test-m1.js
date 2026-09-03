@@ -171,6 +171,25 @@ test('api/chat.js: il branch m1 usa una sola chiamata Anthropic (nessun secondo 
   assert.strictEqual(calls, 1, 'attesa 1 sola chiamata Anthropic nel branch m1, trovate ' + calls);
 });
 
+test('M1_SYSTEM_PROMPT: P6 (assertivita\' proporzionata) e\' applicato operativamente, non solo dichiarato', () => {
+  const promptStart = chat.indexOf('const M1_SYSTEM_PROMPT = `');
+  const promptEnd = chat.indexOf('`;', promptStart);
+  const prompt = chat.slice(promptStart, promptEnd);
+  [
+    "non affermare come fatto avvenuto",
+    "non attribuire un esito a una soglia numerica precisa",
+    "prescrizione universale",
+    "se un'informazione che incide sul giudizio non e' disponibile",
+    "Questo non significa diventare vago",
+    "vale anche per il contenuto che scrivi nel blocco delle osservazioni strutturate",
+  ].forEach(clause => {
+    assert.ok(prompt.includes(clause), 'clausola operativa P6 mancante nel prompt: "' + clause + '"');
+  });
+  // Il criterio di successo e il framework restano quelli originali: nessuna nuova regola cognitiva.
+  assert.match(prompt, /Costruisci una lettura specifica, selettiva e argomentata/);
+  assert.match(prompt, /sensoriale: dolcezza/);
+});
+
 test("khub_mvp.html: gate 'gia' avvenuto' basato su L2 provenance m1 (nessun nuovo flag DB)", () => {
   assert.match(html, /function hasM1\(v\)\{return\(v&&v\.l2Items\|\|\[\]\)\.some\(x=>x\.provenanceType==='m1'\)/);
   assert.match(html, /if\(hasM1\(v\)\)return;/);
