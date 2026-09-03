@@ -213,6 +213,18 @@ test('khub_mvp.html: M1 non completato se saveToSupabase() fallisce (rollback es
   assert.match(fnBody, /throw new Error\('Salvataggio delle osservazioni non riuscito'\)/);
 });
 
+test("api/chat.js: l2_items e' l'ULTIMO step della sequenza di save (nessun L2 orfano se uno step successivo fallisce)", () => {
+  const saveBlock = chat.slice(chat.indexOf("body.supabaseAction === 'save'"), chat.indexOf("body.supabaseAction === 'update'"));
+  const writeCalls = [...saveBlock.matchAll(/write\('(\w+)'/g)].map(m => m[1]);
+  assert.ok(writeCalls.length > 0, 'nessuna chiamata write() trovata nel blocco save');
+  assert.strictEqual(writeCalls[writeCalls.length - 1], 'l2_items',
+    "l'ultima write() nel blocco save deve essere su l2_items, trovato invece: " + writeCalls[writeCalls.length - 1] + ' (ordine: ' + writeCalls.join(' -> ') + ')');
+  const idxL3 = saveBlock.indexOf("write('l3_items'");
+  const idxL2 = saveBlock.indexOf("write('l2_items'");
+  assert.ok(idxL3 !== -1 && idxL2 !== -1, 'write l3_items o l2_items non trovate nel blocco save');
+  assert.ok(idxL3 < idxL2, 'l3_items deve essere scritto prima di l2_items (l2_items ultimo step)');
+});
+
 console.log('');
 console.log(passed + ' passed, ' + failed + ' failed');
 console.log('');

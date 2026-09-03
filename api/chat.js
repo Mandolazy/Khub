@@ -166,14 +166,18 @@ export default async function handler(req, res) {
         await write('ingredients', ingredients, 'ingredients');
       }
 
-      // 4. L2Items: identita' stabile, sempre upsert per id, mai delete+insert
-      if (l2Items && l2Items.length) {
-        await write('l2_items', l2Items, 'l2_items');
-      }
-
-      // 5. L3Items: identita' stabile, sempre upsert per id, mai delete+insert
+      // 4. L3Items: identita' stabile, sempre upsert per id, mai delete+insert
       if (l3Items && l3Items.length) {
         await write('l3_items', l3Items, 'l3_items');
+      }
+
+      // 5. L2Items: identita' stabile, sempre upsert per id, mai delete+insert.
+      //    Scritto per ULTIMO di proposito: se e' l'ultimo step, un fallimento
+      //    di questa chiamata non lascia mai L2 "orfani" gia' persistiti mentre
+      //    uno step successivo fallisce (ogni write() e' un singolo statement
+      //    upsert, quindi atomico al suo interno) — vedi verifica pre-fix.
+      if (l2Items && l2Items.length) {
+        await write('l2_items', l2Items, 'l2_items');
       }
 
       return res.status(200).json({ ok: true });
