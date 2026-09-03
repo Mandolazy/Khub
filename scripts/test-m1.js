@@ -213,6 +213,19 @@ test('khub_mvp.html: M1 non completato se saveToSupabase() fallisce (rollback es
   assert.match(fnBody, /throw new Error\('Salvataggio delle osservazioni non riuscito'\)/);
 });
 
+test("api/chat.js: il payload Anthropic del branch m1 contiene esplicitamente model, max_tokens, system, messages", () => {
+  const m1Block = chat.slice(chat.indexOf("body.mode === 'm1'"), chat.indexOf('// Proxy Anthropic AI'));
+  const bodyStart = m1Block.indexOf('body: JSON.stringify({');
+  assert.ok(bodyStart !== -1, "non trovato \"body: JSON.stringify({\" nel branch m1");
+  const bodyEnd = m1Block.indexOf('}),', bodyStart);
+  assert.ok(bodyEnd !== -1, 'non trovata chiusura del body JSON nel branch m1');
+  const anthropicPayload = m1Block.slice(bodyStart, bodyEnd);
+  ['model:', 'max_tokens:', 'system:', 'messages:'].forEach(key => {
+    assert.ok(anthropicPayload.includes(key), 'payload Anthropic del branch m1 manca del campo: ' + key.replace(':', ''));
+  });
+  assert.match(anthropicPayload, /model:\s*'[^']+'/, "model deve essere una stringa esplicita non vuota, non un campo omesso o undefined");
+});
+
 test("api/chat.js: l2_items e' l'ULTIMO step della sequenza di save (nessun L2 orfano se uno step successivo fallisce)", () => {
   const saveBlock = chat.slice(chat.indexOf("body.supabaseAction === 'save'"), chat.indexOf("body.supabaseAction === 'update'"));
   const writeCalls = [...saveBlock.matchAll(/write\('(\w+)'/g)].map(m => m[1]);
