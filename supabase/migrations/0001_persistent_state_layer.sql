@@ -89,14 +89,19 @@ begin
     alter table l2_items add constraint l2_items_decision_state_chk
       check (decision_state in ('none','probable','confirmed'));
   end if;
+  -- unengaged non puo' coesistere con una decisione: il contrario non e' imposto.
+  if not exists (select 1 from pg_constraint where conname = 'l2_items_unengaged_implies_none_chk') then
+    alter table l2_items add constraint l2_items_unengaged_implies_none_chk
+      check (operational_state <> 'unengaged' or decision_state = 'none');
+  end if;
   if not exists (select 1 from pg_constraint where conname = 'l2_items_provenance_type_chk') then
     alter table l2_items add constraint l2_items_provenance_type_chk
       check (provenance_type in ('m1','m2','m3','handoff'));
   end if;
-  -- source_l2_item_id is meaningful (and only meaningful) for a handoff.
-  if not exists (select 1 from pg_constraint where conname = 'l2_items_source_only_handoff_chk') then
-    alter table l2_items add constraint l2_items_source_only_handoff_chk
-      check (source_l2_item_id is null or provenance_type = 'handoff');
+  -- source_l2_item_id e' presente se e solo se provenance_type = 'handoff' (biconditional).
+  if not exists (select 1 from pg_constraint where conname = 'l2_items_handoff_iff_source_chk') then
+    alter table l2_items add constraint l2_items_handoff_iff_source_chk
+      check ((provenance_type = 'handoff') = (source_l2_item_id is not null));
   end if;
   if not exists (select 1 from pg_constraint where conname = 'l2_items_source_not_self_chk') then
     alter table l2_items add constraint l2_items_source_not_self_chk
