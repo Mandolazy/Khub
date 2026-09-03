@@ -1127,8 +1127,8 @@ function allVariants(recipe){
   const validated=(recipe.validatedVariants||[]).map(v=>{
     // status:'retired' ha priorità assoluta
     if(v.status==='retired')return{...v,_type:'retired',_name:v.name||'Ricetta'};
-    // status:'approved' (o assente per retrocompatibilità): differenziamo per shared
-    if(v.shared)return{...v,_type:'active',_name:v.name||'Ricetta'};
+    // status:'approved' (o assente per retrocompatibilità): differenziamo per active (D2)
+    if(v.active)return{...v,_type:'active',_name:v.name||'Ricetta'};
     return{...v,_type:'approved',_name:v.name||'Ricetta'};
   });
   // Ordine: attive, poi approvate non attive, poi in LAB, poi archiviate in fondo
@@ -1138,10 +1138,11 @@ function allVariants(recipe){
   return [...active,...approved,...lab,...retired];
 }
 
-// Restituisce solo le varianti attive (shared=true) di una ricetta
+// Restituisce solo le varianti attive (active=true) di una ricetta — D2:
+// active e' la source of truth applicativa, shared resta solo legacy nel DB.
 function activeVariants(recipe){
   if(!recipe)return[];
-  return(recipe.validatedVariants||[]).filter(v=>v.shared===true&&v.status!=='retired');
+  return(recipe.validatedVariants||[]).filter(v=>v.active===true&&v.status!=='retired');
 }
 
 // ── STEP 5: CRONOLOGIA & RETIRE ──────────────────────────
@@ -1152,40 +1153,41 @@ function addHistory(variantId,event,label){
   S.variantHistory[variantId].push({event,date,label});
 }
 
-// Attiva/disattiva shared di una variante approvata (con protezione status e cronologia)
-function toggleSharedV2(recipeId,variantId,currentShared){
+// Attiva/disattiva una variante approvata (con protezione status e cronologia).
+// D2: agisce su `active`, mai su `shared` (legacy, non piu' scritto da qui).
+function toggleActiveV2(recipeId,variantId,currentActive){
   const r=R(recipeId);
   const vv=r&&r.validatedVariants.find(v=>v.id===variantId);
   if(!vv||vv.status==='retired')return;
-  const newShared=!currentShared;
+  const newActive=!currentActive;
   upRec(recipeId,rec=>({
     ...rec,
-    validatedVariants:rec.validatedVariants.map(v=>v.id===variantId?{...v,shared:newShared}:v)
+    validatedVariants:rec.validatedVariants.map(v=>v.id===variantId?{...v,active:newActive}:v)
   }));
-  addHistory(variantId,newShared?'attivata':'disattivata',vv.name||'');
+  addHistory(variantId,newActive?'attivata':'disattivata',vv.name||'');
   saveToSupabase(R(recipeId));
-  if(newShared){
+  if(newActive){
     toast('"'+(vv.name||'')+'" è ora quella in uso.','ti-circle-check');
   }
   render();
 }
 
-// Archivia una variante: status→'retired', shared→false (anche se era true)
+// Archivia una variante: status→'retired', active→false (anche se era true)
 function retireVariant(recipeId,variantId){
   const recipe=R(recipeId);
   if(!recipe)return;
   const vv=recipe.validatedVariants.find(v=>v.id===variantId);
   if(!vv||vv.status==='retired')return;
-  const wasShared=vv.shared===true;
+  const wasActive=vv.active===true;
   upRec(recipeId,r=>({
     ...r,
     validatedVariants:r.validatedVariants.map(v=>
-      v.id===variantId?{...v,status:'retired',shared:false}:v
+      v.id===variantId?{...v,status:'retired',active:false}:v
     )
   }));
-  addHistory(variantId,'archiviata',vv.name||(wasShared?'(era attiva)':''));
-  if(wasShared){
-    // Se era condivisa, registriamo anche la disattivazione implicita
+  addHistory(variantId,'archiviata',vv.name||(wasActive?'(era attiva)':''));
+  if(wasActive){
+    // Se era attiva, registriamo anche la disattivazione implicita
     addHistory(variantId,'disattivata','(automatica per archiviazione)');
   }
   toast('Ricetta archiviata','ti-archive');
@@ -1301,6 +1303,15 @@ async function loadFromSupabase(){
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'load'})});
     const data=await res.json();
     if(!data.recipes||!Array.isArray(data.recipes))return;
+    // PSL: mapping L2 (Ricetta-scoped) — riusato sia per le Bozze in LAB sia
+    // per le Ricette validate/attive, perche' L2 segue la stessa variant.id
+    // lungo tutto il lifecycle (D3).
+    const mapL2Items=(vid)=>(data.l2_items||[]).filter(x=>x.variant_id===vid).map(x=>({
+      id:x.id,operationalState:x.operational_state,decisionState:x.decision_state,
+      content:x.content,evidence:x.evidence||null,provenanceType:x.provenance_type,
+      sourceL2ItemId:x.source_l2_item_id||null,
+      baselineHash:x.baseline_hash,baselineContext:x.baseline_context,
+    }));
     S.recipes=data.recipes.map(r=>{
       const rVariants=(data.variants||[]).filter(v=>v.recipe_id===r.id);
       const labVersions=rVariants.filter(v=>v.status==='lab').map(v=>({
@@ -1320,11 +1331,15 @@ async function loadFromSupabase(){
         steps:parseSteps(v.steps),
         mediaUrl:v.media_url||null,
         videoUrl:v.video_url||null,
-        shared:false, // le bozze LAB non sono mai condivise con la brigata
+        active:false, // le bozze LAB non sono mai attive (D2: active, non shared, e' la source of truth)
         primoConsulto:v.primo_consulto||null,
+        l2Items:mapL2Items(v.id),
+        intentionInitial:v.intention_initial||null,intentionCurrent:v.intention_current||null,
+        criteriaInitial:v.criteria_initial||null,criteriaCurrent:v.criteria_current||null,
       }));
       const validatedVariants=rVariants.filter(v=>v.status==='validated'||v.status==='retired').map(v=>({
         id:v.id,name:v.name||v.label||'Ricetta',validatedAt:v.validated_at?new Date(v.validated_at).toLocaleDateString('it-IT'):'',
+        originVariantId:v.origin_variant_id||null,
         portionsCount:v.portions_count||4,
         gramsPerPortion:v.grams_per_portion||200, // mantenuto per compatibilità
         portionSize:v.grams_per_portion||200,      // Step 1: nuovo nome semantico
@@ -1338,12 +1353,20 @@ async function loadFromSupabase(){
         mediaUrl:v.media_url||null,
         videoUrl:v.video_url||null,
         status:v.status||'approved', // Fase 5: legge status da Supabase
-        shared:v.shared!=null ? !!v.shared : false, // Fase 5: solo da Supabase, nessun fallback a prodId
+        active:v.active!=null ? !!v.active : false, // D2: active e' la source of truth applicativa, non shared
+        l2Items:mapL2Items(v.id),
+        intentionInitial:v.intention_initial||null,intentionCurrent:v.intention_current||null,
+        criteriaInitial:v.criteria_initial||null,criteriaCurrent:v.criteria_current||null,
+      }));
+      const l3Items=(data.l3_items||[]).filter(x=>x.recipe_id===r.id).map(x=>({
+        id:x.id,distilledContent:x.distilled_content,contextConditions:x.context_conditions||null,
+        knownLimits:x.known_limits||null,originL2ItemId:x.origin_l2_item_id,supersedesId:x.supersedes_id||null,
       }));
       return{
         id:r.id,name:r.name,category:r.category||'Altro',department:r.department||'Cucina',
         labVersions:labVersions.length>0?labVersions:[makeDefaultLab(r.id,r.name)],
         validatedVariants,
+        l3Items,
         currentLabIdx:0,
         mediaUrl:r.media_url||null,
         videoUrl:r.video_url||null,
@@ -1371,7 +1394,8 @@ function parseSteps(raw){
 }
 
 function makeDefaultLab(recipeId,name){
-  return{id:'lv_'+uid(),label:'Bozza 1',name:name||'',note:'',portionsCount:1,gramsPerPortion:0,portionSize:0,portionUnit:'g',ingredients:[],steps:[],mediaUrl:null,videoUrl:null,shared:false,originVariantId:null};
+  return{id:'lv_'+uid(),label:'Bozza 1',name:name||'',note:'',portionsCount:1,gramsPerPortion:0,portionSize:0,portionUnit:'g',ingredients:[],steps:[],mediaUrl:null,videoUrl:null,active:false,originVariantId:null,
+    l2Items:[],intentionInitial:null,intentionCurrent:null,criteriaInitial:null,criteriaCurrent:null};
 }
 
 async function saveToSupabase(recipe){
@@ -1383,6 +1407,18 @@ async function saveToSupabase(recipe){
     };
     const allVariants=[];
     const allIngredients=[];
+    const allL2Items=[];
+    const pushL2=(items,variantId)=>{
+      (items||[]).forEach(l2=>{
+        allL2Items.push({
+          id:l2.id,variant_id:variantId,
+          operational_state:l2.operationalState,decision_state:l2.decisionState,
+          content:l2.content,evidence:l2.evidence||null,provenance_type:l2.provenanceType,
+          source_l2_item_id:l2.sourceL2ItemId||null,
+          baseline_hash:l2.baselineHash,baseline_context:l2.baselineContext,
+        });
+      });
+    };
     recipe.labVersions.forEach(v=>{
       allVariants.push({
         id:v.id,recipe_id:recipe.id,name:v.name||recipe.name,label:v.label,note:v.note||'',
@@ -1392,6 +1428,11 @@ async function saveToSupabase(recipe){
         primo_consulto:v.primoConsulto||null,
         origin_variant_id:v.originVariantId||null,
         contenuto_hash:firmaContenutoBozza(v),
+        // D2: active e' la source of truth applicativa (mai `shared`, che resta
+        // legacy non piu' scritto da qui — vedi nota di riconciliazione).
+        active:v.active===true,
+        intention_initial:v.intentionInitial||null,intention_current:v.intentionCurrent||null,
+        criteria_initial:v.criteriaInitial||null,criteria_current:v.criteriaCurrent||null,
       });
       (v.ingredients||[]).forEach((ing,idx)=>{
         allIngredients.push({
@@ -1403,6 +1444,7 @@ async function saveToSupabase(recipe){
           measured_yield_pct:ing.measuredYieldPct!==undefined&&ing.measuredYieldPct!==null?ing.measuredYieldPct:null,
         });
       });
+      pushL2(v.l2Items,v.id);
     });
     recipe.validatedVariants.forEach(vv=>{
       allVariants.push({
@@ -1412,7 +1454,13 @@ async function saveToSupabase(recipe){
         steps:JSON.stringify(vv.steps||[]),
         validated_at:vv.validatedAt?new Date(vv.validatedAt.split('/').reverse().join('-')).toISOString():new Date().toISOString(),
         media_url:vv.mediaUrl||null,video_url:vv.videoUrl||null,
-        shared:vv.shared===true,
+        // D2: scriviamo SOLO active, mai piu' shared — il campo shared resta
+        // nel DB come legacy non toccato da questo save, fino alla
+        // riconciliazione active<-shared (preparata, non ancora eseguita).
+        active:vv.active===true,
+        origin_variant_id:vv.originVariantId||null, // D3: sopravvive alle transizioni di lifecycle
+        intention_initial:vv.intentionInitial||null,intention_current:vv.intentionCurrent||null,
+        criteria_initial:vv.criteriaInitial||null,criteria_current:vv.criteriaCurrent||null,
       });
       (vv.ingredients||[]).forEach((ing,idx)=>{
         allIngredients.push({
@@ -1425,9 +1473,16 @@ async function saveToSupabase(recipe){
           measured_yield_pct:ing.measuredYieldPct!==undefined&&ing.measuredYieldPct!==null?ing.measuredYieldPct:null,
         });
       });
+      pushL2(vv.l2Items,vv.id);
     });
+    const allL3Items=(recipe.l3Items||[]).map(l3=>({
+      id:l3.id,recipe_id:recipe.id,
+      distilled_content:l3.distilledContent,context_conditions:l3.contextConditions||null,
+      known_limits:l3.knownLimits||null,origin_l2_item_id:l3.originL2ItemId,
+      supersedes_id:l3.supersedesId||null,
+    }));
     const saveRes=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      supabaseAction:'save',data:{recipe:recipeData,variants:allVariants,ingredients:allIngredients}
+      supabaseAction:'save',data:{recipe:recipeData,variants:allVariants,ingredients:allIngredients,l2Items:allL2Items,l3Items:allL3Items}
     })});
     const saveResult=await saveRes.json();
     if(saveResult&&saveResult.ok===false){
@@ -1640,7 +1695,7 @@ function savePreview(){
     id:'lv'+ts,label:p.name||'Nuova Scheda',name:p.name||'Nuova Scheda',note,originVariantId:null,
     portionsCount:parseInt(p.portionsCount)||4,gramsPerPortion:parseFloat(p.gramsPerPortion)||200,portionSize:parseFloat(p.gramsPerPortion)||200,portionUnit:'g',
     ingredients:p.ingredients.map(i=>({...i,id:uid()})),
-    steps:p.steps||[],mediaUrl:null,videoUrl:null,shared:false,
+    steps:p.steps||[],mediaUrl:null,videoUrl:null,active:false,
   });
 
   // Sotto-ricette: comportamento INVARIATO in entrambi i rami — sempre nuove Schede
@@ -1787,7 +1842,7 @@ function creaBozzaDaSorgente(recipeId,attiva){
     portionUnit:sorgente.portionUnit||'g',
     ingredients:(sorgente.ingredients||[]).map(function(i){return Object.assign({},i,{id:"li"+uid()});}),
     steps:[].concat(sorgente.steps||[]),
-    mediaUrl:null,videoUrl:null,shared:false,
+    mediaUrl:null,videoUrl:null,active:false,
     originVariantId:attiva?attiva.id:null, // memoria certa: da quale Ricetta attiva è nata (o esplicitamente nessuna)
   };
   upRec(recipeId,function(r){
@@ -1838,7 +1893,7 @@ function duplicaVersioneLAB(recipeId){
     steps:[...v.steps],
     mediaUrl:null,
     videoUrl:null,
-    shared:false,
+    active:false,
     originVariantId:(v.originVariantId!==undefined?v.originVariantId:null), // stessa origine della bozza da cui si continua a esplorare
   };
   upRec(recipeId,function(r){
@@ -1874,7 +1929,8 @@ async function creaSchedaDaLab(recipeId){
     portionSize:v.portionSize||v.gramsPerPortion,portionUnit:v.portionUnit||'g',
     ingredients:v.ingredients.map(i=>({...i,id:uid()})),
     steps:[...(v.steps||[])],
-    mediaUrl:null,videoUrl:null,shared:false,
+    mediaUrl:null,videoUrl:null,active:false,
+    l2Items:[],intentionInitial:null,intentionCurrent:null,criteriaInitial:null,criteriaCurrent:null,
   };
   const newRecipe={
     id:newId,name:nomeNuova,category:recipe.category,department:recipe.department||'Cucina',
@@ -1927,11 +1983,13 @@ function rendiAttiva(recipeId){
   }
   if(!confirm('Rendere attiva questa bozza? Diventerà una Ricetta attiva. La bozza nel LAB si chiuderà.'))return;
 
+  // D3: stesso variant.id lungo tutto il lifecycle (lab -> attiva). Un nuovo
+  // id nasce SOLO nel vero branching (creaBozzaDaSorgente/duplicaVersioneLAB/ecc).
   const nv={
-    id:'vv'+Date.now(),
+    id:v.id,
     name:v.name||recipe.name,
     status:'approved',
-    shared:true,
+    active:true,
     validatedAt:new Date().toLocaleDateString('it-IT'),
     portionsCount:v.portionsCount,
     gramsPerPortion:v.gramsPerPortion,
@@ -1945,6 +2003,10 @@ function rendiAttiva(recipeId){
     })),
     steps:[...(v.steps||[])],
     mediaUrl:v.mediaUrl||null,videoUrl:v.videoUrl||null,
+    originVariantId:v.originVariantId||null, // D3: sopravvive alla transizione di lifecycle
+    l2Items:v.l2Items||[], // PSL: L2 segue la Ricetta, mai copiato in una nuova identita'
+    intentionInitial:v.intentionInitial||null,intentionCurrent:v.intentionCurrent||null,
+    criteriaInitial:v.criteriaInitial||null,criteriaCurrent:v.criteriaCurrent||null,
   };
 
   S.view='ricetta-madre-v2'; // la bozza ha concluso il ciclo: si torna alla Scheda
@@ -1970,9 +2032,12 @@ function onValidate(){
   const v=curLab(recipe);if(!v)return;
   const name=(v.name||recipe.name||'').trim();
   if(!name){toast('Questa bozza non ha un titolo.','ti-alert-circle');return;}
+  // D3: stesso variant.id lungo tutto il lifecycle (lab -> validated). Un
+  // nuovo id nasce SOLO nel vero branching (creaBozzaDaSorgente/duplicaVersioneLAB/ecc).
   const nv={
-    id:'vv'+Date.now(),name,
+    id:v.id,name,
     status:'approved',
+    active:false,
     validatedAt:new Date().toLocaleDateString('it-IT'),
     portionsCount:v.portionsCount,
     gramsPerPortion:v.gramsPerPortion,
@@ -1986,7 +2051,10 @@ function onValidate(){
     })),
     steps:[...v.steps],
     mediaUrl:v.mediaUrl||null,videoUrl:v.videoUrl||null,
-    shared:false,
+    originVariantId:v.originVariantId||null, // D3: sopravvive alla transizione di lifecycle
+    l2Items:v.l2Items||[], // PSL: L2 segue la Ricetta, mai copiato in una nuova identita'
+    intentionInitial:v.intentionInitial||null,intentionCurrent:v.intentionCurrent||null,
+    criteriaInitial:v.criteriaInitial||null,criteriaCurrent:v.criteriaCurrent||null,
   };
   // Step 5: registra evento in cronologia
   addHistory(nv.id,'approvata',name);
@@ -2007,7 +2075,7 @@ async function confirmValidate(){
   var isManager=S.familyManagerMode;
   S.familyManagerMode=false;
   if(!isManager){
-    // Fase 5: la nuova variante nasce con status:'approved' e shared:false — nessun automatismo su produzione
+    // Fase 5: la nuova variante nasce con status:'approved' e active:false — nessun automatismo su produzione
     _saveLocked=true;
     if(_saveTimer[id])clearTimeout(_saveTimer[id]);
     var fromBozzaId=S.pendingValidatedFromBozzaId;
@@ -3278,9 +3346,9 @@ function renderConfronto(recipe){
   function colonna(v,cls){
     if(!v)return `<div class="confronto-col"><div class="confronto-col-header ${cls}" style="color:var(--mid)">Seleziona Ricetta attiva</div><div class="confronto-empty">Scegli una Ricetta attiva dal menu sopra</div></div>`;
     const tot=v.ingredients.reduce((s,i)=>s+cnum(i.qty),0);
-    const isSharedV=v.shared===true&&v.status!=='retired';
+    const isActiveV=v.active===true&&v.status!=='retired';
     return `<div class="confronto-col">
-      <div class="confronto-col-header ${cls}">${v.name}${isSharedV?' ★':''}</div>
+      <div class="confronto-col-header ${cls}">${v.name}${isActiveV?' ★':''}</div>
       ${v.ingredients.length===0?`<div class="confronto-empty">Nessun ingrediente</div>`:
         v.ingredients.map(ing=>{
           const altro=cls==='col-a'?vB:vA;
@@ -3306,11 +3374,11 @@ function renderConfronto(recipe){
   <div class="confronto-selectors">
     <select class="confronto-select" onchange="S.confrontoA=this.value||null;render()">
       <option value="">— Ricetta attiva A —</option>
-      ${varianti.map(v=>`<option value="${v.id}" ${S.confrontoA===v.id?'selected':''}>${v.name}${v.shared&&v.status!=='retired'?' ★':''}</option>`).join('')}
+      ${varianti.map(v=>`<option value="${v.id}" ${S.confrontoA===v.id?'selected':''}>${v.name}${v.active&&v.status!=='retired'?' ★':''}</option>`).join('')}
     </select>
     <select class="confronto-select" onchange="S.confrontoB=this.value||null;render()">
       <option value="">— Ricetta attiva B —</option>
-      ${varianti.map(v=>`<option value="${v.id}" ${S.confrontoB===v.id?'selected':''}>${v.name}${v.shared&&v.status!=='retired'?' ★':''}</option>`).join('')}
+      ${varianti.map(v=>`<option value="${v.id}" ${S.confrontoB===v.id?'selected':''}>${v.name}${v.active&&v.status!=='retired'?' ★':''}</option>`).join('')}
     </select>
   </div>
 
@@ -3421,7 +3489,7 @@ function renderRicettaMadreV2(recipe){
         </button>
         <div class="si-riga-azioni">
           <button class="si-riga-btn" onclick="S.rmv2AttivaEspansa['${v.id}']=!S.rmv2AttivaEspansa['${v.id}'];render()">${espansa?'Chiudi':'Contenuto'}</button>
-          <button class="si-riga-btn" onclick="toggleSharedV2('${recipe.id}','${v.id}',true)" title="Disattiva per la produzione">Disattiva</button>
+          <button class="si-riga-btn" onclick="toggleActiveV2('${recipe.id}','${v.id}',true)" title="Disattiva per la produzione">Disattiva</button>
         </div>
         ${espansa?`<div class="si-riga-dettaglio">${renderContenutoVariante(v)}</div>`:''}
       </div>`;
@@ -3445,7 +3513,7 @@ function renderRicettaMadreV2(recipe){
         <span class="si-riga-sub">Pronta il ${v.validatedAt}</span>
       </button>
       <div class="si-riga-azioni">
-        <button class="si-riga-btn" onclick="toggleSharedV2('${recipe.id}','${v.id}',false)">Attiva</button>
+        <button class="si-riga-btn" onclick="toggleActiveV2('${recipe.id}','${v.id}',false)">Attiva</button>
         <button class="si-riga-btn" onclick="retireVariant('${recipe.id}','${v.id}')" title="Archivia Ricetta">Archivia</button>
       </div>
     </div>`).join('')}`:'';
@@ -3979,12 +4047,12 @@ function renderLabRecipe(recipe){
     <div class="card-label"><i class="ti ti-circle-check"></i> Varianti validate (${recipe.validatedVariants.length})</div>
     <div class="variants-grid">
       ${recipe.validatedVariants.map(vv=>{
-        const isShared=vv.shared===true&&vv.status!=='retired';
+        const isActive=vv.active===true&&vv.status!=='retired';
         const isRetired=vv.status==='retired';
-        return `<div class="variant-card ${isShared?'production':''}">
-          <div class="vc-dot ${isShared?'production':'validated'}"></div>
+        return `<div class="variant-card ${isActive?'production':''}">
+          <div class="vc-dot ${isActive?'production':'validated'}"></div>
           <div style="flex:1"><div class="vc-name">${vv.name}</div><div class="vc-meta">${vv.portionsCount} porz · ${vv.gramsPerPortion}g/porz · ${vv.validatedAt}</div></div>
-          ${isShared?'<span class="vc-prod-badge">Attiva</span>':isRetired?'<span class="vc-prod-badge" style="color:var(--light)">Archiviata</span>':'<span class="vc-prod-badge validated">Pronta</span>'}
+          ${isActive?'<span class="vc-prod-badge">Attiva</span>':isRetired?'<span class="vc-prod-badge" style="color:var(--light)">Archiviata</span>':'<span class="vc-prod-badge validated">Pronta</span>'}
           <button onclick="deleteVariant('${recipe.id}','${vv.id}')" title="Elimina" style="background:none;border:none;cursor:pointer;color:var(--light);font-size:13px;padding:4px;transition:color 0.12s" onmouseover="this.style.color='#c0392b'" onmouseout="this.style.color='var(--light)'"><i class="ti ti-trash"></i></button>
         </div>`;
       }).join('')}
@@ -4104,7 +4172,7 @@ function renderProdRecipe(recipe){
       ${attiveOra.map(v=>`<button class="btn btn-outline btn-sm" style="display:block;width:100%;text-align:left;margin-bottom:8px" onclick="S.selectedVariantId='${v.id}';render()">${v.name}</button>`).join('')}
     </div>`;
   }
-  // Fase 5: prima variante shared:true, fallback alla prima validata
+  // Fase 5: prima variante active:true, fallback alla prima validata
   const varId=S.selectedVariantId||attiveOra[0]?.id||(recipe.validatedVariants.find(v=>v.status!=='retired'))?.id;
   const vv=recipe.validatedVariants.find(v=>v.id===varId);
   if(!vv)return`<div class="card" style="text-align:center;padding:40px">
@@ -4204,13 +4272,13 @@ function renderProdRecipe(recipe){
     <div class="card-label"><i class="ti ti-layers"></i> Altre varianti</div>
     <div class="variants-grid">
       ${recipe.validatedVariants.filter(v=>v.id!==vv.id).map(v2=>{
-        const isShared2=v2.shared===true&&v2.status!=='retired';
+        const isActive2=v2.active===true&&v2.status!=='retired';
         const isRetired2=v2.status==='retired';
         return `
       <div class="variant-card" onclick="S.selectedVariantId='${v2.id}';render()">
-        <div class="vc-dot ${isShared2?'production':'validated'}"></div>
+        <div class="vc-dot ${isActive2?'production':'validated'}"></div>
         <div style="flex:1"><div class="vc-name">${v2.name}</div><div class="vc-meta">${v2.portionsCount} porz · ${v2.gramsPerPortion}g/porz</div></div>
-        ${isShared2?'<span class="vc-prod-badge">Attiva</span>':isRetired2?'<span class="vc-prod-badge" style="color:var(--light)">Archiviata</span>':'<span class="vc-prod-badge validated">Pronta</span>'}
+        ${isActive2?'<span class="vc-prod-badge">Attiva</span>':isRetired2?'<span class="vc-prod-badge" style="color:var(--light)">Archiviata</span>':'<span class="vc-prod-badge validated">Pronta</span>'}
       </div>`;}).join('')}
     </div>
   </div>`:''}`;
@@ -4549,7 +4617,7 @@ function renderAttive(){
 }
 
 // "Condividi con lo staff" — UX compatibile col principio "Attiva ≠ Condivisa":
-// non tocca mai `shared`/lifecycle, è uno stato separato e, per ora, solo
+// non tocca mai `active`/lifecycle, è uno stato separato e, per ora, solo
 // client-side (vedi limiti). Riusa il pattern overlay già in uso nell'app.
 function apriCondividiStaff(variantId){
   S.condividiStaffVariantId=variantId;

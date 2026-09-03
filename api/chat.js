@@ -59,58 +59,82 @@ export default async function handler(req, res) {
     }
 
     if (body.supabaseAction === 'load') {
-      const [r1, r2, r3] = await Promise.all([
+      const [r1, r2, r3, r4, r5] = await Promise.all([
         fetch(SB + '/rest/v1/recipes?select=*&order=created_at.asc', { headers: SH_READ }),
         fetch(SB + '/rest/v1/variants?select=*&order=created_at.asc', { headers: SH_READ }),
-        fetch(SB + '/rest/v1/ingredients?select=*&order=sort_order.asc', { headers: SH_READ })
+        fetch(SB + '/rest/v1/ingredients?select=*&order=sort_order.asc', { headers: SH_READ }),
+        fetch(SB + '/rest/v1/l2_items?select=*&order=created_at.asc', { headers: SH_READ }),
+        fetch(SB + '/rest/v1/l3_items?select=*&order=created_at.asc', { headers: SH_READ })
       ]);
-      const [recipes, variants, ingredients] = await Promise.all([r1.json(), r2.json(), r3.json()]);
-      return res.status(200).json({ recipes, variants, ingredients });
+      const [recipes, variants, ingredients, l2_items, l3_items] = await Promise.all([r1.json(), r2.json(), r3.json(), r4.json(), r5.json()]);
+      return res.status(200).json({ recipes, variants, ingredients, l2_items, l3_items });
     }
 
     if (body.supabaseAction === 'save') {
-      const { recipe, variants, ingredients } = body.data;
-      const errors = [];
+      const { recipe, variants, ingredients, l2Items, l3Items } = body.data;
 
-      // 1. Upsert ricetta
-      const r1 = await sbPost('recipes', recipe);
-      if (r1.error) errors.push('recipes: ' + r1.error);
+      // D4 — SAVE FAILURE POLICY: fail-fast. Al primo errore reale di
+      // persistenza, interrompe la sequenza e non scrive le entita'
+      // successive. Non e' una transazione (nessun rollback di cio' che e'
+      // gia' stato scritto), e' solo interruzione della sequenza.
+      const mustSave = async (table, data, label) => {
+        const r = await sbPost(table, data);
+        if (r.error) throw new Error(label + ': ' + r.error);
+      };
 
-      // 2. Upsert varianti una per volta
-      if (variants && variants.length) {
-        for (const v of variants) {
-          const rv = await sbPost('variants', v);
-          if (rv.error) errors.push('variant ' + v.id + ': ' + rv.error);
+      try {
+        // 1. Upsert ricetta
+        await mustSave('recipes', recipe, 'recipes');
+
+        // 2. Upsert varianti una per volta — si ferma alla prima che fallisce
+        if (variants && variants.length) {
+          for (const v of variants) {
+            await mustSave('variants', v, 'variant ' + v.id);
+          }
         }
-      }
 
-      // 3. Ingredienti: upsert tutti, poi elimina gli orfani per variante
-      if (ingredients && ingredients.length) {
-        // Upsert tutti gli ingredienti
-        const ri = await sbPost('ingredients', ingredients);
-        if (ri.error) {
-          errors.push('ingredients upsert: ' + ri.error);
-        } else {
-          // Elimina ingredienti orfani: per ogni variant_id, elimina quelli con ID non presenti
+        // 3. Ingredienti: strategia avanzata preservata — upsert tutti, poi
+        //    elimina gli orfani per variante. Questo pattern resta valido
+        //    SOLO per ingredients (liste senza identita' stabile richiesta):
+        //    MAI applicarlo a l2_items/l3_items.
+        if (ingredients && ingredients.length) {
+          await mustSave('ingredients', ingredients, 'ingredients upsert');
+
           const byVariant = {};
           ingredients.forEach(i => {
             if (!byVariant[i.variant_id]) byVariant[i.variant_id] = [];
             byVariant[i.variant_id].push(i.id);
           });
           for (const [vid, ids] of Object.entries(byVariant)) {
-            // Elimina ingredienti di questa variante che non sono nell'elenco corrente
             const notInIds = ids.map(id => 'id.neq.' + id).join(',');
-            await fetch(SB + '/rest/v1/ingredients?variant_id=eq.' + vid + '&and=(' + notInIds + ')', {
+            const dr = await fetch(SB + '/rest/v1/ingredients?variant_id=eq.' + vid + '&and=(' + notInIds + ')', {
               method: 'DELETE', headers: SH_DEL
             });
+            if (!dr.ok) {
+              const detail = await dr.text().catch(() => '');
+              throw new Error('ingredients orphan-delete (variant ' + vid + '): ' + detail);
+            }
           }
         }
+
+        // 4. L3Items: identita' stabile, sempre upsert per id, mai delete+insert.
+        //    Scritto PRIMA di L2 (D4).
+        if (l3Items && l3Items.length) {
+          await mustSave('l3_items', l3Items, 'l3_items');
+        }
+
+        // 5. L2Items: identita' stabile, sempre upsert per id, mai delete+insert.
+        //    Scritto per ULTIMO (D4): se e' l'ultimo step, un suo fallimento
+        //    non lascia mai L2 "orfani" gia' persistiti mentre uno step
+        //    successivo fallisce, perche' non c'e' piu' alcuno step successivo.
+        if (l2Items && l2Items.length) {
+          await mustSave('l2_items', l2Items, 'l2_items');
+        }
+      } catch (saveError) {
+        console.error('Save error (fail-fast):', saveError.message);
+        return res.status(200).json({ ok: false, errors: [saveError.message] });
       }
 
-      if (errors.length > 0) {
-        console.error('Save errors:', errors);
-        return res.status(200).json({ ok: false, errors });
-      }
       return res.status(200).json({ ok: true });
     }
 
