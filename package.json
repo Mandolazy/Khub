@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "test": "node scripts/test-persistent-state.js",
-    "test:supabase": "node scripts/test-supabase-roundtrip.js"
+    "test": "node scripts/test-persistent-state.js && node scripts/test-m1.js",
+    "test:supabase": "node scripts/test-supabase-roundtrip.js",
+    "test:m1-live": "node scripts/test-m1-live.js"
   }
 }

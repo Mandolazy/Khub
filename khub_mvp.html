@@ -144,15 +144,12 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
 .variants-grid{display:flex;flex-direction:column;gap:6px;}
 
 /* ── AI CHAT ── */
-.ai-panel{display:flex;flex-direction:column;gap:10px;}
-.ai-msgs{display:flex;flex-direction:column;gap:8px;max-height:200px;overflow-y:auto;}
-.ai-msg{padding:8px 12px;border-radius:var(--r-md);font-size:13px;line-height:1.5;}
-.ai-msg.user{background:var(--lab-light);color:var(--lab);margin-left:20%;}
-.ai-msg.bot{background:var(--cream);color:var(--dark);margin-right:20%;}
-.ai-input-row{display:flex;gap:8px;}
-.ai-input{flex:1;background:var(--cream);border:1px solid var(--border);border-radius:var(--r-md);padding:8px 12px;font-family:inherit;font-size:13px;color:var(--dark);outline:none;resize:none;}
-.ai-input:focus{border-color:var(--lab);background:var(--white);}
-.ai-sugg{background:var(--lab-light);border:1px solid var(--lab-border);border-radius:var(--r-md);padding:10px 14px;font-size:12px;color:var(--lab);display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.m1-text{font-size:13px;color:var(--dark);line-height:1.6;background:var(--cream);border-radius:var(--r-md);padding:12px 14px;white-space:pre-wrap;}
+.m1-badge{font-size:11px;font-weight:600;background:var(--lab-light);color:var(--lab);padding:3px 10px;border-radius:999px;display:inline-flex;align-items:center;gap:5px;}
+.m1-obs{display:flex;flex-direction:column;gap:2px;padding:8px 10px;background:var(--cream);border-radius:var(--r-sm);margin-top:6px;}
+.m1-obs-label{font-size:12px;font-weight:600;color:var(--lab);}
+.m1-obs-text{font-size:12px;color:var(--mid);}
+.m1-error{font-size:12px;color:#c0392b;background:rgba(192,57,43,0.08);border-radius:var(--r-sm);padding:8px 10px;display:flex;align-items:center;gap:6px;}
 
 /* ── VOICE ── */
 .voice-panel{display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
@@ -306,8 +303,9 @@ const S = {
   showValidateBar: false,
   pendingVariantName: '',
   toast: null,
-  aiMsgs: {},
-  aiSugg: null,
+  m1Loading: {},
+  m1Text: {},
+  m1Error: {},
   recording: false,
   mediaRecorder: null,
   voiceNotes: {},
@@ -735,34 +733,77 @@ function onVarIngQty(recipeId,varId,ingId,val){
 }
 
 // ══════════════════════════════════════════════════════════
-// AI CONSULTANT
+// M1 — PRIMO CONSULTO
+// MichelinAI non modifica mai autonomamente la Ricetta: produce solo una
+// lettura e osservazioni L2 unengaged. Lo chef decide sempre le modifiche.
 // ══════════════════════════════════════════════════════════
-async function sendAI(recipeId){
-  const inp=document.getElementById('ai-input');
-  const msg=inp?.value?.trim();if(!msg)return;
-  const recipe=R(recipeId);const v=curLab(recipe);
-  S.aiMsgs[recipeId]=[...(S.aiMsgs[recipeId]||[]),{role:'user',text:msg}];
-  if(inp)inp.value='';render();
-  const sys=`Sei un consulente di cucina professionale. Stai analizzando la ricetta "${recipe.name}". Ingredienti attuali: ${(v?.ingredients||[]).map(i=>i.qty+i.unit+' '+i.name).join(', ')}. Rispondi in modo conciso e pratico. Se suggerisci una modifica a un ingrediente, termina con JSON su riga separata: {"action":"update","ingName":"nome","newQty":100,"newName":"nome opzionale"}`;
-  try{
-    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:600,system:sys,messages:(S.aiMsgs[recipeId]||[]).map(m=>({role:m.role==='user'?'user':'assistant',content:m.text}))})});
-    const data=await res.json();
-    const text=(data.content||[]).map(c=>c.text||'').join('');
-    const lines=text.split('\n');
-    let suggLine=null;
-    const cleanLines=lines.filter(l=>{if(l.trim().startsWith('{')){try{JSON.parse(l.trim());suggLine=l.trim();return false;}catch(e){}}return true;});
-    const cleanText=cleanLines.join('\n').trim();
-    S.aiMsgs[recipeId]=[...(S.aiMsgs[recipeId]||[]),{role:'bot',text:cleanText}];
-    if(suggLine){try{S.aiSugg=JSON.parse(suggLine);}catch(e){}}
-  }catch(e){S.aiMsgs[recipeId]=[...(S.aiMsgs[recipeId]||[]),{role:'bot',text:'Errore. Riprova.'}];}
-  render();
-}
+function hasM1(v){return(v&&v.l2Items||[]).some(x=>x.provenanceType==='m1');}
 
-function applyAISugg(recipeId){
-  if(!S.aiSugg)return;
-  const sugg=S.aiSugg;S.aiSugg=null;
-  upLab(recipeId,v=>({...v,ingredients:v.ingredients.map(i=>i.name.toLowerCase().includes(sugg.ingName?.toLowerCase()||'')?{...i,qty:parseFloat(sugg.newQty)||i.qty,name:sugg.newName||i.name}:i)}));
-  toast('Suggerimento applicato','ti-sparkles');
+async function runM1(recipeId){
+  const recipe=R(recipeId);if(!recipe)return;
+  const v=curLab(recipe);if(!v)return;
+  if(hasM1(v))return; // M1 avviene una sola volta per Ricetta
+  S.m1Loading[recipeId]=true;S.m1Error[recipeId]=null;render();
+  try{
+    const snapshot={
+      ingredients:(v.ingredients||[]).map(i=>({name:i.name,qty:i.qty,unit:i.unit})),
+      steps:v.steps||[],
+      portionsCount:v.portionsCount,gramsPerPortion:v.gramsPerPortion,
+      note:v.note||'',
+    };
+    const payload={
+      mode:'m1',
+      recipe:{id:recipe.id,name:recipe.name,category:recipe.category},
+      variant:{id:v.id,ingredients:snapshot.ingredients,steps:snapshot.steps,portionsCount:snapshot.portionsCount,gramsPerPortion:snapshot.gramsPerPortion,note:snapshot.note},
+      intention:{initial:v.intentionInitial||null,current:v.intentionCurrent||null},
+      criteria:{initial:v.criteriaInitial||null,current:v.criteriaCurrent||null},
+      l3:(recipe.l3Items||[]).slice(0,20).map(x=>({distilledContent:x.distilledContent,contextConditions:x.contextConditions,knownLimits:x.knownLimits})),
+    };
+    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const data=await res.json().catch(()=>null);
+    if(!res.ok||!data)throw new Error('Chiamata AI non riuscita');
+    const text=(data.content||[]).map(c=>c.text||'').join('');
+    if(!text.trim())throw new Error('Risposta AI vuota');
+    const marker='===M1_OBSERVATIONS===';
+    const idx=text.indexOf(marker);
+    if(idx===-1)throw new Error('Blocco osservazioni mancante nella risposta');
+    const userText=text.slice(0,idx).trim();
+    if(!userText)throw new Error('Lettura del Primo Consulto vuota');
+    let jsonPart=text.slice(idx+marker.length).trim();
+    jsonPart=jsonPart.replace(/```json|```/g,'').trim();
+    let parsed;
+    try{parsed=JSON.parse(jsonPart);}catch(e){throw new Error('Blocco osservazioni non e\'JSON valido');}
+    if(!parsed||!Array.isArray(parsed.observations))throw new Error('Formato osservazioni non valido');
+    const validObs=parsed.observations.filter(o=>o&&typeof o.content==='string'&&o.content.trim());
+    if(validObs.length===0)throw new Error('Nessuna osservazione valida prodotta');
+
+    const baseline=KhubBaseline.compute(snapshot);
+    const newL2=validObs.map(o=>({
+      id:'l2_'+uid(),
+      operationalState:'unengaged',decisionState:'none',
+      content:{label:(o.label&&String(o.label).trim())||o.content.trim().slice(0,60),text:o.content.trim()},
+      evidence:null,provenanceType:'m1',sourceL2ItemId:null,
+      baselineHash:baseline.baseline_hash,baselineContext:baseline.baseline_context,
+    }));
+
+    // Muta lo stato locale solo ora che parsing e validazione sono completi.
+    upLab(recipeId,lab=>({...lab,l2Items:[...(lab.l2Items||[]),...newL2]}));
+    const fresh=R(recipeId);
+    const ok=await saveToSupabase(fresh);
+    if(!ok){
+      // Persistenza fallita: rollback locale, M1 non e' completato.
+      upLab(recipeId,lab=>({...lab,l2Items:(lab.l2Items||[]).filter(x=>!newL2.some(n=>n.id===x.id))}));
+      throw new Error('Salvataggio delle osservazioni non riuscito');
+    }
+    S.m1Text[recipeId]=userText;
+    S.m1Loading[recipeId]=false;
+    toast('Primo Consulto completato','ti-sparkles');
+  }catch(e){
+    console.error('M1 error',e);
+    S.m1Loading[recipeId]=false;
+    S.m1Error[recipeId]=e.message||'Errore nel Primo Consulto';
+  }
+  render();
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1029,6 +1070,30 @@ function renderPreview(){
   </div>`;
 }
 
+function renderM1Panel(recipe,v){
+  const done=hasM1(v);
+  const loading=!!S.m1Loading[recipe.id];
+  const error=S.m1Error[recipe.id];
+  const freshText=S.m1Text[recipe.id];
+  if(loading){
+    return `<div style="display:flex;align-items:center;gap:8px;color:var(--mid);font-size:13px"><i class="ti ti-loader" style="animation:spin 1s linear infinite"></i> MichelinAI sta leggendo la Bozza...</div><style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
+  }
+  if(done){
+    const obs=(v.l2Items||[]).filter(x=>x.provenanceType==='m1');
+    return `
+      <div class="m1-badge"><i class="ti ti-circle-check"></i> Primo Consulto effettuato</div>
+      ${freshText?`<div class="m1-text" style="margin-top:10px">${freshText}</div>`:`
+      <div style="font-size:12px;color:var(--mid);margin-top:10px">Osservazioni emerse dal Primo Consulto:</div>
+      ${obs.map(o=>`<div class="m1-obs"><div class="m1-obs-label">${(o.content&&o.content.label)||'Osservazione'}</div><div class="m1-obs-text">${(o.content&&o.content.text)||''}</div></div>`).join('')}`}
+    `;
+  }
+  return `
+    ${error?`<div class="m1-error"><i class="ti ti-alert-circle"></i> ${error}</div>`:''}
+    <p style="font-size:13px;color:var(--mid);margin:${error?'10px':'0'} 0 12px">MichelinAI legge la Bozza attuale e costruisce una prima lettura tecnica e gastronomica: punti di forza rilevanti, criticita', ipotesi, direzioni utili.</p>
+    <button class="btn btn-lab" onclick="runM1('${recipe.id}')"><i class="ti ti-sparkles"></i> ${error?'Riprova Primo Consulto':'Avvia Primo Consulto'}</button>
+  `;
+}
+
 function renderLabRecipe(recipe){
   const v=curLab(recipe);if(!v)return'';
   const tot=v.ingredients.reduce((s,i)=>s+cnum(i.qty),0);
@@ -1132,17 +1197,8 @@ function renderLabRecipe(recipe){
   </div>
 
   <div class="card">
-    <div class="card-label"><i class="ti ti-robot"></i> Consulente AI</div>
-    <div class="ai-panel">
-      <div class="ai-msgs" id="ai-msgs">
-        ${(S.aiMsgs[recipe.id]||[]).map(m=>`<div class="ai-msg ${m.role}">${m.text}</div>`).join('')}
-      </div>
-      ${S.aiSugg?`<div class="ai-sugg"><i class="ti ti-sparkles"></i><span>Modifica suggerita: <strong>${S.aiSugg.ingName}</strong> → ${S.aiSugg.newQty}${S.aiSugg.newName?', rinomina in "'+S.aiSugg.newName+'"':''}</span><button class="btn btn-lab btn-sm" onclick="applyAISugg('${recipe.id}')">Applica</button><button class="btn btn-outline btn-sm" onclick="S.aiSugg=null;render()">Ignora</button></div>`:''}
-      <div class="ai-input-row">
-        <textarea class="ai-input" id="ai-input" rows="2" placeholder="Chiedi consiglio sulla ricetta..."></textarea>
-        <button class="btn btn-lab btn-icon" id="btn-send-ai"><i class="ti ti-send"></i></button>
-      </div>
-    </div>
+    <div class="card-label"><i class="ti ti-robot"></i> MichelinAI — Primo Consulto</div>
+    ${renderM1Panel(recipe,v)}
   </div>
 
   <div class="card">
@@ -1431,12 +1487,6 @@ function bindEvents(){
   const valInput=document.getElementById('validate-name');
   if(valInput)valInput.addEventListener('keydown',e=>{if(e.key==='Enter')onValidate();});
 
-  // AI
-  const btnSendAI=document.getElementById('btn-send-ai');
-  if(btnSendAI&&recipe)btnSendAI.addEventListener('click',()=>sendAI(recipe.id));
-  const aiInput=document.getElementById('ai-input');
-  if(aiInput&&recipe)aiInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendAI(recipe.id);}});
-
   // Voice
   const btnVoice=document.getElementById('btn-voice');
   if(btnVoice&&recipe)btnVoice.addEventListener('click',()=>toggleRecording(recipe.id));
@@ -1465,10 +1515,6 @@ function bindEvents(){
   if(bnavLab)bnavLab.addEventListener('click',()=>{S.mode='lab';if(S.selectedId)S.view='recipe';render();});
   const bnavProd=document.getElementById('bnav-prod');
   if(bnavProd)bnavProd.addEventListener('click',()=>{S.mode='produzione';if(S.selectedId)S.view='recipe';render();});
-
-  // Scroll ai msgs
-  const aiMsgs=document.getElementById('ai-msgs');
-  if(aiMsgs)aiMsgs.scrollTop=aiMsgs.scrollHeight;
 }
 
 function handleLoadImage(file){
