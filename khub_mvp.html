@@ -866,6 +866,10 @@ const S = {
   m1LoadingKey: null, // 'recipeId|variantId' della bozza per cui sta caricando — evita di mostrare la rotellina sulla bozza sbagliata
   m1Error: {}, // { [variantId]: string } — errore dell'ultimo tentativo M1, per bozza
   m1Text: {}, // { [variantId]: string } — testo user-facing dell'ultimo M1 riuscito in QUESTA sessione (non persistito: dopo reload si vedono solo le osservazioni L2)
+  m2Loading: false, // true mentre MichelinAI sta rispondendo in modalità Sviluppo (M2, R3D)
+  m2LoadingKey: null, // 'recipeId|variantId' della bozza per cui sta caricando
+  m2Error: {}, // { [variantId]: string } — errore dell'ultimo turno M2 per bozza
+  m2Result: {}, // { [variantId]: {response,classification,l2Updates,l2New,intentionChange,criteriaChange,l3Candidates} } — risultato PREPARATO ma MAI persistito (R3D): nessuna scrittura su v.l2Items/recipe.l3Items/intention/criteria/Supabase. Effimero, si azzera con un nuovo turno o un reload.
   mostraConfrontoOrigine: false, // Sviluppo della Scheda — confronto con la versione di partenza, mai automatico
   interpretazioneLoading: false,
   interpretazioneModifiche: null, // {recipeId,variantId,osservazioni} — mai persistito, solo per la sessione
@@ -2839,6 +2843,121 @@ function costruisciPayloadM2(recipeId, message){
     criteria:{initial:v.criteriaInitial!=null?v.criteriaInitial:null,current:v.criteriaCurrent!=null?v.criteriaCurrent:null},
     message:message||'',
   };
+}
+
+// ══════════════════════════════════════════════════════════
+// M2 — SVILUPPO: chiamata reale + parsing + preparazione (R3D)
+//
+// CALL + PARSE + VALIDATION + PREPARAZIONE — MAI persistenza qui (R3E).
+// Nessuna scrittura su v.l2Items/recipe.l3Items/intention/criteria/
+// Supabase come conseguenza di questa funzione: il risultato preparato
+// vive solo in S.m2Result, effimero.
+//
+// Non ancora collegata a nessun pulsante della UI (R3F): testabile
+// programmaticamente, per costruzione (stesso principio di runM1(), qui
+// applicato più stringentemente perché R3D non deve persistere nulla).
+// ══════════════════════════════════════════════════════════
+async function runM2(recipeId, message){
+  const recipe=R(recipeId);
+  const v=recipe&&curLab(recipe);
+  if(!v)return;
+  if(S.m2Loading)return; // doppio clic / seconda chiamata mentre la prima è attiva
+  const variantId=v.id; // catturato ORA
+
+  // Baseline corrente calcolata UNA VOLTA per il turno (come runM1()).
+  const baselineAlMomentoDellInvio=KhubReconciliation.computeCurrentBaseline(v);
+  const classification=KhubReconciliation.classifyBaseline(v.l2Items||[],baselineAlMomentoDellInvio.baseline_hash);
+
+  const payload=costruisciPayloadM2(recipeId,message);
+  if(!payload)return;
+
+  const chiaveM2=recipeId+'|'+variantId;
+  S.m2Loading=true;S.m2LoadingKey=chiaveM2;S.m2Error[variantId]=null;render();
+
+  try{
+    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const data=await res.json().catch(()=>null);
+    if(!res.ok||!data)throw new Error('Chiamata AI non riuscita');
+    const text=(data.content||[]).map(c=>c.text||'').join('');
+    if(!text.trim())throw new Error('Risposta AI vuota');
+
+    const marker='===M2_UPDATE===';
+    const idx=text.indexOf(marker);
+    if(idx===-1)throw new Error('Blocco strutturato mancante nella risposta');
+    const responseText=text.slice(0,idx).trim();
+    if(!responseText)throw new Error('Risposta rivolta allo chef vuota');
+    let jsonPart=text.slice(idx+marker.length).trim();
+    jsonPart=jsonPart.replace(/```json|```/g,'').trim();
+    let parsed;
+    try{parsed=JSON.parse(jsonPart);}catch(e){throw new Error('Blocco strutturato non è JSON valido');}
+    if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw new Error('Blocco strutturato non è un oggetto valido');
+    if(!Array.isArray(parsed.l2_updates)||!Array.isArray(parsed.l2_new)||!Array.isArray(parsed.l3_candidates)){
+      throw new Error('Forma del blocco strutturato non valida: array attesi assenti (l2_updates/l2_new/l3_candidates)');
+    }
+    if(!('intention_change' in parsed)||!('criteria_change' in parsed)){
+      throw new Error('Forma del blocco strutturato non valida: intention_change/criteria_change assenti');
+    }
+    if(parsed.intention_change!==null&&(typeof parsed.intention_change!=='object'||Array.isArray(parsed.intention_change))){
+      throw new Error('intention_change non valido');
+    }
+    if(parsed.criteria_change!==null&&(typeof parsed.criteria_change!=='object'||Array.isArray(parsed.criteria_change))){
+      throw new Error('criteria_change non valido');
+    }
+
+    // Controllo avanzato (stale-Bozza), più severo di M1: non basta l'id,
+    // perché la Bozza potrebbe essere cambiata restando sullo stesso
+    // variant.id. Si ricalcola il baseline corrente e lo si confronta con
+    // quello catturato PRIMA della chiamata.
+    const recipeOra=R(recipeId);
+    const labOra=recipeOra&&curLab(recipeOra);
+    const baselineOra=labOra?KhubReconciliation.computeCurrentBaseline(labOra):null;
+    if(!recipeOra||!labOra||labOra.id!==variantId||!baselineOra||baselineOra.baseline_hash!==baselineAlMomentoDellInvio.baseline_hash){
+      toast('La Bozza è cambiata nel frattempo: risultato di MichelinAI scartato.','ti-alert-circle');
+      S.m2Loading=false;S.m2LoadingKey=null;
+      render();
+      return;
+    }
+
+    // Validazione/preparazione — MAI persistenza, MAI mutazione di PSL.
+    // R3D: nessun rilevatore affidabile di attribuzione chef esiste ancora
+    // (progettarlo è compito di R3E) — chefAttributedThisTurn resta
+    // SEMPRE false qui: qualunque transizione verso confirmed viene
+    // rifiutata dal validator, mai accettata silenziosamente per
+    // l'assenza (non per l'esistenza) di un segnale.
+    const opts={chefAttributedThisTurn:false};
+
+    const l2UpdatesResult=KhubReconciliation.applyL2Updates(v.l2Items||[],parsed.l2_updates,baselineAlMomentoDellInvio,opts);
+
+    const l2NewResult=parsed.l2_new.map(function(proposedNew){
+      return{proposedNew:proposedNew,validation:KhubReconciliation.validateL2New(proposedNew,opts)};
+    });
+
+    const existingL2ById={};
+    (v.l2Items||[]).forEach(function(item){existingL2ById[item.id]=item;});
+    const l3CandidatesResult=parsed.l3_candidates.map(function(candidate){
+      return{candidate:candidate,validation:KhubReconciliation.validateL3Candidate(candidate,existingL2ById)};
+    });
+
+    // Risultato PREPARATO, mai persistito: l2UpdatesResult.items è una
+    // preview locale (non scritta su v.l2Items), applied/rejected
+    // riportano cosa è stato validato e cosa no.
+    S.m2Result[variantId]={
+      response:responseText,
+      classification:classification,
+      l2Updates:l2UpdatesResult,
+      l2New:l2NewResult,
+      intentionChange:parsed.intention_change,
+      criteriaChange:parsed.criteria_change,
+      l3Candidates:l3CandidatesResult,
+    };
+    S.m2Loading=false;S.m2LoadingKey=null;
+    toast('Risposta di MichelinAI pronta (non ancora salvata)','ti-message-chatbot');
+  }catch(e){
+    console.error('[M2] errore:',e);
+    S.m2Loading=false;S.m2LoadingKey=null;
+    S.m2Error[variantId]=e.message||'Errore nella risposta di MichelinAI';
+  }
+  render();
 }
 
 // Sviluppo della Scheda — Interpretazione delle modifiche: primo vero intervento

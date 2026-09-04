@@ -271,10 +271,12 @@ test('khub_mvp.html carica lib/reconciliation.js dopo lib/baseline.js, prima del
   assert.match(html, /<script src="lib\/baseline\.js"><\/script>\s*<script src="lib\/reconciliation\.js"><\/script>\s*<script>/);
 });
 
-test('nessuna funzione applicativa esistente chiama ancora KhubReconciliation (R3C non wire-a la UI)', () => {
-  const html = fs.readFileSync(path.join(ROOT, 'khub_mvp.html'), 'utf8');
-  assert.doesNotMatch(html, /KhubReconciliation\./, 'KhubReconciliation non deve ancora essere chiamato da alcuna funzione applicativa in R3C');
-});
+// NOTA (R3D, approvato dopo il congelamento di R3C): il test che era qui
+// verificava "nessuna funzione applicativa chiama ancora KhubReconciliation"
+// — vero allora, non più per costruzione da quando R3D ha introdotto
+// runM2() come primo chiamante legittimo (era esattamente lo scopo del
+// meccanismo). La verifica del wiring corretto vive ora in
+// scripts/test-m2-runtime.js, insieme al resto del comportamento di runM2.
 
 console.log('');
 console.log(passed + ' passed, ' + failed + ' failed');
