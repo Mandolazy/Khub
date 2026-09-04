@@ -2780,6 +2780,66 @@ function costruisciContestoSchedaLAB(recipeId){
   };
 }
 
+// ══════════════════════════════════════════════════════════
+// M2 — SVILUPPO: Context Builder (R3B)
+// Adapter puro e di sola lettura: prepara, dallo stato PSL già caricato
+// (Ricetta/Bozza corrente, L2, L3, intention/criteria), il payload
+// strutturato previsto dal contratto mode:'m2' congelato in R3A
+// (api/chat.js: buildM2UserMessage).
+//
+// NON riusa costruisciContestoSchedaLAB(): quella funzione produce un
+// formato testuale/italiano pensato per "Chiedi a MichelinAI"/
+// "Interpretazione modifiche" (procedimento come stringa unica, chiavi
+// italiane, confronto con l'origine) — una forma incompatibile con quella
+// esatta richiesta dal contratto M2 (chiavi inglesi, steps come array,
+// nessun campo "origine"). Evolverla per servire entrambi i consumatori
+// avrebbe significato sovraccaricarla di due forme diverse — qui invece
+// un piccolo adapter dedicato, che riusa lo stesso pattern di lookup
+// (R()+curLab(), stessa null-safety) senza duplicare alcuna logica
+// cognitiva: nessun secondo "universo" di context builder, solo un
+// secondo formato di output per lo stesso stato.
+//
+// Nessuna persistenza, nessuna chiamata di rete, nessuna mutazione di
+// stato: legge S/recipe/variant/L2/L3/intention/criteria così come sono
+// e restituisce un nuovo oggetto con array copiati (mai gli stessi
+// riferimenti mutabili). La reconciliation baseline/L2 (R3C) e la
+// persistenza degli aggiornamenti M2 (R3E) NON sono responsabilità di
+// questa funzione — qui si legge soltanto.
+//
+// M1 non ha una rappresentazione separata: le sue osservazioni sono già
+// L2 con provenanceType:'m1' dentro v.l2Items, incluse qui senza alcuna
+// distinzione strutturale (si distinguono, se serve, solo dal campo
+// provenanceType di ciascun item — mai un campo/blocco "m1" a parte).
+//
+// "message" (il turno corrente dello chef) è previsto dal contratto ma il
+// suo wiring reale da UI resta fuori scope in R3B: il chiamante lo passa
+// esplicitamente (stringa vuota se assente), nessuna lettura di stato UI
+// qui dentro.
+function costruisciPayloadM2(recipeId, message){
+  const recipe=R(recipeId);
+  if(!recipe)return null;
+  const v=curLab(recipe);
+  if(!v)return null;
+
+  return{
+    mode:'m2',
+    recipe:{id:recipe.id,name:recipe.name,category:recipe.category},
+    variant:{
+      id:v.id,
+      ingredients:(v.ingredients||[]).map(i=>({name:i.name,qty:i.qty,unit:i.unit})),
+      steps:[...(v.steps||[])],
+      portionsCount:v.portionsCount,
+      gramsPerPortion:v.gramsPerPortion,
+      note:v.note||'',
+    },
+    l2:(v.l2Items||[]).slice(),
+    l3:(recipe.l3Items||[]).slice(),
+    intention:{initial:v.intentionInitial!=null?v.intentionInitial:null,current:v.intentionCurrent!=null?v.intentionCurrent:null},
+    criteria:{initial:v.criteriaInitial!=null?v.criteriaInitial:null,current:v.criteriaCurrent!=null?v.criteriaCurrent:null},
+    message:message||'',
+  };
+}
+
 // Sviluppo della Scheda — Interpretazione delle modifiche: primo vero intervento
 // di MichelinAI in questa modalità. Mai automatico, sempre su richiesta esplicita.
 // Non persiste: resta visibile solo mentre si lavora sulla bozza.
