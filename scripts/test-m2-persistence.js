@@ -113,7 +113,11 @@ function buildM2Result(v, opts) {
   const proposedUpdates = opts.l2Updates || [];
   const baseline = KhubReconciliation.computeCurrentBaseline(v);
   const l2UpdatesResult = KhubReconciliation.applyL2Updates(v.l2Items || [], proposedUpdates, baseline, { chefAttributedThisTurn: false });
-  const l2New = (opts.l2New || []).map(p => ({ proposedNew: p, validation: KhubReconciliation.validateL2New(p, { chefAttributedThisTurn: false }) }));
+  // tempId deterministico (non il vero uid() di runM2, ma stessa forma/ruolo:
+  // stabile, locale, mai un id DB) cosi' i test possono referenziare una
+  // proposta l2_new precisa attraverso piu' chiamate senza dipendere da
+  // un indice posizionale che il pruning di R3F puo' far scorrere.
+  const l2New = (opts.l2New || []).map((p, idx) => ({ tempId: 'm2new_test_' + idx, proposedNew: p, validation: KhubReconciliation.validateL2New(p, { chefAttributedThisTurn: false }) }));
   const existingL2ById = {};
   (v.l2Items || []).forEach(i => { existingL2ById[i.id] = i; });
   const l3Candidates = (opts.l3Candidates || []).map(c => ({ candidate: c, validation: KhubReconciliation.validateL3Candidate(c, existingL2ById) }));
@@ -222,7 +226,7 @@ async function run() {
     const S = makeS([recipe]);
     S.m2Result['v1'] = buildM2Result(curV(recipe), { l2New: [{ operational_state: 'open', decision_state: 'confirmed', content: { text: 'osservazione forte' } }] });
     const apply = makeApply(S, makeSave(true));
-    const res = await apply('r1', { confirmNewL2Indexes: [0] });
+    const res = await apply('r1', { confirmNewL2Ids: ['m2new_test_0'] });
     assert.strictEqual(res.ok, true);
     assert.strictEqual(res.l2Created.length, 1);
     const items = curV(S.recipes[0]).l2Items;
@@ -239,10 +243,10 @@ async function run() {
       ],
     });
     const apply = makeApply(S, makeSave(true));
-    const res = await apply('r1', {}); // nessuna autorizzazione per l'indice 1
+    const res = await apply('r1', {}); // nessuna autorizzazione per la seconda proposta
     assert.strictEqual(res.l2Created.length, 1);
     assert.strictEqual(res.l2Rejected.length, 1);
-    assert.strictEqual(res.l2Rejected[0].index, 1);
+    assert.strictEqual(res.l2Rejected[0].tempId, 'm2new_test_1');
     const items = curV(S.recipes[0]).l2Items;
     assert.strictEqual(items.length, 1, 'un solo L2 nuovo persistito, mai id assegnato al rifiutato');
   });
@@ -474,7 +478,7 @@ async function run() {
       l3Candidates: [l3Candidate],
     });
     const apply = makeApply(S, makeSave(true));
-    const res = await apply('r1', { adoptIntention: true, confirmNewL2Indexes: [0] });
+    const res = await apply('r1', { adoptIntention: true, confirmNewL2Ids: ['m2new_test_0'] });
     assert.strictEqual(res.ok, true);
     assert.ok(Object.isFrozen(intentionProposal) && Object.keys(intentionProposal).length === 1);
     assert.ok(Object.isFrozen(newProposal) && Object.keys(newProposal).length === 3);
@@ -486,6 +490,329 @@ async function run() {
     assert.match(srcRunM2, /S\.m2Result\[variantId\]=\{/);
     assert.match(srcRunM2, /chefAttributedThisTurn:false/);
     assert.doesNotMatch(srcRunM2, /saveToSupabase/, 'runM2 (R3D) non deve persistere: resta invariato');
+  });
+
+  console.log('');
+  console.log('Z1-Z21. R3F — lifecycle incrementale di S.m2Result (potatura progressiva)');
+
+  await test('Z1: automatic apply persiste la parte auto-applicabile e lascia pending l\'existing L2 gated', async () => {
+    const recipe = withRealBaseline(makeRecipe([
+      makeL2({ id: 'l2_open', operationalState: 'open', decisionState: 'probable' }),
+      makeL2({ id: 'l2_gated', decisionState: 'probable' }),
+    ]));
+    const S = makeS([recipe]);
+    S.m2Result['v1'] = buildM2Result(curV(recipe), {
+      l2Updates: [
+        { id: 'l2_open', operational_state: 'affected' },
+        { id: 'l2_gated', decision_state: 'confirmed' },
+      ],
+    });
+    const apply = makeApply(S, makeSave(true));
+    const res = await apply('r1', {});
+    assert.strictEqual(res.ok, true);
+    assert.deepStrictEqual(res.l2Applied, ['l2_open'], 'la parte automatica viene applicata subito');
+    assert.strictEqual(findL2(S.recipes[0], 'l2_open').operationalState, 'affected');
+    assert.ok(S.m2Result['v1'], 'm2Result non eliminato: l2_gated resta pending');
+    assert.deepStrictEqual(S.m2Result['v1'].l2Updates.applied, [], 'la parte automatica e\' consumata, non si ripropone');
+    assert.strictEqual(S.m2Result['v1'].l2Updates.rejected.length, 1);
+    assert.strictEqual(S.m2Result['v1'].l2Updates.rejected[0].id, 'l2_gated');
+  });
+
+  await test('Z2: seconda apply con confirmExistingL2Ids conferma il pending residuo', async () => {
+    const recipe = withRealBaseline(makeRecipe([makeL2({ id: 'l2_probable', decisionState: 'probable' })]));
+    const S = makeS([recipe]);
+    S.m2Result['v1'] = buildM2Result(curV(recipe), { l2Updates: [{ id: 'l2_probable', decision_state: 'confirmed' }] });
+    const apply = makeApply(S, makeSave(true));
+    await apply('r1', {}); // prima chiamata: lascia pending
+    const res2 = await apply('r1', { confirmExistingL2Ids: ['l2_probable'] });
+    assert.strictEqual(res2.ok, true);
+    assert.deepStrictEqual(res2.l2Applied, ['l2_probable']);
+    assert.strictEqual(findL2(S.recipes[0], 'l2_probable').decisionState, 'confirmed');
+  });
+
+  await test('Z3: m2Result eliminato quando risolta l\'ultima proposal pending', async () => {
+    const recipe = withRealBaseline(makeRecipe([makeL2({ id: 'l2_probable', decisionState: 'probable' })]));
+    const S = makeS([recipe]);
+    S.m2Result['v1'] = buildM2Result(curV(recipe), { l2Updates: [{ id: 'l2_probable', decision_state: 'confirmed' }] });
+    const apply = makeApply(S, makeSave(true));
+    await apply('r1', {});
+    assert.ok(S.m2Result['v1'], 'ancora pending dopo la prima chiamata');
+    await apply('r1', { confirmExistingL2Ids: ['l2_probable'] });
+    assert.strictEqual(S.m2Result['v1'], undefined, 'nessuna proposal pending residua: turno chiuso');
+  });
+
+  await test('Z4: due l2New ricevono tempId distinti e stabili', async () => {
+    const recipe = withRealBaseline(makeRecipe([]));
+    const S = makeS([recipe]);
+    S.m2Result['v1'] = buildM2Result(curV(recipe), {
+      l2New: [
+        { operational_state: 'open', decision_state: 'confirmed', content: { text: 'prima' } },
+        { operational_state: 'open', decision_state: 'confirmed', content: { text: 'seconda' } },
+      ],
+    });
+    const tempIds = S.m2Result['v1'].l2New.map(e => e.tempId);
+    assert.strictEqual(tempIds.length, 2);
+    assert.notStrictEqual(tempIds[0], tempIds[1], 'tempId univoci');
+    assert.ok(tempIds.every(t => typeof t === 'string' && t.length > 0));
+  });
+
+  await test('Z5: consumare il primo l2New non altera il tempId/identita\' del secondo', async () => {
+    const recipe = withRealBaseline(makeRecipe([]));
+    const S = makeS([recipe]);
+    S.m2Result['v1'] = buildM2Result(curV(recipe), {
+      l2New: [
+        { operational_state: 'open', decision_state: 'confirmed', content: { text: 'prima' } },
+        { operational_state: 'open', decision_state: 'confirmed', content: { text: 'seconda' } },
+      ],
+    });
+    const firstTempId = S.m2Result['v1'].l2New[0].tempId;
+    const secondTempId = S.m2Result['v1'].l2New[1].tempId;
+    const apply = makeApply(S, makeSave(true));
+    await apply('r1', { confirmNewL2Ids: [firstTempId] });
+    assert.ok(S.m2Result['v1'], 'la seconda proposta resta pending');
+    assert.strictEqual(S.m2Result['v1'].l2New.length, 1);
+    assert.strictEqual(S.m2Result['v1'].l2New[0].tempId, secondTempId, 'stesso tempId, nessun drift dopo la rimozione della prima');
+  });
+
+  await test('Z6: il secondo l2New resta confermabile in una chiamata successiva tramite il proprio tempId', async () => {
+    const recipe = withRealBaseline(makeRecipe([]));
+    const S = makeS([recipe]);
+    S.m2Result['v1'] = buildM2Result(curV(recipe), {
+      l2New: [
+        { operational_state: 'open', decision_state: 'confirmed', content: { text: 'prima' } },
+        { operational_state: 'open', decision_state: 'confirmed', content: { text: 'seconda' } },
+      ],
+    });
+    const firstTempId = S.m2Result['v1'].l2New[0].tempId;
+    const secondTempId = S.m2Result['v1'].l2New[1].tempId;
+    const apply = makeApply(S, makeSave(true));
+    await apply('r1', { confirmNewL2Ids: [firstTempId] });
+    const res2 = await apply('r1', { confirmNewL2Ids: [secondTempId] });
+    assert.strictEqual(res2.ok, true);
+    assert.strictEqual(res2.l2Created.length, 1);
+    assert.strictEqual(curV(S.recipes[0]).l2Items.length, 2, 'entrambe le osservazioni create, una per chiamata');
+    assert.strictEqual(S.m2Result['v1'], undefined, 'nessuna proposta l2New residua: turno chiuso');
+  });
+
+  await test('Z7: intentionChange resta pending dopo una apply automatica che non la adotta', async () => {
+    const recipe = withRealBaseline(makeRecipe([]));
+    const S = makeS([recipe]);
+    S.m2Result['v1'] = buildM2Result(curV(recipe), { intentionChange: { text: 'nuova intenzione' } });
+    const apply = makeApply(S, makeSave(true));
+    const res = await apply('r1', {});
+    assert.strictEqual(res.ok, true);
+    assert.ok(S.m2Result['v1'], 'm2Result resta: intentionChange ancora pending');
+    assert.deepStrictEqual(S.m2Result['v1'].intentionChange, { text: 'nuova intenzione' });
+  });
+
+  await test('Z8: una adoption successiva consuma intentionChange e chiude il turno', async () => {
+    const recipe = withRealBaseline(makeRecipe([]));
+    const S = makeS([recipe]);
+    S.m2Result['v1'] = buildM2Result(curV(recipe), { intentionChange: { text: 'nuova intenzione' } });
+    const apply = makeApply(S, makeSave(true));
+    await apply('r1', {});
+    const res2 = await apply('r1', { adoptIntention: true });
+    assert.strictEqual(res2.intentionAdopted, true);
+    assert.deepStrictEqual(curV(S.recipes[0]).intentionCurrent, { text: 'nuova intenzione' });
+    assert.strictEqual(S.m2Result['v1'], undefined, 'intentionChange consumata, nessun altro pending: turno chiuso');
+  });
+
+  await test('Z9: criteriaChange resta pending e viene consumata simmetricamente a intention', async () => {
+    const recipe = withRealBaseline(makeRecipe([]));
+    const S = makeS([recipe]);
+    S.m2Result['v1'] = buildM2Result(curV(recipe), { criteriaChange: { list: ['cremosita'] } });
+    const apply = makeApply(S, makeSave(true));
+    const res1 = await apply('r1', {});
+    assert.strictEqual(res1.ok, true);
+    assert.ok(S.m2Result['v1'], 'criteriaChange ancora pending');
+    const res2 = await apply('r1', { adoptCriteria: true });
+    assert.strictEqual(res2.criteriaAdopted, true);
+    assert.deepStrictEqual(curV(S.recipes[0]).criteriaCurrent, { list: ['cremosita'] });
+    assert.strictEqual(S.m2Result['v1'], undefined);
+  });
+
+  await test('Z10: L3 da existing gia\' confirmed si consolida e viene rimosso dal result', async () => {
+    const l2 = makeL2({ id: 'l2_confirmed', decisionState: 'confirmed', operationalState: 'resolved', evidence: { note: 'verificato in servizio' } });
+    const recipe = withRealBaseline(makeRecipe([l2]));
+    const S = makeS([recipe]);
+    S.m2Result['v1'] = buildM2Result(curV(recipe), {
+      l3Candidates: [{ origin_l2_item_id: 'l2_confirmed', distilled_content: { summary: 'tecnica consolidata' } }],
+    });
+    const apply = makeApply(S, makeSave(true));
+    const res = await apply('r1', {});
+    assert.strictEqual(res.l3Created.length, 1);
+    assert.strictEqual(S.m2Result['v1'], undefined, 'candidate consolidato: nulla resta pending, turno chiuso');
+  });
+
+  await test('Z11: L3 con origin gated nello stesso turno resta pending (caso A, non scartato)', async () => {
+    const l2 = makeL2({ id: 'l2_probable', decisionState: 'probable', evidence: { note: 'buona evidenza' } });
+    const recipe = withRealBaseline(makeRecipe([l2]));
+    const S = makeS([recipe]);
+    S.m2Result['v1'] = buildM2Result(curV(recipe), {
+      l2Updates: [{ id: 'l2_probable', decision_state: 'confirmed' }], // M2 propone di confermarlo questo turno
+      l3Candidates: [{ origin_l2_item_id: 'l2_probable', distilled_content: { summary: 'quasi pronto' } }],
+    });
+    const apply = makeApply(S, makeSave(true));
+    const res = await apply('r1', {}); // nessuna autorizzazione ancora
+    assert.strictEqual(res.ok, true);
+    assert.deepStrictEqual(res.l3Created, []);
+    assert.ok(S.m2Result['v1'], 'm2Result resta: sia l\'update L2 sia il candidate L3 sono pending');
+    assert.strictEqual(S.m2Result['v1'].l3Candidates.length, 1, 'candidate L3 mantenuto in coda (caso A)');
+  });
+
+  await test('Z12: una successiva conferma dell\'origin consolida il candidate L3 rimasto pending', async () => {
+    const l2 = makeL2({ id: 'l2_probable', decisionState: 'probable', evidence: { note: 'buona evidenza' } });
+    const recipe = withRealBaseline(makeRecipe([l2]));
+    const S = makeS([recipe]);
+    S.m2Result['v1'] = buildM2Result(curV(recipe), {
+      l2Updates: [{ id: 'l2_probable', decision_state: 'confirmed' }],
+      l3Candidates: [{ origin_l2_item_id: 'l2_probable', distilled_content: { summary: 'quasi pronto' } }],
+    });
+    const apply = makeApply(S, makeSave(true));
+    await apply('r1', {}); // lascia pending
+    const res2 = await apply('r1', { confirmExistingL2Ids: ['l2_probable'] });
+    assert.strictEqual(res2.l3Created.length, 1, 'ora l\'origin e\' confirmed+attribuita: il candidate si consolida');
+    assert.strictEqual(S.m2Result['v1'], undefined, 'nulla resta pending: turno chiuso');
+  });
+
+  await test('Z13: L3 deferred per origin l2New dello stesso turno resta pending (caso B, non perso)', async () => {
+    const seed = makeL2({ id: 'l2_seed', decisionState: 'none', operationalState: 'open' });
+    const recipe = withRealBaseline(makeRecipe([seed]));
+    const S = makeS([recipe]);
+    const predictableUid = () => 'PREDICTABLE1';
+    S.m2Result['v1'] = buildM2Result(curV(recipe), {
+      l2New: [{ operational_state: 'open', decision_state: 'probable', content: { text: 'osservazione nuova' } }],
+      l3Candidates: [{ origin_l2_item_id: 'l2_PREDICTABLE1', distilled_content: { summary: 'troppo presto, stesso turno' } }],
+    });
+    const apply = makeApply(S, makeSave(true), predictableUid);
+    const res = await apply('r1', {});
+    assert.strictEqual(res.l2Created.length, 1);
+    assert.deepStrictEqual(res.l3Created, []);
+    assert.strictEqual(res.l3Deferred.length, 1);
+    assert.ok(S.m2Result['v1'], 'm2Result resta: il candidate deferred e\' ancora pending');
+    assert.strictEqual(S.m2Result['v1'].l3Candidates.length, 1);
+  });
+
+  await test('Z14: una apply successiva consolida un candidate L3 deferred per l2New dello stesso turno', async () => {
+    const seed = makeL2({ id: 'l2_seed', decisionState: 'none', operationalState: 'open' });
+    const recipe = withRealBaseline(makeRecipe([seed]));
+    const S = makeS([recipe]);
+    const predictableUid = () => 'PREDICTABLE1';
+    S.m2Result['v1'] = buildM2Result(curV(recipe), {
+      l2New: [{ operational_state: 'open', decision_state: 'probable', content: { text: 'osservazione nuova' }, evidence: { note: 'gia\' pronta' } }],
+      l3Candidates: [{ origin_l2_item_id: 'l2_PREDICTABLE1', distilled_content: { summary: 'consolidabile al turno successivo' } }],
+    });
+    const apply = makeApply(S, makeSave(true), predictableUid);
+    await apply('r1', {}); // call 1: crea l2_new, L3 resta deferred
+    assert.ok(S.m2Result['v1'], 'ancora pending dopo la prima chiamata');
+    const res2 = await apply('r1', { confirmExistingL2Ids: ['l2_PREDICTABLE1'] }); // call 2: origin ora pre-existing
+    assert.strictEqual(res2.l3Created.length, 1, 'origin ora pre-existing, confirmed e con evidence: il candidate deferred si consolida');
+    assert.strictEqual(S.m2Result['v1'], undefined, 'nulla resta pending: turno chiuso');
+  });
+
+  await test('Z15: L3 con evidence vuota viene scartato subito, mai pending (caso C)', async () => {
+    const l2 = makeL2({ id: 'l2_confirmed_noev', decisionState: 'confirmed', evidence: null });
+    const recipe = withRealBaseline(makeRecipe([l2]));
+    const S = makeS([recipe]);
+    S.m2Result['v1'] = buildM2Result(curV(recipe), {
+      l3Candidates: [{ origin_l2_item_id: 'l2_confirmed_noev', distilled_content: { summary: 'senza evidenza' } }],
+    });
+    const apply = makeApply(S, makeSave(true));
+    const res = await apply('r1', {});
+    assert.deepStrictEqual(res.l3Created, []);
+    assert.strictEqual(S.m2Result['v1'], undefined, 'scartato subito: nessun candidate pending residuo, turno chiuso');
+  });
+
+  await test('Z16: L3 con origin non-confirmed e nessuna chef-confirmation proposta in questo turno viene scartato (caso F)', async () => {
+    const l2 = makeL2({ id: 'l2_probable', decisionState: 'probable', evidence: { note: 'x' } });
+    const recipe = withRealBaseline(makeRecipe([l2]));
+    const S = makeS([recipe]);
+    // NESSUN l2Updates proposto per l2_probable in questo turno: M2 non ha
+    // chiesto di confermarlo, quindi non c'e' alcuna via di risoluzione
+    // dentro questo stesso turno per il candidate (a differenza di Z11).
+    S.m2Result['v1'] = buildM2Result(curV(recipe), {
+      l3Candidates: [{ origin_l2_item_id: 'l2_probable', distilled_content: { summary: 'troppo presto, e nessuno lo sta proponendo' } }],
+    });
+    const apply = makeApply(S, makeSave(true));
+    const res = await apply('r1', {});
+    assert.deepStrictEqual(res.l3Created, []);
+    assert.strictEqual(S.m2Result['v1'], undefined, 'scartato subito: non e\' un\'attesa di evoluzioni cognitive future');
+  });
+
+  await test('Z17: L3 strutturalmente invalido (origin inesistente) viene scartato, non pending (caso D)', async () => {
+    const recipe = withRealBaseline(makeRecipe([]));
+    const S = makeS([recipe]);
+    S.m2Result['v1'] = buildM2Result(curV(recipe), {
+      l3Candidates: [{ origin_l2_item_id: 'l2_fantasma', distilled_content: { summary: 'x' } }],
+    });
+    const apply = makeApply(S, makeSave(true));
+    const res = await apply('r1', {});
+    assert.deepStrictEqual(res.l3Created, []);
+    assert.strictEqual(S.m2Result['v1'], undefined, 'candidate strutturalmente invalido: mai pending, turno chiuso');
+  });
+
+  await test('Z18: L3 gia\' consolidato non viene ricreato in una chiamata successiva dello stesso turno (caso E)', async () => {
+    const l2 = makeL2({ id: 'l2_confirmed', decisionState: 'confirmed', evidence: { note: 'ok' } });
+    const recipe = withRealBaseline(makeRecipe([l2]));
+    const S = makeS([recipe]);
+    S.m2Result['v1'] = buildM2Result(curV(recipe), {
+      l3Candidates: [{ origin_l2_item_id: 'l2_confirmed', distilled_content: { summary: 'consolidato subito' } }],
+      intentionChange: { text: 'tenuta pending per non chiudere il turno' }, // mantiene m2Result vivo dopo il consolidamento
+    });
+    const apply = makeApply(S, makeSave(true));
+    const res1 = await apply('r1', {});
+    assert.strictEqual(res1.l3Created.length, 1);
+    assert.ok(S.m2Result['v1'], 'intentionChange ancora pending: il turno resta aperto');
+    assert.strictEqual(S.m2Result['v1'].l3Candidates.length, 0, 'il candidate consolidato non e\' piu\' in coda');
+    const res2 = await apply('r1', {}); // seconda chiamata, nessuna azione su L3
+    assert.deepStrictEqual(res2.l3Created, [], 'non ricreato: non e\' piu\' nella coda');
+    assert.strictEqual(S.recipes[0].l3Items.filter(x => x.originL2ItemId === 'l2_confirmed').length, 1, 'un solo L3 persistito per quell\'origin');
+  });
+
+  await test('Z19: save failure lascia m2Result IDENTICO (nessun pruning parziale)', async () => {
+    const l2 = makeL2({ id: 'l2_probable', decisionState: 'probable', operationalState: 'open' });
+    const recipe = withRealBaseline(makeRecipe([l2]));
+    const S = makeS([recipe]);
+    const m2ResultOriginal = buildM2Result(curV(recipe), {
+      l2Updates: [{ id: 'l2_probable', decision_state: 'confirmed' }],
+      l2New: [{ operational_state: 'open', decision_state: 'probable', content: { text: 'nuova' } }],
+      intentionChange: { text: 'intenzione' },
+    });
+    S.m2Result['v1'] = m2ResultOriginal;
+    const snapshotBefore = JSON.parse(JSON.stringify(m2ResultOriginal));
+    const apply = makeApply(S, makeSave(false)); // save fallisce
+    const res = await apply('r1', { confirmExistingL2Ids: ['l2_probable'], adoptIntention: true });
+    assert.strictEqual(res.ok, false);
+    assert.ok(S.m2Result['v1'], 'm2Result non eliminato su save failure');
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(S.m2Result['v1'])), snapshotBefore, 'm2Result identico: nessun pruning senza persistenza riuscita');
+  });
+
+  await test('Z20: il pruning non muta gli oggetti proposta grezzi rimasti pending', async () => {
+    const recipe = withRealBaseline(makeRecipe([]));
+    const S = makeS([recipe]);
+    const firstProposal = Object.freeze({ operational_state: 'open', decision_state: 'confirmed', content: Object.freeze({ text: 'uno' }) });
+    const secondProposal = Object.freeze({ operational_state: 'open', decision_state: 'confirmed', content: Object.freeze({ text: 'due' }) });
+    S.m2Result['v1'] = buildM2Result(curV(recipe), { l2New: [firstProposal, secondProposal] });
+    const firstTempId = S.m2Result['v1'].l2New[0].tempId;
+    const apply = makeApply(S, makeSave(true));
+    await apply('r1', { confirmNewL2Ids: [firstTempId] });
+    assert.ok(Object.isFrozen(secondProposal) && Object.keys(secondProposal).length === 3, 'la proposta ancora pending non e\' mai stata toccata');
+    assert.strictEqual(S.m2Result['v1'].l2New[0].proposedNew, secondProposal, 'stessa reference, mai clonata/ricreata');
+  });
+
+  await test('Z21: tempId non compare mai negli L2 persistiti (mai un id DB)', async () => {
+    const recipe = withRealBaseline(makeRecipe([]));
+    const S = makeS([recipe]);
+    S.m2Result['v1'] = buildM2Result(curV(recipe), {
+      l2New: [{ operational_state: 'open', decision_state: 'probable', content: { text: 'osservazione' } }],
+    });
+    const tempId = S.m2Result['v1'].l2New[0].tempId;
+    const apply = makeApply(S, makeSave(true));
+    await apply('r1', {});
+    const items = curV(S.recipes[0]).l2Items;
+    assert.strictEqual(items.length, 1);
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(items[0], 'tempId'), false, 'tempId mai copiato sull\'item persistito');
+    assert.notStrictEqual(items[0].id, tempId, 'id reale (l2_...) sempre distinto dal tempId effimero');
   });
 
   console.log('');

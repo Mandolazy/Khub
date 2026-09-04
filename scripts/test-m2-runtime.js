@@ -41,22 +41,29 @@ const srcR = extractFunction('function R(id)');
 const srcCurLab = extractFunction('function curLab(recipe)');
 const srcBuilder = extractFunction('function costruisciPayloadM2(recipeId, message)');
 const srcRunM2 = extractFunction('async function runM2(recipeId, message)');
+const srcUid = extractFunction('function uid()');
+
+// uid() reale di khub_mvp.html (R3F: runM2 ora l'assegna anche al tempId di
+// ogni entry l2New) — stesso principio di test-m2-persistence.js: mai un
+// doppione a mano, la funzione vera compilata nello stesso realm.
+const realUid = new Function(srcUid + '\nreturn uid;')();
 
 // Carica R/curLab/costruisciPayloadM2/runM2 REALI nello stesso realm del
-// test file; KhubReconciliation/fetch/render/toast sono parametri della
+// test file; KhubReconciliation/fetch/render/toast/uid sono parametri della
 // factory (l'unico vero confine da mockare è I/O: rete + UI).
 function makeRunM2(S, fetchImpl) {
   const toastLog = [];
   const renderLog = [];
   const factory = new Function(
-    'S', 'KhubReconciliation', 'fetch', 'render', 'toast', 'console',
+    'S', 'KhubReconciliation', 'fetch', 'render', 'toast', 'console', 'uid',
     srcR + '\n' + srcCurLab + '\n' + srcBuilder + '\n' + srcRunM2 + '\nreturn runM2;'
   );
   const runM2 = factory(
     S, KhubReconciliation, fetchImpl,
     () => renderLog.push(1),
     (msg, icon) => toastLog.push({ msg, icon }),
-    console
+    console,
+    realUid
   );
   return { runM2, toastLog, renderLog };
 }
@@ -320,6 +327,30 @@ async function run() {
     await runM2('r1', 'x');
     assert.strictEqual(S.m2Result['v1'].l2New[0].validation.valid, true);
     assert.strictEqual(S.recipes[0].labVersions[0].l2Items.length, 3, 'nessun nuovo L2 deve comparire in v.l2Items in R3D');
+  });
+
+  await test('N-ter (R3F): ogni entry l2New riceve un tempId locale/effimero, stabile e univoco', async () => {
+    const S = makeS([withRealBaseline(makeRecipe())]);
+    const structured = Object.assign({}, EMPTY_STRUCTURED, {
+      l2_new: [
+        { operational_state: 'open', decision_state: 'probable', content: { label: 'a', text: 'prima' } },
+        { operational_state: 'open', decision_state: 'probable', content: { label: 'b', text: 'seconda' } },
+      ],
+    });
+    const fetchImpl = makeFetch(m2ResponseText('ok', structured));
+    const { runM2 } = makeRunM2(S, fetchImpl);
+    await runM2('r1', 'x');
+    const entries = S.m2Result['v1'].l2New;
+    assert.strictEqual(entries.length, 2);
+    entries.forEach(e => {
+      assert.strictEqual(typeof e.tempId, 'string');
+      assert.ok(e.tempId.length > 0);
+      assert.doesNotMatch(e.tempId, /^l2_/, 'mai nella forma di un id L2 reale/DB');
+    });
+    assert.notStrictEqual(entries[0].tempId, entries[1].tempId, 'tempId univoci nello stesso result');
+    // Nessuna chiamata di rete aggiuntiva introdotta dal tempId: un solo
+    // fetch verso /api/chat, esattamente come prima di R3F.
+    assert.strictEqual(fetchImpl.calls.length, 1);
   });
 
   console.log('');

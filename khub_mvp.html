@@ -2928,8 +2928,13 @@ async function runM2(recipeId, message){
 
     const l2UpdatesResult=KhubReconciliation.applyL2Updates(v.l2Items||[],parsed.l2_updates,baselineAlMomentoDellInvio,opts);
 
+    // R3F: tempId locale/effimero, mai un id DB e mai inviato a Supabase —
+    // serve solo a referenziare in modo stabile ciascuna proposta l2_new
+    // attraverso applicazioni successive dello stesso turno M2 (R3E ora pota
+    // questo array progressivamente: un indice posizionale diventerebbe
+    // instabile non appena una voce viene rimossa dopo essere stata creata).
     const l2NewResult=parsed.l2_new.map(function(proposedNew){
-      return{proposedNew:proposedNew,validation:KhubReconciliation.validateL2New(proposedNew,opts)};
+      return{tempId:'m2new_'+uid(),proposedNew:proposedNew,validation:KhubReconciliation.validateL2New(proposedNew,opts)};
     });
 
     const existingL2ById={};
@@ -3008,7 +3013,9 @@ function hasNonEmptyEvidence(evidence){
 async function applyM2Persistence(recipeId, options){
   options=options||{};
   const confirmExistingL2Ids=options.confirmExistingL2Ids||[];
-  const confirmNewL2Indexes=options.confirmNewL2Indexes||[];
+  // R3F: per tempId (stabile attraverso applicazioni successive dello
+  // stesso turno), mai più per indice posizionale — vedi tempId in runM2.
+  const confirmNewL2Ids=options.confirmNewL2Ids||[];
   const adoptIntention=options.adoptIntention===true;
   const adoptCriteria=options.adoptCriteria===true;
 
@@ -3094,11 +3101,19 @@ async function applyM2Persistence(recipeId, options){
   // Rivalidato da zero (mai riusata la validation di R3D, calcolata con
   // chefAttributedThisTurn:false): la proposta grezza è sempre integralmente
   // conservata da R3D in .proposedNew, quindi nessuna perdita di campi qui.
-  (m2Result.l2New||[]).forEach(function(entry,idx){
+  // R3F: le entry NON create restano in survivingL2New (pending, riprovabili
+  // in una chiamata successiva tramite lo stesso tempId assegnato da runM2);
+  // le entry create vengono lasciate fuori (consumate).
+  const survivingL2New=[];
+  (m2Result.l2New||[]).forEach(function(entry){
     const proposedNew=entry.proposedNew;
-    const authorized=confirmNewL2Indexes.indexOf(idx)!==-1;
+    const authorized=confirmNewL2Ids.indexOf(entry.tempId)!==-1;
     const val=KhubReconciliation.validateL2New(proposedNew,{chefAttributedThisTurn:authorized});
-    if(!val.valid){result.l2Rejected.push({kind:'new',index:idx,reason:val.reason});return;}
+    if(!val.valid){
+      result.l2Rejected.push({kind:'new',tempId:entry.tempId,reason:val.reason});
+      survivingL2New.push(entry);
+      return;
+    }
     const newItem=Object.assign({},val.sanitized,{
       id:'l2_'+uid(),
       provenanceType:'m2',
@@ -3163,31 +3178,59 @@ async function applyM2Persistence(recipeId, options){
   // interamente affidato a preExistingL2Ids, non a questa validazione.
   const val3ExistingL2ById=postApplyL2ById;
 
+  // R3F: m2Result.l3Candidates NON deve diventare una memoria parallela.
+  // Un candidate può restare pending SOLO in attesa di una condizione
+  // risolvibile ALL'INTERNO dello stesso turno M2 (stesso m2Result):
+  //   A. existing L2 con una chef-confirmation ancora proposta in QUESTO
+  //      turno (presente in l2UpdatesResult.rejected, il gate R3C/R3D) ->
+  //      resta pending, una chiamata futura può ancora autorizzarla;
+  //   B. origin creato come l2_new in QUESTO turno -> resta deferred finché
+  //      una chiamata successiva lo rende pre-existing (D4: L3 mai scritto
+  //      prima di L2, FK reale);
+  //   C. evidence assente/vuota -> MAI pending indefinitamente: scartato,
+  //      un futuro TURNO M2 (non questa apply) potrà riproporlo con nuova
+  //      evidence;
+  //   D. candidate strutturalmente invalido/origin inesistente -> scartato,
+  //      non diventerà mai valido;
+  //   E. consolidato -> rimosso subito, mai ripetuto;
+  //   F. origin non-confirmed e SENZA alcuna chef-confirmation pending in
+  //      questo m2Result (M2 non ha proposto nulla su quell'id in questo
+  //      turno) -> scartato subito, non e' una condizione risolvibile
+  //      dentro questo turno.
   let nextL3Items=(recipe.l3Items||[]).slice();
+  const survivingL3Candidates=[];
   (m2Result.l3Candidates||[]).forEach(function(entry,idx){
     const candidate=entry.candidate;
     const val=KhubReconciliation.validateL3Candidate(candidate,val3ExistingL2ById);
-    if(!val.valid){result.l3Rejected.push({index:idx,reason:val.reason});return;}
+    if(!val.valid){result.l3Rejected.push({index:idx,reason:val.reason});return;} // D: mai valido, scartato
 
     const originId=val.sanitized.originL2ItemId;
     if(!preExistingL2Ids.has(originId)){
       result.l3Deferred.push({index:idx,reason:'origin_l2_item_id creato in questo stesso turno (l2_new): consolidamento rimandato a un turno successivo (D4: L3 scritto prima di L2, FK reale)'});
+      survivingL3Candidates.push(entry); // B: pending, risolvibile in una prossima apply dello stesso turno
       return;
     }
     const postItem=postApplyL2ById[originId];
     if(!postItem||postItem.decisionState!=='confirmed'){
-      result.l3Rejected.push({index:idx,reason:"L2 di origine non e' confirmed dopo l'applicazione di questo turno"});
+      const pendingChefConfirmationThisTurn=(l2UpdatesResult.rejected||[]).some(function(r){return r&&r.id===originId;});
+      if(pendingChefConfirmationThisTurn){
+        result.l3Rejected.push({index:idx,reason:"L2 di origine non e' confirmed dopo l'applicazione di questo turno, ma una chef-confirmation resta proposta in questo turno"});
+        survivingL3Candidates.push(entry); // A: pending, aspetta una conferma ancora possibile in questo turno
+      }else{
+        result.l3Rejected.push({index:idx,reason:"L2 di origine non e' confirmed e nessuna chef-confirmation e' proposta per esso in questo turno: scartato, non un'attesa di evoluzioni cognitive future"});
+        // F: nessuna via di risoluzione dentro questo turno -> scartato, non pending
+      }
       return;
     }
     const wasAlreadyConfirmed=(originalL2ById[originId]||{}).decisionState==='confirmed';
     const chefAttributedForOrigin=wasAlreadyConfirmed||confirmExistingL2Ids.indexOf(originId)!==-1;
     if(!chefAttributedForOrigin){
       result.l3Rejected.push({index:idx,reason:'decisione confirmed sul L2 di origine non attribuibile allo chef in questo turno'});
-      return;
+      return; // caso strutturalmente non dovrebbe verificarsi (vedi commento sopra); scartato per sicurezza
     }
     if(!hasNonEmptyEvidence(postItem.evidence)){
       result.l3Rejected.push({index:idx,reason:"evidence assente o vuota sull'L2 di origine"});
-      return;
+      return; // C: mai pending in attesa di evidence futura, scartato ora
     }
     const newL3={
       id:'l3_'+uid(),
@@ -3199,7 +3242,7 @@ async function applyM2Persistence(recipeId, options){
       supersedesId:null,
     };
     nextL3Items=nextL3Items.concat([newL3]);
-    result.l3Created.push(newL3.id);
+    result.l3Created.push(newL3.id); // E: consolidato, non torna in survivingL3Candidates
   });
 
   // ---- F. mutazione locale (una sola applicazione coerente) ----
@@ -3230,12 +3273,49 @@ async function applyM2Persistence(recipeId, options){
     return result;
   }
 
-  // ---- I. idempotenza ----
-  // Il result applicato con successo viene consumato: una seconda chiamata
-  // con lo stesso variantId non trova più nulla da applicare (nessun flag
-  // di schema nuovo, nessuna doppia applicazione accidentale nello stesso
-  // runtime). Un nuovo turno M2 produrrà un nuovo S.m2Result.
-  delete S.m2Result[variantId];
+  // ---- I. potatura progressiva (R3F) ----
+  // S.m2Result[variantId] NON è più consumato in blocco: è una coda
+  // effimera del turno che si svuota un pezzo alla volta, un successo per
+  // volta. Qui si rimuove SOLO ciò che questa chiamata ha realmente
+  // risolto — mai gli oggetti proposta grezzi (mai mutati, solo esclusi
+  // dagli array), mai un nuovo tipo di persistenza, mai uno schema nuovo.
+  //
+  // - l2Updates.applied: svuotato sempre dopo un successo (la parte
+  //   auto-applicabile vive per un solo giro di persistenza riuscita).
+  // - l2Updates.rejected: ricostruito da result.l2Rejected filtrato per
+  //   kind:'update' — è esattamente, per costruzione, l'insieme degli id
+  //   ancora non risolti dopo QUESTA chiamata (le entry autorizzate e
+  //   applicate con successo qui non vi compaiono più).
+  // - l2New: solo survivingL2New (le entry create sono state escluse al
+  //   punto B, mai rimesse in lista: il loro tempId non torna riusabile).
+  // - intentionChange/criteriaChange: azzerate solo se adottate ORA.
+  // - l3Candidates: solo survivingL3Candidates (A/B pending, D/C/E/F già
+  //   esclusi al punto E secondo le regole congelate sopra).
+  const newL2UpdatesRejected=result.l2Rejected
+    .filter(function(r){return r.kind==='update';})
+    .map(function(r){return{id:r.id,reason:r.reason};});
+  const newIntentionChange=result.intentionAdopted?null:m2Result.intentionChange;
+  const newCriteriaChange=result.criteriaAdopted?null:m2Result.criteriaChange;
+
+  const hasPending=newL2UpdatesRejected.length>0
+    ||survivingL2New.length>0
+    ||newIntentionChange!=null
+    ||newCriteriaChange!=null
+    ||survivingL3Candidates.length>0;
+
+  if(!hasPending){
+    // Nessuna proposta actionable residua per questo turno: il turno si
+    // chiude. Un nuovo turno M2 produrrà un nuovo S.m2Result.
+    delete S.m2Result[variantId];
+  }else{
+    S.m2Result[variantId]=Object.assign({},m2Result,{
+      l2Updates:{items:l2UpdatesResult.items,applied:[],rejected:newL2UpdatesRejected},
+      l2New:survivingL2New,
+      intentionChange:newIntentionChange,
+      criteriaChange:newCriteriaChange,
+      l3Candidates:survivingL3Candidates,
+    });
+  }
 
   result.ok=true;
   return result;
