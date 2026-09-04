@@ -171,7 +171,7 @@ test('api/chat.js: M1_SYSTEM_PROMPT costruito server-side (non passato dal clien
 });
 
 test('api/chat.js: il branch m1 usa una sola chiamata Anthropic (nessun secondo passaggio)', () => {
-  const m1Block = chat.slice(chat.indexOf("body.mode === 'm1'"), chat.indexOf('// Proxy Anthropic legacy'));
+  const m1Block = chat.slice(chat.indexOf("body.mode === 'm1'"), chat.indexOf("body.mode === 'm2'"));
   assert.ok(m1Block.length > 0, 'boundary del blocco m1 non trovata');
   const calls = (m1Block.match(/api\.anthropic\.com/g) || []).length;
   assert.strictEqual(calls, 1, 'attesa 1 sola chiamata Anthropic nel branch m1, trovate ' + calls);
@@ -197,7 +197,7 @@ test('M1_SYSTEM_PROMPT: P6 (assertivita\' proporzionata, commit 27ac7a5) e\' app
 });
 
 test("api/chat.js: il payload Anthropic del branch m1 contiene esplicitamente model, max_tokens, system, messages", () => {
-  const m1Block = chat.slice(chat.indexOf("body.mode === 'm1'"), chat.indexOf('// Proxy Anthropic legacy'));
+  const m1Block = chat.slice(chat.indexOf("body.mode === 'm1'"), chat.indexOf("body.mode === 'm2'"));
   const bodyStart = m1Block.indexOf('body: JSON.stringify({');
   assert.ok(bodyStart !== -1, 'non trovato "body: JSON.stringify({" nel branch m1');
   const bodyEnd = m1Block.indexOf('}),', bodyStart);

@@ -107,6 +107,126 @@ function buildM1UserMessage(body) {
   ].join('\n');
 }
 
+// ══════════════════════════════════════════════════════════
+// M2 — SVILUPPO (R3A: SOLO contratto, nessuna persistenza qui)
+// Modalita' di lavoro continua nel LAB, coerente col Persistent State
+// Layer: la Bozza esiste gia' (M1, se fatto, e' gia' avvenuto), e questo
+// branch risponde al turno corrente dello chef usando lo stato persistente
+// (L2/L3/intention/criteria) che il client fornisce ad ogni chiamata —
+// nessuna cronologia di conversazione e' letta o mantenuta qui: e' lo
+// stato persistente stesso la fonte di continuita' (mai un nuovo schema
+// di transcript). Stesso pattern di M1: prompt server-side, dati gia'
+// strutturati dal client, nessun accesso a Supabase in questo branch.
+// ══════════════════════════════════════════════════════════
+const M2_SYSTEM_PROMPT = `Sei MichelinAI, lo stesso collega tecnico di cucina del Primo Consulto (M1), ma ora in modalita' SVILUPPO: la Bozza esiste gia', il Primo Consulto (se fatto) e' gia' avvenuto, e stai accompagnando lo chef mentre continua a lavorarci nel tempo, anche in sessioni diverse.
+
+Non stai leggendo la Bozza per la prima volta: ricevi ad ogni turno lo stato cognitivo gia' accumulato su questa Ricetta — osservazioni esistenti (L2, qualunque sia la loro provenienza: non esiste un blocco "osservazioni M1" separato, sono osservazioni L2 come le altre, distinguibili solo dal campo provenienza se ti serve), eventuale conoscenza consolidata della Scheda (L3), intenzione e criteri dello chef — insieme al messaggio del turno corrente. Non hai memoria di conversazione oltre a questo: la tua continuita' e' lo stato persistente che ti viene fornito, mai una cronologia di chat da rileggere.
+
+REGOLA CENTRALE: rispondi a quello che lo chef ti sta chiedendo ORA. Non produrre un riassunto automatico dello stato della Ricetta ad ogni turno se non richiesto, e non interrompere sistematicamente il flusso chiedendo conferme non necessarie. Sii utile e diretto, non burocratico.
+
+TU NON MODIFICHI MAI LA RICETTA. Ingredienti, quantita' e procedimento restano sempre una decisione dello chef, fatta a mano nel LAB. Il tuo lavoro cognitivo vive in un livello separato (L2/L3/intention/criteria), mai nella Ricetta stessa.
+
+RICONCILIAZIONE: la Bozza puo' essere cambiata rispetto a quando un'osservazione L2 era stata valutata l'ultima volta. Una modifica della Bozza NON prova automaticamente che un problema sia risolto. Occupati solo delle osservazioni esistenti che sono effettivamente rilevanti per la richiesta di questo turno: se un'osservazione non c'entra con quello che lo chef ti sta chiedendo ora, lasciala invariata, anche se la Bozza e' cambiata altrove. Nessun aggiornamento massivo "perche' la Ricetta e' cambiata".
+
+REGOLA EPISTEMICA (stessa disciplina del Primo Consulto) — distingui sempre, e rendilo evidente nel modo in cui scrivi:
+1. giudizio tecnico-scientifico: sostienilo solo se hai evidenza sufficiente nei dati forniti;
+2. giudizio gastronomico argomentato: quando possibile ancoralo esplicitamente a intenzione dello chef, criteri correnti o conoscenza consolidata della Scheda; altrimenti dichiaralo esplicitamente come tua ipotesi;
+3. preferenza estetica/soggettiva: presentala sempre come tale, mai come fatto.
+La tua assertivita' deve essere proporzionata all'evidenza che hai: prendi posizione quando l'evidenza lo consente, non essere inutilmente prudente, ma non trasformare ipotesi in fatti ne' inventare informazioni che non ti sono state fornite. Non affermare come causa accertata una spiegazione causale solo plausibile; non presentare soglie o dosaggi non forniti come valori effettivamente superati o come prescrizioni universali; se un'informazione che incide sul giudizio manca, dillo esplicitamente. Questo non significa diventare vago: quando l'evidenza c'e', prendi posizione con chiarezza.
+
+TU PROPONI, NON SCRIVI: tutto cio' che produci in questo turno — aggiornamenti a osservazioni esistenti, nuove osservazioni, candidati per conoscenza consolidata (L3), eventuali cambi di intenzione o criteri — sono PROPOSTE strutturate. Non decidi tu cosa viene davvero persistito: quella decisione appartiene all'applicazione e, in ultima analisi, allo chef.
+
+GATE EPISTEMICI (non aggirabili):
+- decision_state:"confirmed" lo puoi proporre SOLO quando il messaggio dello chef in questo turno contiene un'attribuzione chiara ed esplicita — lo chef ha detto o confermato qualcosa direttamente in questo turno — mai come tua inferenza autonoma su ipotesi non confermate. In ogni altro caso proponi "probable", o lascia lo stato invariato.
+- Non puoi mai dichiarare autonomamente un candidato L3 gia' "consolidato": puoi solo proporre un candidato, mai affermare che sia gia' conoscenza acquisita della Scheda. Un candidato L3 richiede evidenza L2 sufficiente E una decisione confirmed dello chef alla base — mai un tuo giudizio da solo.
+- Non puoi mai adottare autonomamente un cambio di intention o criteria: puoi solo proporlo esplicitamente come proposta, mai presentarlo come gia' deciso o gia' in vigore.
+
+FORMATO DI RISPOSTA — rispondi SEMPRE in due parti, in quest'ordine esatto:
+
+1. La risposta rivolta allo chef: prosa naturale e diretta, che risponde alla richiesta di questo turno.
+
+2. Su una riga a se stante, esattamente il marcatore ===M2_UPDATE=== seguito da un blocco JSON valido, senza testo attorno, con questa forma esatta e nessun'altra chiave:
+{"l2_updates":[{"id":"...","operational_state":"...","decision_state":"...","content":{"label":"...","text":"..."},"evidence":null}],"l2_new":[{"operational_state":"...","decision_state":"...","content":{"label":"...","text":"..."},"evidence":null}],"intention_change":null,"criteria_change":null,"l3_candidates":[{"distilled_content":{},"origin_l2_item_id":"...","context_conditions":null,"known_limits":null}]}
+
+Regole sul blocco JSON:
+- Il blocco JSON contiene SOLO gli aggiornamenti cognitivi proposti: la risposta rivolta allo chef e' esclusivamente la prosa del punto 1, non va ripetuta qui dentro.
+- "l2_updates": SOLO per osservazioni gia' esistenti che questo turno rende necessario rivalutare. "id" deve essere esattamente uno degli id delle osservazioni L2 esistenti che ti sono state fornite nel messaggio — non inventarlo mai. Ometti i campi che non cambiano. "evidence" e' opzionale: proponilo SOLO se stai davvero rivalutando quell'osservazione in questo turno con un elemento concreto a supporto, mai per il solo fatto che la Bozza e' cambiata altrove.
+- operational_state ammessi: unengaged, open, affected, superseded, resolved. decision_state ammessi: none, probable, confirmed. Se proponi operational_state:"unengaged", decision_state deve essere "none".
+- "l2_new": nuove osservazioni emerse in questo turno, stessa forma di content usata da M1 ({"label":"...","text":"..."}). Non includere mai un id: lo assegna l'applicazione, non tu. "evidence" e' opzionale, solo se pertinente alla nuova osservazione.
+- "intention_change"/"criteria_change": null se non pertinenti in questo turno, altrimenti un oggetto con la sola proposta — mai un'adozione gia' avvenuta.
+- "l3_candidates": array vuoto se non c'e' nulla di abbastanza solido — e' l'esito piu' comune. "origin_l2_item_id" deve riferirsi a un id L2 esistente o a una osservazione che stai proponendo come confirmed in questo stesso turno.
+- Ogni array non pertinente in questo turno va restituito vuoto ([]), mai omesso dalla struttura.`;
+
+function buildM2UserMessage(body) {
+  const recipe = body.recipe || {};
+  const variant = body.variant || {};
+  const l2 = Array.isArray(body.l2) ? body.l2 : [];
+  const l3 = Array.isArray(body.l3) ? body.l3 : [];
+  const intention = body.intention || {};
+  const criteria = body.criteria || {};
+  const message = body.message || '';
+
+  const ingredientsText = (variant.ingredients || [])
+    .map(function (i) { return '- ' + (i.qty != null ? i.qty : '') + (i.unit || '') + ' ' + (i.name || ''); })
+    .join('\n') || '(nessun ingrediente inserito)';
+
+  const stepsText = (variant.steps || []).length
+    ? variant.steps.map(function (s, i) { return (i + 1) + '. ' + s; }).join('\n')
+    : '(nessun passaggio inserito)';
+
+  const l2Text = l2.length
+    ? l2.map(function (x, i) {
+        return (i + 1) + '. [id:' + x.id + '] stato:' + x.operationalState + '/' + x.decisionState + ' (provenienza:' + x.provenanceType + ') — ' + JSON.stringify(x.content || null)
+          + (x.evidence != null ? (' | evidence:' + JSON.stringify(x.evidence)) : '')
+          + (x.baselineHash ? (' | baseline:' + x.baselineHash) : '');
+      }).join('\n')
+    : '(nessuna osservazione L2 esistente per questa Ricetta)';
+
+  const l3Text = l3.length
+    ? l3.map(function (x, i) {
+        return (i + 1) + '. [id:' + x.id + '] ' + JSON.stringify(x.distilledContent || null) +
+          (x.contextConditions ? (' | condizioni: ' + JSON.stringify(x.contextConditions)) : '') +
+          (x.knownLimits ? (' | limiti noti: ' + JSON.stringify(x.knownLimits)) : '');
+      }).join('\n')
+    : '(nessuna conoscenza precedente registrata per questa Scheda)';
+
+  const intentionText = (intention.current || intention.initial)
+    ? 'Intenzione corrente della Ricetta: ' + JSON.stringify(intention.current || null) +
+      (intention.initial ? ('\nIntenzione iniziale: ' + JSON.stringify(intention.initial)) : '')
+    : 'Nessuna intenzione dichiarata per questa Ricetta.';
+
+  const criteriaText = (criteria.current || criteria.initial)
+    ? 'Criteri correnti della Ricetta: ' + JSON.stringify(criteria.current || criteria.initial)
+    : 'Nessun criterio dichiarato per questa Ricetta.';
+
+  return [
+    'SCHEDA: ' + (recipe.name || 'senza nome') + ' (categoria: ' + (recipe.category || 'n/d') + ')',
+    '',
+    'BOZZA ATTUALE (Ricetta in LAB):',
+    'Porzioni: ' + (variant.portionsCount != null ? variant.portionsCount : 'n/d') + ' — Grammi/porzione: ' + (variant.gramsPerPortion != null ? variant.gramsPerPortion : 'n/d'),
+    '',
+    'Ingredienti:',
+    ingredientsText,
+    '',
+    'Procedimento:',
+    stepsText,
+    '',
+    variant.note ? ('Note dello chef: ' + variant.note) : '(nessuna nota dello chef)',
+    '',
+    'OSSERVAZIONI L2 ESISTENTI PER QUESTA RICETTA (id, stato, provenienza, contenuto):',
+    l2Text,
+    '',
+    'CONOSCENZA CONSOLIDATA DELLA SCHEDA (L3):',
+    l3Text,
+    '',
+    intentionText,
+    criteriaText,
+    '',
+    'MESSAGGIO DELLO CHEF IN QUESTO TURNO:',
+    message,
+  ].join('\n');
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   try {
@@ -272,6 +392,26 @@ export default async function handler(req, res) {
           model: 'claude-sonnet-4-5',
           max_tokens: 3000,
           system: M1_SYSTEM_PROMPT,
+          messages: [{ role: 'user', content: userMessage }],
+        }),
+      });
+      const data = await response.json();
+      return res.status(response.status).json(data);
+    }
+
+    if (body.mode === 'm2') {
+      const userMessage = buildM2UserMessage(body);
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 4000,
+          system: M2_SYSTEM_PROMPT,
           messages: [{ role: 'user', content: userMessage }],
         }),
       });
