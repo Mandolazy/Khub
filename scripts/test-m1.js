@@ -269,7 +269,10 @@ test("khub_mvp.html: M1 usa KhubBaseline.compute() una sola volta per run", () =
 });
 
 test('khub_mvp.html: lib/baseline.js e\' caricato prima dello script principale', () => {
-  assert.match(html, /<script src="lib\/baseline\.js"><\/script>\s*<script>/);
+  const idxBaseline = html.indexOf('<script src="lib/baseline.js"></script>');
+  const idxMain = html.indexOf('\n<script>');
+  assert.ok(idxBaseline !== -1, 'tag lib/baseline.js non trovato');
+  assert.ok(idxMain !== -1 && idxBaseline < idxMain, 'lib/baseline.js deve essere caricato prima dello script principale');
 });
 
 test('khub_mvp.html: runM1() non muta mai ingredienti/steps della Ricetta (nessuna chiamata alle funzioni di editing)', () => {
