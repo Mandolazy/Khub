@@ -264,16 +264,20 @@ test('costruisciPayloadM2 non contiene chiamate di rete, save o mutazioni di sta
 console.log('');
 console.log('G. non regressione (controllo leggero — la suite reale resta test-m1.js/test-m2-contract.js/test-persistent-state.js)');
 
-test('costruisciContestoSchedaLAB resta definita e precede costruisciPayloadM2 (nessuna sostituzione, solo aggiunta)', () => {
+test('costruisciContestoSchedaLAB (R3F): rimossa insieme alla pipeline "Chiedi a MichelinAI" legacy che la usava; costruisciPayloadM2 resta definita', () => {
   const idxOld = html.indexOf('function costruisciContestoSchedaLAB(recipeId)');
   const idxNew = html.indexOf('function costruisciPayloadM2(recipeId, message)');
-  assert.ok(idxOld !== -1 && idxNew !== -1 && idxOld < idxNew);
+  assert.strictEqual(idxOld, -1, 'era usata SOLO da chiediMichelinAI(), rimossa con essa in R3F');
+  assert.ok(idxNew !== -1);
 });
 
-test('chiediMichelinAI()/interpretaModifiche() restano presenti e non ancora ricollegate a M2 (assorbimento rimandato a R3F)', () => {
-  assert.match(html, /async function chiediMichelinAI\(recipeId\)\{/);
-  assert.match(html, /async function interpretaModifiche\(recipeId\)\{/);
-  assert.doesNotMatch(html, /onclick="costruisciPayloadM2/, 'costruisciPayloadM2 non deve essere ancora collegata alla UI in R3B');
+test('chiediMichelinAI()/interpretaModifiche() (R3F): assorbite da M2, rimosse e non più raggiungibili; runM2 ora e\' collegata alla UI reale', () => {
+  assert.doesNotMatch(html, /async function chiediMichelinAI\(recipeId\)\{/);
+  assert.doesNotMatch(html, /async function interpretaModifiche\(recipeId\)\{/);
+  // R3F: il seam reale e' runM2() via inviaMichelinAI(), mai una chiamata
+  // diretta a costruisciPayloadM2 da un onclick/event listener.
+  assert.doesNotMatch(html, /onclick="costruisciPayloadM2/);
+  assert.match(html, /addEventListener\('click',\(\)=>inviaMichelinAI\(recipe\.id\)\)/, 'il click su #mai-q-send deve chiamare inviaMichelinAI (che a sua volta chiama runM2)');
 });
 
 console.log('');

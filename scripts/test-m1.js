@@ -325,9 +325,11 @@ test('khub_mvp.html: pannello "Primo Consulto" nel LAB legge le osservazioni da 
 console.log('');
 console.log('C. verifica preservazione funzionalita\' avanzata + PSL (non regressione R1)');
 
-test('khub_mvp.html: le altre feature AI temporanee (interpretaModifiche, chiediMichelinAI) restano presenti e invariate (D1: assorbite da M2 in futuro, non qui)', () => {
-  assert.match(html, /async function interpretaModifiche\(recipeId\)\{/);
-  assert.match(html, /async function chiediMichelinAI\(recipeId\)\{/);
+test('khub_mvp.html (R3F): interpretaModifiche/chiediMichelinAI legacy sono state assorbite da M2 e rimosse, mai più raggiungibili', () => {
+  assert.doesNotMatch(html, /async function interpretaModifiche\(recipeId\)\{/);
+  assert.doesNotMatch(html, /async function chiediMichelinAI\(recipeId\)\{/);
+  assert.doesNotMatch(html, /onclick="[^"]*interpretaModifiche/);
+  assert.doesNotMatch(html, /addEventListener\('click',\(\)=>chiediMichelinAI/);
 });
 
 test('khub_mvp.html: Famiglie/mattoncini, merge Schede, yield analysis, cronologia restano presenti', () => {

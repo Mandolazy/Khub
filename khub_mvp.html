@@ -853,11 +853,13 @@ const S = {
   // aiMsgs / aiSugg rimossi in Step 3A — pannello MichelinAI legacy dismesso
   // (chat persistente multi-turno + modifica automatica via applyAISugg).
   michelinAIQuestion: '', // contenuto corrente della textarea "Chiedi a MichelinAI" — sincronizzato per sopravvivere a render() intermedi
-  michelinAILastQuestion: null, // ultima domanda inviata con successo, mostrata insieme alla risposta
-  michelinAILoading: false, // true mentre la chiamata reale è in corso (Step 3E)
-  michelinAILoadingKey: null, // recipeId+'|'+variantId della richiesta in corso, per non confonderla con un'altra bozza
-  michelinAICronologia: {}, // { [variantId]: string[] } — SOLO domande, mai risposte, mai persistito, si azzera naturalmente con una nuova bozza (nuova chiave)
-  michelinAIRisposta: null, // ultimo output validato di validateChiediMichelinAIOutput, o null
+  // R3F: stato UI effimero SOLO per mostrare l'ultimo turno M2 nella card —
+  // MAI PSL, MAI Supabase, MAI memoria cognitiva: sopravvive alla potatura
+  // di S.m2Result (che dopo un auto-apply può azzerarsi del tutto) ma non
+  // sopravvive a un refresh. La continuità cognitiva resta L2/L3/intention/
+  // criteria persistiti, non questa coppia domanda/risposta.
+  michelinAILastQuestion: null, // ultima domanda inviata con successo a M2
+  michelinAILastResponse: null, // ultima prosa M2 (S.m2Result[..].response al momento dell'invio)
   yieldAnalysis: null,      // {recipeId, suggestions:[{ingId,ingName,currentYield,suggestedYield,reason}]}
   yieldAnalysisLoading: false, // true mentre MichelinAI sta analizzando
   primoConsultoLoading: false, // legacy (D1): runPrimoConsulto() non è più collegato a nessun pulsante, resta solo per lettura storica
@@ -869,10 +871,17 @@ const S = {
   m2Loading: false, // true mentre MichelinAI sta rispondendo in modalità Sviluppo (M2, R3D)
   m2LoadingKey: null, // 'recipeId|variantId' della bozza per cui sta caricando
   m2Error: {}, // { [variantId]: string } — errore dell'ultimo turno M2 per bozza
-  m2Result: {}, // { [variantId]: {response,classification,l2Updates,l2New,intentionChange,criteriaChange,l3Candidates} } — risultato PREPARATO ma MAI persistito (R3D): nessuna scrittura su v.l2Items/recipe.l3Items/intention/criteria/Supabase. Effimero, si azzera con un nuovo turno o un reload.
-  mostraConfrontoOrigine: false, // Sviluppo della Scheda — confronto con la versione di partenza, mai automatico
-  interpretazioneLoading: false,
-  interpretazioneModifiche: null, // {recipeId,variantId,osservazioni} — mai persistito, solo per la sessione
+  m2Result: {}, // { [variantId]: {response,classification,l2Updates,l2New,intentionChange,criteriaChange,l3Candidates} } — coda EFFIMERA del turno M2, potata progressivamente da applyM2Persistence (R3E); si azzera del tutto solo quando non resta più nulla di pending, o con un nuovo turno/reload.
+  // R3F: guardrail UI SOLO per un salvataggio automatico M2 fallito e non
+  // ancora risolto — MAI PSL, MAI Supabase, MAI memoria cognitiva, può
+  // sparire al refresh. Distinto da "S.m2Result esiste": un m2Result può
+  // sopravvivere normalmente per proposte chef pending (mai un blocco), qui
+  // invece si blocca un nuovo invio SOLO perché il salvataggio automatico
+  // (applyM2Persistence con options vuote) è fallito e riprovarlo
+  // perderebbe lo stato non ancora persistito se sovrascritto da un nuovo
+  // runM2.
+  m2SaveFailed: {}, // { [variantId]: true }
+  mostraConfrontoOrigine: false, // Sviluppo della Scheda — confronto deterministico con la versione di partenza, mai automatico (resta: non è l'interpretazione AI, che R3F assorbe in M2)
   addIngMode: 'normal', // 'normal' | 'mattoncino' — modalità della riga "aggiungi ingrediente" nel LAB
   addIngSearchQuery: '', // testo di ricerca quando si cerca un mattoncino
   addIngSelectedMattoncino: null, // {recipeId,recipeName,variantId,variantLabel,category} scelto, in attesa di conferma
@@ -2586,204 +2595,12 @@ function validatePrimoConsultoOutput(parsed){
   return{status:'valid',observations,scartate};
 }
 
-// Sviluppo della Scheda — Interpretazione delle modifiche: valori ammessi
-const INTERPRETAZIONE_FAMIGLIE=['costruzione','tecnica','validazione_sensoriale','stabilita','produzione','decisione_finale'];
-const INTERPRETAZIONE_MODALITA=['costruttiva','diagnostica'];
-const INTERPRETAZIONE_FONTI=['conoscenza_universale','scheda_corrente'];
-const INTERPRETAZIONE_CERTEZZA=['fatto_verificato','osservazione_ricorrente','ipotesi','dati_insufficienti'];
-const INTERPRETAZIONE_MAX_OSS=4;
-
-// Pura, testabile offline: stesso status esplicito già usato per il Primo Consulto —
-// 'valid' con array vuoto è un esito legittimo, 'invalid' quando c'era qualcosa ma
-// nulla sopravvive alla validazione (mai confuso con "nessuna osservazione").
-function validateInterpretazioneOutput(parsed){
-  const scartate=[];
-  if(!parsed||typeof parsed!=='object'||!Array.isArray(parsed.osservazioni)){
-    return{status:'invalid',osservazioni:[],scartate:['struttura non valida o campo osservazioni assente']};
-  }
-  const rawObs=parsed.osservazioni;
-  const osservazioni=rawObs.filter(o=>{
-    if(!o||typeof o!=='object'){scartate.push('elemento non valido');return false;}
-    const testiOk=typeof o.osservazione==='string'&&o.osservazione.trim()
-      &&typeof o.motivo==='string'&&o.motivo.trim();
-    const famigliaOk=INTERPRETAZIONE_FAMIGLIE.includes(o.famiglia);
-    const modalitaOk=INTERPRETAZIONE_MODALITA.includes(o.modalita);
-    const fonteOk=INTERPRETAZIONE_FONTI.includes(o.fonte);
-    const certezzaOk=INTERPRETAZIONE_CERTEZZA.includes(o.certezza);
-    if(!testiOk||!famigliaOk||!modalitaOk||!fonteOk||!certezzaOk){
-      scartate.push('osservazione scartata: '+JSON.stringify(o).slice(0,120));
-      return false;
-    }
-    return true;
-  }).slice(0,INTERPRETAZIONE_MAX_OSS);
-
-  if(rawObs.length>0&&osservazioni.length===0){
-    if(scartate.length)console.warn('[Interpretazione modifiche] output scartato interamente:',scartate);
-    return{status:'invalid',osservazioni:[],scartate};
-  }
-  if(scartate.length)console.warn('[Interpretazione modifiche] elementi scartati in validazione:',scartate);
-  return{status:'valid',osservazioni,scartate};
-}
-
-// ══════════════════════════════════════════════════════════
-// "Chiedi a MichelinAI" — Step 3C: contratto e validazione offline.
-// Nessuna chiamata API, nessun context builder, nessun prompt reale:
-// solo la forma esatta di input/output e la sua validazione pura.
-// Riusa gli stessi enum già congelati per Fonte/Certezza (nessun
-// enum nuovo — vedi INTERPRETAZIONE_FONTI/INTERPRETAZIONE_CERTEZZA sopra).
-// ══════════════════════════════════════════════════════════
-const CHIEDI_MICHELINAI_MAX_CRONOLOGIA=5; // solo domande, mai risposte — memoria linguistica della sessione, non conoscenza della Scheda
-
-// Pura, testabile offline, non muta l'array originale. Mantiene solo le
-// ultime CHIEDI_MICHELINAI_MAX_CRONOLOGIA domande, in ordine cronologico.
-// Nessuna risposta, nessun timestamp, nessun riferimento alla Scheda.
-function aggiungiDomandaACronologia(cronologiaAttuale,nuovaDomanda){
-  const base=Array.isArray(cronologiaAttuale)?cronologiaAttuale:[];
-  const aggiornata=[...base,nuovaDomanda];
-  return aggiornata.slice(-CHIEDI_MICHELINAI_MAX_CRONOLOGIA);
-}
-
-// Pura, testabile offline: riceve l'oggetto già passato da JSON.parse (o
-// qualunque cosa, anche malformata) e restituisce sempre uno status esplicito.
-//
-// Contratto (oggetto singolo, non un array di osservazioni — una domanda
-// dello chef merita una risposta coerente, non un elenco puntato):
-//   { pertinente: boolean, risposta: string, motivo: string,
-//     fonti: string[], certezza: string }
-//
-// pertinente:true  -> la domanda riguarda il compito di MichelinAI su questa
-//                      Scheda. Tutti i campi diventano obbligatori, ANCHE
-//                      quando i dati mancano: "dati_insufficienti" è un
-//                      valore legittimo di certezza, non una scusa per
-//                      dire pertinente:false. pertinente:false significa
-//                      ESCLUSIVAMENTE "questa richiesta non appartiene al
-//                      compito di MichelinAI rispetto a questa Scheda" —
-//                      mai "non ho abbastanza dati per rispondere bene".
-// pertinente:false -> risposta resta obbligatoria (spiega perché non è
-//                      pertinente); motivo/fonti/certezza possono essere
-//                      assenti e, se presenti, vengono ignorati — mai usati
-//                      semanticamente.
-// fonti: string[]  -> può contenere una o entrambe le fonti ammesse
-//                      (una risposta può derivare in parte dalla Scheda
-//                      corrente e in parte da conoscenza generale). Nessun
-//                      valore "mista": la cardinalità sostituisce l'enum.
-//                      Duplicati vengono normalizzati (deduplicati), non
-//                      trattati come errore — il valore resta comunque
-//                      valido, solo ripetuto.
-//
-// Nessun output "parzialmente valido": è un oggetto singolo, o è valido
-// nella sua interezza o va scartato tutto (stesso principio già usato
-// per Primo Consulto e Interpretazione).
-function validateChiediMichelinAIOutput(parsed){
-  if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)){
-    return{status:'invalid',pertinente:null,risposta:'',motivo:'',fonti:[],certezza:'',scartate:['struttura non valida: atteso un oggetto']};
-  }
-
-  const pertinenteOk=typeof parsed.pertinente==='boolean'; // tipizzazione rigida: "true" stringa NON è ammesso
-  const rispostaOk=typeof parsed.risposta==='string'&&parsed.risposta.trim();
-  if(!pertinenteOk||!rispostaOk){
-    return{status:'invalid',pertinente:null,risposta:'',motivo:'',fonti:[],certezza:'',scartate:['campo pertinente o risposta assente/non valido']};
-  }
-
-  // pertinente:false — solo "non è compito di MichelinAI qui", risposta obbligatoria, resto ignorato
-  if(parsed.pertinente===false){
-    return{status:'valid',pertinente:false,risposta:parsed.risposta.trim(),motivo:'',fonti:[],certezza:'',scartate:[]};
-  }
-
-  // pertinente:true — motivo, fonti, certezza tutti obbligatori, anche con dati_insufficienti
-  const motivoOk=typeof parsed.motivo==='string'&&parsed.motivo.trim();
-  const fontiRaw=Array.isArray(parsed.fonti)?parsed.fonti:null;
-  const fontiValide=fontiRaw&&fontiRaw.length>0&&fontiRaw.every(f=>INTERPRETAZIONE_FONTI.includes(f));
-  const certezzaOk=INTERPRETAZIONE_CERTEZZA.includes(parsed.certezza);
-
-  if(!motivoOk||!fontiValide||!certezzaOk){
-    return{status:'invalid',pertinente:null,risposta:'',motivo:'',fonti:[],certezza:'',scartate:['pertinente:true ma motivo/fonti/certezza mancanti o non validi']};
-  }
-
-  const fontiUniche=[...new Set(fontiRaw)]; // duplicati normalizzati, non un errore
-  return{status:'valid',pertinente:true,risposta:parsed.risposta.trim(),motivo:parsed.motivo.trim(),fonti:fontiUniche,certezza:parsed.certezza,scartate:[]};
-}
-
-// ══════════════════════════════════════════════════════════
-// "Chiedi a MichelinAI" — Step 3D: Context Builder.
-// Funzione pura: trasforma lo stato reale della Scheda/bozza in un oggetto
-// strutturato. Nessuna domanda, nessuna cronologia, nessun prompt, nessuna
-// chiamata API, nessuna inferenza gastronomica — solo dati che esistono
-// davvero, così come sono. Non tocca Primo Consulto/Interpretazione
-// (duplicazione di formattazione esistente volutamente non refactorizzata:
-// fuori dal perimetro di questo Step).
-// ══════════════════════════════════════════════════════════
-
-// Rappresenta un ingrediente così com'è nella Scheda: mai un valore
-// inventato o di default per un campo assente. estimatedYieldPct/
-// measuredYieldPct compaiono SOLO se presenti nel dato reale. isSubRecipe
-// preserva l'informazione "questo componente è un mattoncino" senza
-// espanderne ricorsivamente il contenuto (fuori perimetro di questo Step).
-function formattaIngredienteContesto(i){
-  const out={nome:i.name,quantita:i.qty,unita:i.unit,mattoncino:!!i.isSubRecipe};
-  if(i.estimatedYieldPct!=null)out.resaStimata=i.estimatedYieldPct;
-  if(i.measuredYieldPct!=null)out.resaMisurata=i.measuredYieldPct;
-  if(i.isSubRecipe&&i.subRecipeId)out.mattoncinoRiferimento=i.subRecipeId;
-  return out;
-}
-
-// Procedimento come lista di step non vuoti unita in un unico testo, oppure
-// null se non esiste ancora — rappresentazione esplicita dell'assenza, MAI
-// una stringa vuota ambigua né una frase inventata (la prosa per l'utente/
-// il prompt è responsabilità dello Step 3E, non del Context Builder).
-function formattaProcedimentoContesto(steps){
-  const testo=(steps||[]).filter(s=>s&&s.trim()).join(' ');
-  return testo||null;
-}
-
-function costruisciContestoSchedaLAB(recipeId){
-  const recipe=R(recipeId);
-  if(!recipe)return null;
-  const v=curLab(recipe);
-  if(!v)return null;
-
-  const ingredienti=(v.ingredients||[]).map(formattaIngredienteContesto);
-  const procedimento=formattaProcedimentoContesto(v.steps);
-
-  // Peso totale: SOLO la semantica già deterministica e usata altrove in KHUB
-  // (porzioni × grammi/porzione, es. header del LAB) — mai la somma delle
-  // quantità ingredienti, che mescolerebbe unità incompatibili (g, ml, n...).
-  const pesoTotale=(v.portionsCount!=null&&v.gramsPerPortion!=null)
-    ?Math.round(v.portionsCount*v.gramsPerPortion):null;
-
-  // Origine della bozza: tre stati distinti e sempre espliciti, mai un'omissione
-  // silenziosa. "non_disponibile" non deve mai essere confuso con "nessuna".
-  let origine;
-  if(v.originVariantId===null){
-    origine={stato:'nessuna'};
-  }else{
-    const trovata=findVariantById(v.originVariantId);
-    if(!trovata){
-      origine={stato:'non_disponibile'};
-    }else{
-      origine={
-        stato:'disponibile',
-        nome:trovata.variant.name||trovata.variant.label||null,
-        ingredienti:(trovata.variant.ingredients||[]).map(formattaIngredienteContesto),
-        procedimento:formattaProcedimentoContesto(trovata.variant.steps),
-        confronto:contaVariabiliCambiate(trovata.variant.ingredients,v.ingredients),
-      };
-    }
-  }
-
-  return{
-    nome:recipe.name,
-    categoria:recipe.category,
-    porzioni:v.portionsCount,
-    grammiPerPorzione:v.gramsPerPortion, // compatibilità/modello attuale — non toccato, dismissione fuori scope
-    portionSize:v.portionSize!=null?v.portionSize:v.gramsPerPortion, // Step 3E: pass-through, stesso fallback già usato altrove in KHUB
-    portionUnit:v.portionUnit||'g', // Step 3E: pass-through, stesso fallback già usato altrove in KHUB
-    pesoTotale,
-    ingredienti,
-    procedimento,
-    origine,
-  };
-}
+// R3F: "Interpretazione delle modifiche" (AI legacy) e "Chiedi a MichelinAI"
+// (AI legacy) sono state assorbite da M2 — l'intera pipeline di prompt/
+// validator/context-builder dedicata a quelle due funzioni legacy è stata
+// rimossa (era isolata, zero altri chiamanti). Il confronto DETERMINISTICO
+// (contaVariabiliCambiate, pannello "Confronta con la Ricetta di partenza")
+// resta invariato più sotto: non è mai stato parte di questa pipeline AI.
 
 // ══════════════════════════════════════════════════════════
 // M2 — SVILUPPO: Context Builder (R3B)
@@ -2792,12 +2609,13 @@ function costruisciContestoSchedaLAB(recipeId){
 // strutturato previsto dal contratto mode:'m2' congelato in R3A
 // (api/chat.js: buildM2UserMessage).
 //
-// NON riusa costruisciContestoSchedaLAB(): quella funzione produce un
-// formato testuale/italiano pensato per "Chiedi a MichelinAI"/
-// "Interpretazione modifiche" (procedimento come stringa unica, chiavi
-// italiane, confronto con l'origine) — una forma incompatibile con quella
+// Non riusava (storicamente) costruisciContestoSchedaLAB(): quella funzione
+// legacy produceva un formato testuale/italiano pensato per "Chiedi a
+// MichelinAI"/"Interpretazione modifiche" (procedimento come stringa unica,
+// chiavi italiane, confronto con l'origine) — rimossa in R3F insieme a
+// quelle due funzioni, assorbite da M2. Una forma incompatibile con quella
 // esatta richiesta dal contratto M2 (chiavi inglesi, steps come array,
-// nessun campo "origine"). Evolverla per servire entrambi i consumatori
+// nessun campo "origine") — evolverla per servire entrambi i consumatori
 // avrebbe significato sovraccaricarla di due forme diverse — qui invece
 // un piccolo adapter dedicato, che riusa lo stesso pattern di lookup
 // (R()+curLab(), stessa null-safety) senza duplicare alcuna logica
@@ -3321,105 +3139,98 @@ async function applyM2Persistence(recipeId, options){
   return result;
 }
 
-// Sviluppo della Scheda — Interpretazione delle modifiche: primo vero intervento
-// di MichelinAI in questa modalità. Mai automatico, sempre su richiesta esplicita.
-// Non persiste: resta visibile solo mentre si lavora sulla bozza.
-async function interpretaModifiche(recipeId){
-  const recipe=R(recipeId);
-  if(!recipe)return;
-  const v=curLab(recipe);
-  if(!v)return;
-  if(S.interpretazioneLoading)return; // doppio clic / seconda chiamata mentre la prima è attiva
+// ══════════════════════════════════════════════════════════
+// M2 — AZIONI CHEF IN UI (R3F)
+//
+// Gesti granulari: ciascuno chiama applyM2Persistence con UNA SOLA opzione
+// alla volta, mai un batch, mai un "conferma tutto". Il testo umano mostrato
+// prima di ciascun bottone viene SEMPRE letto da dati reali (v.l2Items per
+// gli existing, entry.proposedNew per i new — mai inventato, mai sintetizzato
+// dall'oggetto opaco intention/criteria: per quelli l'azione resta ancorata
+// alla prosa conversazionale già mostrata, non a un riassunto strutturato).
+// Nessun L2/L3/PSL terminology esposto: solo label/text così come sono.
+// ══════════════════════════════════════════════════════════
 
-  if(v.originVariantId===null){
-    toast('Questa bozza non ha una Ricetta di partenza da interpretare.','ti-alert-circle');
-    return;
-  }
-  const origine=findVariantById(v.originVariantId);
-  if(!origine){
-    toast('La Ricetta di partenza non è più disponibile.','ti-alert-circle');
-    return;
-  }
-  const risultato=contaVariabiliCambiate(origine.variant.ingredients,v.ingredients);
-  if(risultato.numeroIngredientiCoinvolti===0){
-    toast('Nessuna differenza da interpretare rispetto alla Ricetta di partenza.','ti-circle-check');
-    return;
-  }
-  const variantId=v.id; // catturato ora: il risultato resta legato a questa bozza precisa
+// Pura: {label?,text} -> HTML leggibile, o stringa vuota se assente.
+function renderContenutoL2Umano(content){
+  if(!content)return'';
+  const label=content.label?'<div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--mid);margin-bottom:2px">'+content.label+'</div>':'';
+  const text=content.text?'<div style="font-size:13px;color:var(--dark);line-height:1.4">'+content.text+'</div>':'';
+  return label+text;
+}
 
-  const fmtIng=ings=>(ings||[]).map((i,idx)=>(idx+1)+'. '+i.name+': '+i.qty+i.unit).join('\n');
-  const fmtSteps=steps=>(steps||[]).filter(s=>s&&s.trim()).join(' ')||'non ancora scritto';
-  const aggiunti=risultato.dettaglio.filter(d=>d.tipo==='aggiunto').map(d=>d.ingName);
-  const rimossi=risultato.dettaglio.filter(d=>d.tipo==='rimosso').map(d=>d.ingName);
-  const modificati=risultato.dettaglio.filter(d=>d.tipo==='modificato').map(d=>d.ingName+' ('+d.campi.join(', ')+')');
-
-  const prompt='Sei MichelinAI, il collega tecnico che accompagna questa Scheda per tutta la sua vita.\n\n'
-    +'In questo momento la osservi mentre lo chef sta sperimentando nel LAB.\n\n'
-    +'Non stai bonificando una ricetta appena nata (quello è il Primo Consulto), ma stai aiutando lo chef a comprendere le conseguenze delle modifiche che ha appena effettuato durante una sperimentazione ancora aperta.\n\n'
-    +'REGOLE FONDAMENTALI\n\n'
-    +'Ruolo: sei un collega tecnico, non un giudice. Aiuti lo chef a ragionare meglio, non a prendere decisioni al suo posto. Il tuo compito non è avere sempre ragione, ma aiutare lo chef a comprendere meglio ciò che probabilmente accadrà.\n\n'
-    +'Tono: sempre positivo, rispettoso e incoraggiante. Non scoraggiare mai la sperimentazione. Ogni prova rappresenta un passo avanti nella costruzione del patrimonio gastronomico dell\'azienda. Anche quando individui una criticità, mantieni sempre un atteggiamento costruttivo.\n\n'
-    +'Giudizio tecnico: non giudicare mai la creatività, la capacità o le scelte dello chef. Giudica invece con chiarezza e onestà le conseguenze tecniche delle modifiche apportate alla ricetta. Quando la conoscenza gastronomica e scientifica è consolidata, esprimi le conseguenze in modo diretto. Se una modifica rischia di compromettere gusto, consistenza, struttura, lievitazione, cottura, stabilità, conservazione, lavorabilità o produzione, dillo chiaramente. Se le informazioni non sono sufficienti per formulare una previsione affidabile, dichiaralo apertamente.\n\n'
-    +'Puoi dire, ad esempio: "Con questa quantità di lievito la crescita sarà probabilmente insufficiente." "Questa temperatura rischia di lasciare il cuore ancora crudo." "Riducendo così tanto lo zucchero aumenterà la percezione dell\'amaro." "Con questa acidità la crema potrebbe separarsi." "L\'aumento del burro renderà probabilmente la struttura più friabile."\n\n'
-    +'Non devi invece dire: "Hai sbagliato." "Questa è una cattiva idea." "Io non lo farei." "Questa ricetta è migliore." "Questa ricetta è peggiore." Parla sempre delle conseguenze della ricetta, mai del valore delle decisioni dello chef.\n\n'
-    +'Pertinenza: prima di produrre un\'osservazione chiediti: questa informazione può aiutare lo chef a prendere una decisione migliore? Se la risposta è no, non dirla. Un array vuoto è un risultato perfettamente valido.\n\n'
-    +'Obiettivo della prova: parti sempre da ciò che lo chef sembra cercare di ottenere. Interpreta le modifiche rispetto all\'obiettivo implicito della prova, non rispetto a un\'idea astratta di "ricetta migliore". Se l\'obiettivo non è deducibile con sufficiente certezza, dichiaralo e limita le osservazioni a ciò che puoi affermare onestamente.\n\n'
-    +'Controlli già eseguiti: non ripetere controlli formali. KHUB ha già verificato ingredienti mancanti, unità, quantità, struttura della ricetta, confronto deterministico. Concentrati esclusivamente sulle conseguenze gastronomiche e tecniche delle modifiche.\n\n'
-    +'Classificazione: per ogni osservazione dichiara famiglia (costruzione, tecnica, validazione_sensoriale, stabilita, produzione, decisione_finale), modalità (costruttiva o diagnostica), livello di certezza.\n\n'
-    +'Certezza: usa sempre il livello corretto — fatto_verificato, osservazione_ricorrente, ipotesi, dati_insufficienti. Quando non hai basi sufficienti, dichiaralo chiaramente.\n\n'
-    +'DATI\n\n'
-    +'Scheda: '+recipe.name+' ('+recipe.category+')\n\n'
-    +'Ricetta di partenza — ingredienti:\n'+fmtIng(origine.variant.ingredients)+'\nProcedimento: '+fmtSteps(origine.variant.steps)+'\n\n'
-    +'Bozza attuale — ingredienti:\n'+fmtIng(v.ingredients)+'\nProcedimento: '+fmtSteps(v.steps)+'\n\n'
-    +'Confronto deterministico (già calcolato da KHUB, non ricalcolarlo):\n'
-    +'Aggiunti: '+(aggiunti.join(', ')||'nessuno')+'\n'
-    +'Rimossi: '+(rimossi.join(', ')||'nessuno')+'\n'
-    +'Modificati: '+(modificati.join(', ')||'nessuno')+'\n\n'
-    +'OUTPUT\n\n'
-    +'Rispondi esclusivamente con JSON valido:\n'
-    +'{"osservazioni":[{"famiglia":"...","modalita":"...","osservazione":"...","motivo":"...","fonte":"conoscenza_universale|scheda_corrente","certezza":"fatto_verificato|osservazione_ricorrente|ipotesi|dati_insufficienti"}]}\n'
-    +'Massimo '+INTERPRETAZIONE_MAX_OSS+' osservazioni.';
-
-  S.interpretazioneLoading=true;
-  render();
-
-  try{
-    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:900,
-        messages:[{role:'user',content:prompt}]})});
-    if(!res.ok)throw new Error('HTTP '+res.status);
-
-    const data=await res.json();
-    const text=(data.content||[]).map(c=>c.text||'').join('').replace(/```json|```/g,'').trim();
-    if(!text)throw new Error('risposta vuota');
-
-    const parsed=JSON.parse(text);
-    const validato=validateInterpretazioneOutput(parsed);
-    if(validato.status==='invalid'){
-      throw new Error('output non affidabile: '+validato.scartate.join('; '));
-    }
-
-    // Ricetta o bozza non più la stessa dopo l'attesa: risultato scartato, mai mostrato altrove
-    const recipeOra=R(recipeId);
-    const labOra=recipeOra&&curLab(recipeOra);
-    if(!recipeOra||!labOra||labOra.id!==variantId){
-      toast('La bozza è cambiata nel frattempo: risultato scartato.','ti-alert-circle');
-      S.interpretazioneLoading=false;
-      render();
-      return;
-    }
-
-    S.interpretazioneModifiche={recipeId,variantId,osservazioni:validato.osservazioni};
-    if(validato.osservazioni.length===0){
-      toast('Nessuna osservazione rilevante da aggiungere.','ti-circle-check');
-    }
-  }catch(e){
-    console.error('[Interpretazione modifiche] errore:',e);
-    toast('Errore durante l\'interpretazione. Riprova.','ti-alert-circle');
-  }
-  S.interpretazioneLoading=false;
+// Azione singola: existing L2 che richiede una nuova transizione a
+// confirmed. Il testo viene letto ESCLUSIVAMENTE da v.l2Items (mai dalla
+// proposta di M2, che R3D scarta senza conservarla — vedi nota storica su
+// applyM2Persistence più sopra): è l'unico contenuto che, dopo il click,
+// resterà davvero vero sull'item.
+async function confermaEsistenteM2(recipeId,l2Id){
+  await applyM2Persistence(recipeId,{confirmExistingL2Ids:[l2Id]});
   render();
 }
+
+// Azione singola: l2_new proposta come confirmed. Riferita per tempId
+// (mai indice posizionale — R3E pota l'array progressivamente).
+async function confermaNuovoM2(recipeId,tempId){
+  await applyM2Persistence(recipeId,{confirmNewL2Ids:[tempId]});
+  render();
+}
+
+async function adottaIntentionM2(recipeId){
+  await applyM2Persistence(recipeId,{adoptIntention:true});
+  render();
+}
+
+async function adottaCriteriaM2(recipeId){
+  await applyM2Persistence(recipeId,{adoptCriteria:true});
+  render();
+}
+
+// Costruisce il blocco di azioni pending per la bozza corrente, leggendo
+// SOLO S.m2Result[v.id] (già potato da applyM2Persistence: tutto ciò che
+// resta qui richiede davvero un gesto chef, la parte automatica è già
+// stata applicata da inviaMichelinAI). Zero L3 qui dentro: l3Candidates
+// non ha mai un'azione propria (invisibile per principio congelato R3E).
+function renderMichelinAIPendingActions(recipeId,v){
+  const m2Result=S.m2Result[v.id];
+  if(!m2Result)return'';
+
+  const l2ItemsById={};
+  (v.l2Items||[]).forEach(function(item){l2ItemsById[item.id]=item;});
+
+  const azioniEsistenti=(((m2Result.l2Updates||{}).rejected)||[]).map(function(entry){
+    const item=l2ItemsById[entry.id];
+    if(!item)return''; // id non più esistente nella Bozza: nessun testo da mostrare senza inventarlo
+    return'<div class="ai-pending-action" style="padding:10px 12px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-md);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
+      +'<div style="flex:1;min-width:180px">'+renderContenutoL2Umano(item.content)+'</div>'
+      +'<button class="btn btn-lab btn-sm" onclick="confermaEsistenteM2(\''+recipeId+'\',\''+entry.id+'\')"><i class="ti ti-check"></i> Conferma</button>'
+      +'</div>';
+  }).join('');
+
+  const azioniNuove=(m2Result.l2New||[]).map(function(entry){
+    return'<div class="ai-pending-action" style="padding:10px 12px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-md);display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
+      +'<div style="flex:1;min-width:180px">'+renderContenutoL2Umano(entry.proposedNew&&entry.proposedNew.content)+'</div>'
+      +'<button class="btn btn-lab btn-sm" onclick="confermaNuovoM2(\''+recipeId+'\',\''+entry.tempId+'\')"><i class="ti ti-check"></i> Conferma</button>'
+      +'</div>';
+  }).join('');
+
+  const azioneIntention=m2Result.intentionChange?('<div class="ai-pending-action" style="padding:10px 12px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-md);display:flex;justify-content:flex-end">'
+    +'<button class="btn btn-lab btn-sm" onclick="adottaIntentionM2(\''+recipeId+'\')"><i class="ti ti-bulb"></i> Adotta intenzione</button>'
+    +'</div>'):'';
+
+  const azioneCriteria=m2Result.criteriaChange?('<div class="ai-pending-action" style="padding:10px 12px;background:var(--white);border:1px solid var(--border);border-radius:var(--r-md);display:flex;justify-content:flex-end">'
+    +'<button class="btn btn-lab btn-sm" onclick="adottaCriteriaM2(\''+recipeId+'\')"><i class="ti ti-target-arrow"></i> Adotta criterio</button>'
+    +'</div>'):'';
+
+  const tutte=azioniEsistenti+azioniNuove+azioneIntention+azioneCriteria;
+  if(!tutte)return'';
+  return'<div style="margin-top:10px;display:flex;flex-direction:column;gap:8px">'+tutte+'</div>';
+}
+
+// R3F: interpretaModifiche() (AI legacy) rimossa — assorbita da M2. Il
+// confronto DETERMINISTICO (contaVariabiliCambiate, pannello "Confronta con
+// la Ricetta di partenza", S.mostraConfrontoOrigine) resta invariato più
+// sotto nel render della Scheda: non faceva parte di questa funzione AI.
 
 // ══════════════════════════════════════════════════════════
 // M1 — PRIMO CONSULTO (MichelinAI 2.0)
@@ -3694,143 +3505,84 @@ function renderYieldAnalysisPanel(recipe,v){
 }
 
 // ══════════════════════════════════════════════════════════
-// "Chiedi a MichelinAI" — Step 3E.2: collegamento reale.
-// Pipeline: buildPromptChiediMichelinAI -> callMichelinAI ->
-// validateChiediMichelinAIOutput -> renderRispostaMichelinAI.
-// Stesso pattern di sicurezza già usato da Primo Consulto/Interpretazione:
-// blocco doppio invio, variantId catturato prima della chiamata, verifica
-// che la bozza sia ancora la stessa al ritorno, cronologia aggiornata SOLO
-// dopo un output valido.
+// MichelinAI — invio reale (R3F): unico entry point della card, sostituisce
+// "Chiedi a MichelinAI" legacy. Legge la domanda dalla textarea, esegue
+// runM2 (R3D: prepara, non persiste), poi — solo se un risultato è stato
+// prodotto per QUESTA bozza precisa — tenta subito applyM2Persistence
+// (recipeId,{}) per la sola parte NON gated (R3E: auto-apply, zero opzioni
+// = nessuna transizione verso confirmed, nessuna adozione). Le proposte che
+// richiedono un gesto chef restano in S.m2Result, potate progressivamente
+// da applyM2Persistence stessa: questa funzione non applica mai altro.
+//
+// michelinAILastQuestion/michelinAILastResponse sono stato UI effimero
+// (mai PSL, mai Supabase, mai memoria cognitiva): l'unico motivo per cui
+// esistono è che l'auto-apply può consumare interamente S.m2Result (nessuna
+// proposta pending residua) — senza questa coppia, la prosa di MichelinAI
+// sparirebbe dalla card nello stesso istante in cui viene salvata la parte
+// automatica, il che sarebbe assurdo dal punto di vista dello chef.
+//
+// Guardrail S.m2SaveFailed (R3F, edge case): se il salvataggio automatico
+// fallisce, m2Result resta INTATTO (rollback già garantito da R3E) — ma un
+// nuovo invio chiamerebbe runM2, che sovrascrive incondizionatamente
+// S.m2Result[variantId] per il nuovo turno, perdendo lo stato non ancora
+// persistito. Blocchiamo quindi un nuovo invio per QUESTA bozza finché il
+// salvataggio non viene risolto (via riprovaSalvataggioM2, mai un nuovo
+// runM2). Guard posizionato PRIMA di runM2: nessuna nuova risposta AI
+// viene mai generata mentre il blocco è attivo.
 // ══════════════════════════════════════════════════════════
-
-// Pura, testabile offline: nessuna chiamata di rete qui dentro.
-// Traduce contesto (Step 3D) + domanda + cronologia in testo, seguendo
-// esattamente il prompt congelato in Step 3E.1.
-function buildPromptChiediMichelinAI(contesto,domanda,cronologiaDomande){
-  const fmtIng=ings=>(ings||[]).map((i,idx)=>{
-    let riga=(idx+1)+'. '+i.nome+': '+i.quantita+' '+i.unita;
-    if(i.mattoncino)riga+=' (mattoncino: preparazione validata usata come ingrediente)';
-    if(i.resaStimata!=null)riga+=' — resa stimata '+i.resaStimata+'%';
-    if(i.resaMisurata!=null)riga+=' — resa misurata '+i.resaMisurata+'%';
-    return riga;
-  }).join('\n');
-
-  const origineStatoTesto={nessuna:'nessuna',disponibile:'disponibile',non_disponibile:'non disponibile'}[contesto.origine.stato]||contesto.origine.stato;
-
-  let blocOrigine='\nORIGINE DELLA BOZZA: '+origineStatoTesto;
-  if(contesto.origine.stato==='disponibile'){
-    const o=contesto.origine;
-    const aggiunti=o.confronto.dettaglio.filter(d=>d.tipo==='aggiunto').map(d=>d.ingName);
-    const rimossi=o.confronto.dettaglio.filter(d=>d.tipo==='rimosso').map(d=>d.ingName);
-    const modificati=o.confronto.dettaglio.filter(d=>d.tipo==='modificato').map(d=>d.ingName+' ('+d.campi.join(', ')+')');
-    blocOrigine+='\nVERSIONE DI PARTENZA: '+(o.nome||'senza nome')+'\n'
-      +'Ingredienti:\n'+fmtIng(o.ingredienti)+'\n'
-      +'Procedimento: '+(o.procedimento||'non ancora scritto')+'\n'
-      +'Confronto già calcolato da KHUB (contesto, non ricalcolarlo): '
-      +'Aggiunti: '+(aggiunti.join(', ')||'nessuno')+'. '
-      +'Rimossi: '+(rimossi.join(', ')||'nessuno')+'. '
-      +'Modificati: '+(modificati.join(', ')||'nessuno')+'.';
-  }
-
-  let blocCronologia='';
-  if(cronologiaDomande&&cronologiaDomande.length){
-    blocCronologia='\n\nSe lo chef ha già fatto altre domande in questa sessione di lavoro su questa bozza, te le riporto qui SOLO per aiutarti a capire riferimenti linguistici come "ancora", "invece", "quello":\n'
-      +cronologiaDomande.map((d,idx)=>(idx+1)+'. '+d).join('\n')
-      +'\n\nLe domande precedenti servono esclusivamente ad aiutarti a interpretare riferimenti linguistici come "ancora", "invece", "quello". Non sono fatti, non sono conoscenza della Scheda e non sono una fonte tecnica. Basa il tuo giudizio sui dati reali della Scheda e, quando necessario, sulla conoscenza tecnica generale. Non assumere né ricostruire ciò che potresti aver risposto nelle interazioni precedenti.';
-  }
-
-  return 'Sei MichelinAI, il collega tecnico che accompagna questa Scheda per tutta la sua vita.\n\n'
-    +'In questo momento lo chef ti sta facendo una domanda specifica mentre lavora su questa bozza in LAB. Non stai facendo un Primo Consulto (bonifica generale di una Scheda appena nata) né un\'Interpretazione delle modifiche (lettura di un confronto già calcolato): stai rispondendo esattamente a quello che ti è stato chiesto.\n\n'
-    +'REGOLA CENTRALE: rispondi alla domanda posta. Non è tuo compito individuare proattivamente altri problemi, rischi o osservazioni sulla Scheda che lo chef non ha chiesto — anche se li vedi. Puoi menzionare qualcosa di ulteriore SOLO se è direttamente necessario per rispondere correttamente alla domanda specifica. In tutti gli altri casi, resta sulla domanda.\n\n'
-    +'Tono: positivo, rispettoso, mai un freno alla sperimentazione. Non giudichi mai la creatività o le scelte dello chef — solo le conseguenze tecniche. Quando la conoscenza è consolidata, sii diretto. Non dire mai "hai sbagliato" o "questa è una cattiva idea".\n\n'
-    +'SCHEDA: '+contesto.nome+' ('+contesto.categoria+') — '+contesto.porzioni+' porzioni, '+contesto.portionSize+' '+contesto.portionUnit+'/porzione'+(contesto.pesoTotale!=null?', peso totale '+contesto.pesoTotale+' g':'')+'\n'
-    +'INGREDIENTI:\n'+fmtIng(contesto.ingredienti)+'\n'
-    +'PROCEDIMENTO: '+(contesto.procedimento||'non ancora scritto')+'\n'
-    +blocOrigine
-    +blocCronologia+'\n\n'
-    +'DOMANDA DELLO CHEF: '+domanda+'\n\n'
-    +'Se la domanda è ipotetica ("cosa succede se sostituisco X con Y?"), rispondi con un giudizio qualitativo da collega esperto — non simulare numericamente uno scenario, non trattare la sostituzione come se fosse già avvenuta nella Scheda. È una conversazione, non un calcolo.\n\n'
-    +'Rispondi ESCLUSIVAMENTE con JSON valido, nessun testo fuori dal JSON:\n'
-    +'{"pertinente": true|false, "risposta": "testo diretto allo chef", "motivo": "obbligatorio se pertinente:true", "fonti": ["scheda_corrente"|"conoscenza_universale", ...], "certezza": "fatto_verificato|osservazione_ricorrente|ipotesi|dati_insufficienti"}\n'
-    +'pertinente:false significa ESCLUSIVAMENTE "questa richiesta non appartiene al mio compito su questa Scheda" — MAI "non ho abbastanza dati". Se la domanda riguarda la Scheda ma i dati non bastano per una risposta affidabile, resta pertinente:true con certezza:"dati_insufficienti" e spiega cosa manca.';
-}
-
-// Unico punto che tocca la rete. Restituisce l'oggetto già JSON.parse-ato
-// (può lanciare: HTTP non ok, risposta vuota, JSON malformato — catturati
-// dal chiamante, mai qui dentro).
-async function callMichelinAI(prompt){
-  const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:700,messages:[{role:'user',content:prompt}]})});
-  if(!res.ok)throw new Error('HTTP '+res.status);
-  const data=await res.json();
-  const text=(data.content||[]).map(c=>c.text||'').join('').replace(/```json|```/g,'').trim();
-  if(!text)throw new Error('risposta vuota');
-  return JSON.parse(text); // JSON malformato: lancia da solo, catturato dal chiamante
-}
-
-const CHIEDI_MICHELINAI_CERTEZZA_LABEL={fatto_verificato:'Fatto verificato',osservazione_ricorrente:'Pattern osservato',ipotesi:'Ipotesi',dati_insufficienti:'Dati insufficienti'};
-const CHIEDI_MICHELINAI_FONTE_LABEL={scheda_corrente:'Scheda corrente',conoscenza_universale:'Conoscenza generale'};
-
-// Pura: dato un output già validato (status:'valid'), restituisce l'HTML
-// della card risposta. Non decide nulla, non tocca lo stato, non chiama rete.
-function renderRispostaMichelinAI(validato){
-  if(!validato)return'';
-  if(validato.pertinente===false){
-    return'<div style="font-size:13px;color:var(--mid);font-style:italic">'+validato.risposta+'</div>';
-  }
-  const fontiTesto=(validato.fonti||[]).map(f=>CHIEDI_MICHELINAI_FONTE_LABEL[f]||f).join(' + ');
-  return'<div style="font-size:14px;color:var(--dark);line-height:1.4;margin-bottom:6px">'+validato.risposta+'</div>'
-    +'<div style="font-size:12px;color:var(--mid);margin-bottom:4px">'+validato.motivo+'</div>'
-    +'<div style="font-size:11px;color:var(--light)">'+fontiTesto+' · '+(CHIEDI_MICHELINAI_CERTEZZA_LABEL[validato.certezza]||validato.certezza)+'</div>';
-}
-
-async function chiediMichelinAI(recipeId){
+async function inviaMichelinAI(recipeId){
   const inp=document.getElementById('mai-q-input');
   const domanda=inp?.value?.trim();
   if(!domanda)return; // stringa vuota o solo spazi: nessun invio
-  if(S.michelinAILoading)return; // blocco doppio invio
+  if(S.m2Loading)return; // blocco doppio invio (stesso guard di runM2)
 
   const recipe=R(recipeId);
   const v=recipe&&curLab(recipe);
   if(!v)return;
   const variantId=v.id; // catturato ORA: la risposta resta legata a questa bozza precisa
 
-  const contesto=costruisciContestoSchedaLAB(recipeId);
-  if(!contesto){toast('Impossibile leggere la Scheda in questo momento.','ti-alert-circle');return;}
+  if(S.m2SaveFailed[variantId])return; // salvataggio automatico precedente non risolto: nessun nuovo turno finché non si riprova
 
-  const cronologiaAttuale=S.michelinAICronologia[variantId]||[];
-  const prompt=buildPromptChiediMichelinAI(contesto,domanda,cronologiaAttuale);
-
-  S.michelinAILoading=true;
-  S.michelinAILoadingKey=recipeId+'|'+variantId;
   S.michelinAIQuestion='';
-  render();
+  await runM2(recipeId,domanda);
 
-  try{
-    const parsed=await callMichelinAI(prompt);
-    const validato=validateChiediMichelinAIOutput(parsed);
-    if(validato.status==='invalid'){
-      throw new Error('output non affidabile: '+validato.scartate.join('; '));
-    }
+  // runM2 scarta già da solo un risultato stale (bozza cambiata durante
+  // l'attesa) o fallito (S.m2Error impostato, S.m2Result mai scritto):
+  // qui verifichiamo solo che ci sia davvero qualcosa da mostrare/applicare.
+  const recipeOra=R(recipeId);
+  const vOra=recipeOra&&curLab(recipeOra);
+  if(!recipeOra||!vOra||vOra.id!==variantId)return;
+  if(!S.m2Result[variantId])return;
 
-    // Ri-verifico DOPO l'attesa: la bozza potrebbe essere cambiata nel frattempo
-    const recipeOra=R(recipeId);
-    const labOra=recipeOra&&curLab(recipeOra);
-    if(!recipeOra||!labOra||labOra.id!==variantId){
-      toast('La Scheda o la bozza sono cambiate nel frattempo: risposta scartata.','ti-alert-circle');
-      S.michelinAILoading=false;S.michelinAILoadingKey=null;render();return;
-    }
+  S.michelinAILastQuestion=domanda;
+  S.michelinAILastResponse=S.m2Result[variantId].response;
+  render(); // la risposta è visibile SUBITO, prima ancora del salvataggio automatico
 
-    S.michelinAILastQuestion=domanda;
-    S.michelinAIRisposta=validato;
-    // Cronologia aggiornata SOLO dopo un output valido, mai prima
-    S.michelinAICronologia[variantId]=aggiungiDomandaACronologia(cronologiaAttuale,domanda);
-  }catch(e){
-    console.error('[Chiedi a MichelinAI] errore:',e);
-    toast('Errore durante la risposta di MichelinAI. Riprova.','ti-alert-circle');
-  }finally{
-    S.michelinAILoading=false;S.michelinAILoadingKey=null;render();
+  const esitoAutoApply=await applyM2Persistence(recipeId,{}); // solo parte auto-applicabile; saveToSupabase toasta già da sé in caso di errore
+  if(esitoAutoApply&&esitoAutoApply.ok){
+    delete S.m2SaveFailed[variantId];
+  }else{
+    S.m2SaveFailed[variantId]=true; // m2Result resta intatto (rollback R3E): nessuna proposta persa, solo bloccato un nuovo invio
   }
+  render(); // riflette eventuali azioni chef pending residue e/o il guardrail di save-failed
+}
+
+// Retry esplicito del SOLO salvataggio automatico (mai runM2, mai una nuova
+// risposta AI) — l'unico modo per uscire dal guardrail S.m2SaveFailed oltre
+// a un refresh (che lo azzera comunque, essendo stato UI effimero).
+async function riprovaSalvataggioM2(recipeId){
+  const recipe=R(recipeId);
+  const v=recipe&&curLab(recipe);
+  if(!v)return;
+  const variantId=v.id;
+
+  const esito=await applyM2Persistence(recipeId,{});
+  if(esito&&esito.ok){
+    delete S.m2SaveFailed[variantId];
+  }else{
+    S.m2SaveFailed[variantId]=true; // resta bloccato: nessuna proposta persa, si può riprovare ancora
+  }
+  render();
 }
 
 // ══════════════════════════════════════════════════════════
@@ -4554,26 +4306,6 @@ function renderLabRecipe(recipe){
         <div style="font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--orange-accessible);margin-bottom:4px">Modificati</div>
         ${modificati.map(d=>`<div style="font-size:13px;color:var(--dark)">${d.ingName} <span style="color:var(--mid);font-size:12px">(${d.campi.join(', ')})</span></div>`).join('')}
       </div>`:''}
-      <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
-        <button class="btn btn-lab btn-sm" onclick="interpretaModifiche('${recipe.id}')" ${S.interpretazioneLoading?'disabled':''}>
-          ${S.interpretazioneLoading?'<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> MichelinAI sta osservando…':'<i class="ti ti-chef-hat"></i> Aiutami a interpretare queste modifiche'}
-        </button>
-        ${(S.interpretazioneModifiche&&S.interpretazioneModifiche.recipeId===recipe.id&&S.interpretazioneModifiche.variantId===v.id)?(()=>{
-          const oss=S.interpretazioneModifiche.osservazioni;
-          if(oss.length===0){
-            return `<div style="margin-top:10px;font-size:13px;color:var(--mid)"><i class="ti ti-circle-check"></i> MichelinAI non ha trovato nulla di rilevante da segnalare su queste modifiche.</div>`;
-          }
-          const certezzaLabel={fatto_verificato:'Fatto verificato',osservazione_ricorrente:'Osservazione ricorrente',ipotesi:'Ipotesi',dati_insufficienti:'Dati insufficienti'};
-          return `<div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">
-            ${oss.map(o=>`
-              <div style="background:var(--cream);border-radius:var(--r-md);padding:10px 12px">
-                <div style="font-size:13px;color:var(--dark);line-height:1.5">${o.osservazione}</div>
-                <div style="font-size:11.5px;color:var(--mid);margin-top:4px;font-style:italic">${o.motivo}</div>
-                <div style="font-size:10.5px;color:var(--light);margin-top:6px;text-transform:uppercase;letter-spacing:.03em">${certezzaLabel[o.certezza]||o.certezza}</div>
-              </div>`).join('')}
-          </div>`;
-        })():''}
-      </div>
     </div>`;
   })()}
 
@@ -4803,16 +4535,26 @@ function renderLabRecipe(recipe){
     ${labSectionHeader(recipe.id,'ai','ti-chef-hat','MichelinAI',sectionsOpen.ai)}
     ${sectionsOpen.ai?(()=>{
       const chiaveBozzaAttuale=recipe.id+'|'+v.id;
-      const staRispondendo=S.michelinAILoading&&S.michelinAILoadingKey===chiaveBozzaAttuale;
+      const staRispondendo=S.m2Loading&&S.m2LoadingKey===chiaveBozzaAttuale;
+      const salvataggioFallito=!staRispondendo&&!!S.m2SaveFailed[v.id];
+      const erroreM2=!staRispondendo&&!salvataggioFallito&&S.m2Error[v.id];
+      const azioniPending=staRispondendo?'':renderMichelinAIPendingActions(recipe.id,v);
+      const inputBloccato=staRispondendo||salvataggioFallito;
       return`<div class="ai-panel">
       <div class="ai-input-row">
-        <textarea class="ai-input" id="mai-q-input" rows="2" placeholder="Chiedi qualcosa su questa Scheda... (Cmd/Ctrl+Invio per inviare)" ${staRispondendo?'disabled':''}>${S.michelinAIQuestion||''}</textarea>
-        <button class="btn btn-lab btn-icon" id="mai-q-send" ${staRispondendo?'disabled':''}><i class="ti ${staRispondendo?'ti-loader-2':'ti-send'}"></i></button>
+        <textarea class="ai-input" id="mai-q-input" rows="2" placeholder="Chiedi qualcosa su questa Scheda... (Cmd/Ctrl+Invio per inviare)" ${inputBloccato?'disabled':''}>${S.michelinAIQuestion||''}</textarea>
+        <button class="btn btn-lab btn-icon" id="mai-q-send" ${inputBloccato?'disabled':''}><i class="ti ${staRispondendo?'ti-loader-2':'ti-send'}"></i></button>
       </div>
       ${staRispondendo?`<div style="margin-top:10px;font-size:13px;color:var(--mid)"><i class="ti ti-loader-2"></i> MichelinAI sta rispondendo…</div>`:''}
+      ${erroreM2?`<div style="margin-top:10px;font-size:13px;color:#c0392b"><i class="ti ti-alert-circle"></i> ${erroreM2}</div>`:''}
       ${(!staRispondendo&&S.michelinAILastQuestion)?`<div style="margin-top:10px;padding:12px 14px;background:var(--cream);border-radius:var(--r-md)">
         <div style="font-weight:600;font-size:13px;color:var(--dark);margin-bottom:8px"><i class="ti ti-message"></i> ${S.michelinAILastQuestion}</div>
-        ${renderRispostaMichelinAI(S.michelinAIRisposta)}
+        <div style="font-size:14px;color:var(--dark);line-height:1.4;white-space:pre-wrap">${S.michelinAILastResponse||''}</div>
+        ${salvataggioFallito?`<div style="margin-top:10px;padding:10px 12px;background:var(--orange-light);border-radius:var(--r-md);display:flex;flex-direction:column;gap:8px;align-items:flex-start">
+          <div style="font-size:13px;color:var(--orange-accessible)"><i class="ti ti-alert-triangle"></i> Il salvataggio non è riuscito.</div>
+          <button class="btn btn-lab btn-sm" onclick="riprovaSalvataggioM2('${recipe.id}')"><i class="ti ti-refresh"></i> Riprova salvataggio</button>
+        </div>`:''}
+        ${azioniPending}
       </div>`:''}
     </div>`;})():''}
   </div>
@@ -5720,17 +5462,17 @@ function bindEvents(){
   const btnShowValidate=document.getElementById('btn-show-validate');
   if(btnShowValidate)btnShowValidate.addEventListener('click',onValidate);
 
-  // "Chiedi a MichelinAI" — Step 3E: shell + collegamento reale.
+  // MichelinAI (R3F: runM2) — shell + collegamento reale.
   // Invio da solo va SEMPRE a capo (comportamento normale di una textarea,
   // fondamentale quando si incolla un testo su più righe). Solo Cmd/Ctrl+Invio
   // invia la domanda — mai un invio anticipato accidentale durante un incolla.
   const maiQInput=document.getElementById('mai-q-input');
   if(maiQInput&&recipe){
     maiQInput.addEventListener('input',()=>{S.michelinAIQuestion=maiQInput.value;}); // sync silenzioso, niente render() a ogni tasto
-    maiQInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){e.preventDefault();chiediMichelinAI(recipe.id);}});
+    maiQInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.metaKey||e.ctrlKey)){e.preventDefault();inviaMichelinAI(recipe.id);}});
   }
   const maiQSend=document.getElementById('mai-q-send');
-  if(maiQSend&&recipe)maiQSend.addEventListener('click',()=>chiediMichelinAI(recipe.id));
+  if(maiQSend&&recipe)maiQSend.addEventListener('click',()=>inviaMichelinAI(recipe.id));
 
   // Voice
   const btnVoice=document.getElementById('btn-voice');

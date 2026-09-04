@@ -460,10 +460,15 @@ async function run() {
   console.log('');
   console.log('V-Y. boundary, non-mutazione, regressione');
 
-  await test('V: applyM2Persistence non e\' collegata a nessun elemento UI', () => {
+  await test('V (R3F): applyM2Persistence e\' collegata alla UI SOLO tramite i gesti granulari, mai direttamente da un onclick', () => {
+    // R3F: la funzione e' ora richiamata da inviaMichelinAI() (auto-apply
+    // non gated), dalle 4 azioni chef granulari (confermaEsistenteM2,
+    // confermaNuovoM2, adottaIntentionM2, adottaCriteriaM2) e dal retry
+    // dedicato riprovaSalvataggioM2 (edge case save-failed) — mai un
+    // "conferma tutto" globale, mai una chiamata diretta da un onclick.
     const occurrences = (html.match(/applyM2Persistence\(/g) || []).length;
-    assert.strictEqual(occurrences, 1, 'un solo riferimento: la propria definizione, nessuna chiamata da onclick/altro');
-    assert.doesNotMatch(html, /onclick="[^"]*applyM2Persistence/);
+    assert.strictEqual(occurrences, 7, 'definizione + inviaMichelinAI (auto-apply) + 4 azioni chef granulari + riprovaSalvataggioM2 (retry)');
+    assert.doesNotMatch(html, /onclick="[^"]*applyM2Persistence/, 'mai chiamata direttamente da un onclick: sempre tramite una delle funzioni-azione dedicate');
   });
 
   await test('W: nessuna mutazione sugli oggetti raw della proposta (intention/l2New/l3Candidate)', async () => {
