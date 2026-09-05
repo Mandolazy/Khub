@@ -282,7 +282,7 @@ test('khub_mvp.html: runM1() non muta mai ingredienti/steps della Ricetta (nessu
   });
 });
 
-test("khub_mvp.html: le uniche mutazioni di stato in runM1() toccano solo l2Items, mai ingredients/steps", () => {
+test("khub_mvp.html: le mutazioni di stato in runM1() toccano solo l2Items/m1ReadingText, mai ingredients/steps", () => {
   const fnBody = html.slice(html.indexOf('async function runM1'), html.indexOf('async function runPrimoConsulto'));
   const upLabCalls = fnBody.match(/upLab\(recipeId,lab=>\(\{[^}]*\}\)\)/g) || [];
   assert.ok(upLabCalls.length >= 2, 'attese almeno 2 chiamate upLab (add + rollback), trovate ' + upLabCalls.length);
@@ -291,6 +291,59 @@ test("khub_mvp.html: le uniche mutazioni di stato in runM1() toccano solo l2Item
     assert.doesNotMatch(call, /ingredients:/, 'una chiamata upLab in runM1 tocca ingredients: ' + call);
     assert.doesNotMatch(call, /steps:/, 'una chiamata upLab in runM1 tocca steps: ' + call);
   });
+});
+
+console.log('');
+console.log('D. mini-sprint E2E — FIX 1 (persistenza prosa M1) e FIX 2 (evoluzione osservazioni)');
+
+test('FIX 1: runM1() salva m1ReadingText NELLA STESSA upLab/save degli L2 (mai una seconda saveToSupabase)', () => {
+  const fnBody = html.slice(html.indexOf('async function runM1'), html.indexOf('async function runPrimoConsulto'));
+  assert.match(
+    fnBody,
+    /upLab\(recipeId,lab=>\(\{\.\.\.lab,l2Items:\[\.\.\.\(lab\.l2Items\|\|\[\]\),\.\.\.newL2\],m1ReadingText:userText\}\)\);/,
+    'l2Items e m1ReadingText devono essere scritti nella stessa chiamata upLab, prima della save'
+  );
+  const saveCalls = (fnBody.match(/saveToSupabase\(/g) || []).length;
+  assert.strictEqual(saveCalls, 1, 'atteso un solo saveToSupabase() in runM1, trovati ' + saveCalls);
+});
+
+test('FIX 1: rollback su save failure azzera m1ReadingText insieme agli L2 aggiunti (nessuna prosa orfana)', () => {
+  const fnBody = html.slice(html.indexOf('async function runM1'), html.indexOf('async function runPrimoConsulto'));
+  assert.match(
+    fnBody,
+    /upLab\(recipeId,lab=>\(\{\.\.\.lab,l2Items:\(lab\.l2Items\|\|\[\]\)\.filter\(x=>!newL2\.some\(n=>n\.id===x\.id\)\),m1ReadingText:null\}\)\);/,
+    'il rollback deve azzerare m1ReadingText nella stessa chiamata che rimuove gli L2 appena aggiunti'
+  );
+});
+
+test('FIX 1: m1ReadingText NON viene mai scritto/letto da costruisciPayloadM2 (mai memoria cognitiva)', () => {
+  const fnBody = html.slice(html.indexOf('function costruisciPayloadM2'), html.indexOf('async function runM2'));
+  assert.doesNotMatch(fnBody, /m1ReadingText/, 'costruisciPayloadM2 non deve mai referenziare m1ReadingText');
+});
+
+test('FIX 1: load/save mapping del variant LAB include m1_reading_text <-> m1ReadingText', () => {
+  assert.match(html, /m1ReadingText:v\.m1_reading_text\|\|null/, 'mapping di caricamento mancante');
+  assert.match(html, /m1_reading_text:v\.m1ReadingText\|\|null/, 'mapping di salvataggio mancante');
+});
+
+test('FIX 1: rendering usa v.m1ReadingText (persistito), mai lo stato di sessione ritirato S.m1Text', () => {
+  const idx = html.indexOf("labSectionHeader(recipe.id,'primoConsulto'");
+  const block = html.slice(idx, idx + 4000);
+  assert.match(block, /const testoFresco=v\.m1ReadingText\|\|null;/);
+  assert.doesNotMatch(html, /S\.m1Text/, 'S.m1Text deve essere stato ritirato, non solo non piu\' letto qui');
+});
+
+test('FIX 2: hasM1() resta invariato — basato SOLO sulla presenza di provenance m1, mai su operational_state', () => {
+  assert.match(html, /function hasM1\(v\)\{return\(\(v&&v\.l2Items\)\|\|\[\]\)\.some\(x=>x\.provenanceType==='m1'\)/);
+  assert.doesNotMatch(html, /function hasM1\(v\)\{return\(\(v&&v\.l2Items\)\|\|\[\]\)\.some\(x=>x\.provenanceType==='m1'&&/, 'hasM1 non deve filtrare per operational_state');
+});
+
+test('FIX 2: il render del Primo Consulto divide le osservazioni m1 in attuali (unengaged/open/affected) e risolte/evolute (resolved/superseded)', () => {
+  const idx = html.indexOf("labSectionHeader(recipe.id,'primoConsulto'");
+  const block = html.slice(idx, idx + 4000);
+  assert.match(block, /osservazioniAttuali=osservazioniM1\.filter\(x=>\['unengaged','open','affected'\]\.includes\(x\.operationalState\)\)/);
+  assert.match(block, /osservazioniRisolte=osservazioniM1\.filter\(x=>\['resolved','superseded'\]\.includes\(x\.operationalState\)\)/);
+  assert.match(block, /Risolte \/ evolute/, 'la sezione risolte/evolute deve essere visivamente distinta, non assente');
 });
 
 test('khub_mvp.html: M1 non completato se saveToSupabase() fallisce (rollback esplicito, gate 4)', () => {

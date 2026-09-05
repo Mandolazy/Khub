@@ -128,6 +128,8 @@ TU NON MODIFICHI MAI LA RICETTA. Ingredienti, quantita' e procedimento restano s
 
 RICONCILIAZIONE: la Bozza puo' essere cambiata rispetto a quando un'osservazione L2 era stata valutata l'ultima volta. Una modifica della Bozza NON prova automaticamente che un problema sia risolto. Occupati solo delle osservazioni esistenti che sono effettivamente rilevanti per la richiesta di questo turno: se un'osservazione non c'entra con quello che lo chef ti sta chiedendo ora, lasciala invariata, anche se la Bozza e' cambiata altrove. Nessun aggiornamento massivo "perche' la Ricetta e' cambiata".
 
+Per aiutarti in questo, ogni osservazione L2 che ricevi porta un campo baseline con valore "current" o "divergent". "current" significa che la Bozza non e' cambiata da quando quell'osservazione e' stata valutata l'ultima volta. "divergent" significa che la Bozza e' cambiata da allora, e nessuno ha ancora rivalutato quell'osservazione alla luce del cambiamento. Divergent NON significa che l'osservazione sia risolta, ne' che sia diventata affected: significa solo che potrebbe non essere piu' aggiornata. Se un'osservazione divergent e' pertinente alla richiesta di questo turno, rivalutala semanticamente e proponi in l2_updates lo stato che ritieni corretto (unengaged, open, affected, resolved o superseded), con un'evidence che spieghi la rivalutazione. Se un'osservazione divergent NON e' pertinente al turno corrente, lasciala invariata: divergent da solo non autorizza mai un aggiornamento automatico, e resta valido il divieto di aggiornamento massivo qui sopra — vale anche quando piu' osservazioni sono divergent insieme.
+
 REGOLA EPISTEMICA (stessa disciplina del Primo Consulto) — distingui sempre, e rendilo evidente nel modo in cui scrivi:
 1. giudizio tecnico-scientifico: sostienilo solo se hai evidenza sufficiente nei dati forniti;
 2. giudizio gastronomico argomentato: quando possibile ancoralo esplicitamente a intenzione dello chef, criteri correnti o conoscenza consolidata della Scheda; altrimenti dichiaralo esplicitamente come tua ipotesi;
@@ -174,11 +176,17 @@ function buildM2UserMessage(body) {
     ? variant.steps.map(function (s, i) { return (i + 1) + '. ' + s; }).join('\n')
     : '(nessun passaggio inserito)';
 
+  // R3F mini-sprint E2E (FIX 3): baselineStatus è SOLO lo status semantico
+  // deterministico ('current'|'divergent'), calcolato lato client da
+  // KhubReconciliation.classifyBaseline() e mai ricalcolato qui. Non si
+  // renderizza mai baseline_hash/baseline_context al modello: quegli hash
+  // restano meccanica interna KHUB, irrilevante e non decodificabile per
+  // MichelinAI — solo il fatto semantico "è cambiato o no" gli serve.
   const l2Text = l2.length
     ? l2.map(function (x, i) {
         return (i + 1) + '. [id:' + x.id + '] stato:' + x.operationalState + '/' + x.decisionState + ' (provenienza:' + x.provenanceType + ') — ' + JSON.stringify(x.content || null)
           + (x.evidence != null ? (' | evidence:' + JSON.stringify(x.evidence)) : '')
-          + (x.baselineHash ? (' | baseline:' + x.baselineHash) : '');
+          + (x.baselineStatus ? (' | baseline:' + x.baselineStatus) : '');
       }).join('\n')
     : '(nessuna osservazione L2 esistente per questa Ricetta)';
 

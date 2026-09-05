@@ -867,7 +867,9 @@ const S = {
   m1Loading: false, // true mentre MichelinAI sta eseguendo M1 — Primo Consulto (sostituisce il vecchio Primo Consulto, D1)
   m1LoadingKey: null, // 'recipeId|variantId' della bozza per cui sta caricando — evita di mostrare la rotellina sulla bozza sbagliata
   m1Error: {}, // { [variantId]: string } — errore dell'ultimo tentativo M1, per bozza
-  m1Text: {}, // { [variantId]: string } — testo user-facing dell'ultimo M1 riuscito in QUESTA sessione (non persistito: dopo reload si vedono solo le osservazioni L2)
+  // m1Text (sessione, mai persistito) è stato ritirato: la prosa M1 ora vive
+  // in v.m1ReadingText (persistita, mini-sprint E2E) — vedi runM1() e il
+  // render del Primo Consulto, che leggono direttamente dalla Bozza.
   m2Loading: false, // true mentre MichelinAI sta rispondendo in modalità Sviluppo (M2, R3D)
   m2LoadingKey: null, // 'recipeId|variantId' della bozza per cui sta caricando
   m2Error: {}, // { [variantId]: string } — errore dell'ultimo turno M2 per bozza
@@ -1353,6 +1355,7 @@ async function loadFromSupabase(){
         videoUrl:v.video_url||null,
         active:false, // le bozze LAB non sono mai attive (D2: active, non shared, e' la source of truth)
         primoConsulto:v.primo_consulto||null,
+        m1ReadingText:v.m1_reading_text||null, // R3F mini-sprint E2E: artefatto leggibile, mai memoria cognitiva
         l2Items:mapL2Items(v.id),
         intentionInitial:v.intention_initial||null,intentionCurrent:v.intention_current||null,
         criteriaInitial:v.criteria_initial||null,criteriaCurrent:v.criteria_current||null,
@@ -1415,7 +1418,7 @@ function parseSteps(raw){
 
 function makeDefaultLab(recipeId,name){
   return{id:'lv_'+uid(),label:'Bozza 1',name:name||'',note:'',portionsCount:1,gramsPerPortion:0,portionSize:0,portionUnit:'g',ingredients:[],steps:[],mediaUrl:null,videoUrl:null,active:false,originVariantId:null,
-    l2Items:[],intentionInitial:null,intentionCurrent:null,criteriaInitial:null,criteriaCurrent:null};
+    l2Items:[],intentionInitial:null,intentionCurrent:null,criteriaInitial:null,criteriaCurrent:null,m1ReadingText:null};
 }
 
 async function saveToSupabase(recipe){
@@ -1446,6 +1449,7 @@ async function saveToSupabase(recipe){
         steps:JSON.stringify(v.steps||[]),
         media_url:v.mediaUrl||null,video_url:v.videoUrl||null,
         primo_consulto:v.primoConsulto||null,
+        m1_reading_text:v.m1ReadingText||null, // R3F mini-sprint E2E: artefatto leggibile, mai memoria cognitiva (mai letto da costruisciPayloadM2)
         origin_variant_id:v.originVariantId||null,
         contenuto_hash:firmaContenutoBozza(v),
         // D2: active e' la source of truth applicativa (mai `shared`, che resta
@@ -1952,7 +1956,7 @@ async function creaSchedaDaLab(recipeId){
     ingredients:v.ingredients.map(i=>({...i,id:uid()})),
     steps:[...(v.steps||[])],
     mediaUrl:null,videoUrl:null,active:false,
-    l2Items:[],intentionInitial:null,intentionCurrent:null,criteriaInitial:null,criteriaCurrent:null,
+    l2Items:[],intentionInitial:null,intentionCurrent:null,criteriaInitial:null,criteriaCurrent:null,m1ReadingText:null,
   };
   const newRecipe={
     id:newId,name:nomeNuova,category:recipe.category,department:recipe.department||'Cucina',
@@ -2638,11 +2642,22 @@ function validatePrimoConsultoOutput(parsed){
 // suo wiring reale da UI resta fuori scope in R3B: il chiamante lo passa
 // esplicitamente (stringa vuota se assente), nessuna lettura di stato UI
 // qui dentro.
-function costruisciPayloadM2(recipeId, message){
+// R3F mini-sprint E2E (FIX 3): classification è la stessa classifyBaseline()
+// già calcolata UNA VOLTA da runM2() prima di chiamare questa funzione (mai
+// ricalcolata qui) — [{id,status:'current'|'divergent'}]. Ogni L2 riceve un
+// campo baselineStatus derivato SOLO da quell'array, mai un nuovo compute.
+// PRECISAZIONE: qui si passa solo lo status semantico, MAI baseline_hash/
+// baseline_context come informazione aggiuntiva per il modello — quelli
+// restano meccanica interna KHUB (buildM2UserMessage in api/chat.js non li
+// renderizza più, vedi commento lì).
+function costruisciPayloadM2(recipeId, message, classification){
   const recipe=R(recipeId);
   if(!recipe)return null;
   const v=curLab(recipe);
   if(!v)return null;
+
+  const baselineStatusById={};
+  (classification||[]).forEach(function(c){baselineStatusById[c.id]=c.status;});
 
   return{
     mode:'m2',
@@ -2655,7 +2670,9 @@ function costruisciPayloadM2(recipeId, message){
       gramsPerPortion:v.gramsPerPortion,
       note:v.note||'',
     },
-    l2:(v.l2Items||[]).slice(),
+    l2:(v.l2Items||[]).map(function(item){
+      return Object.assign({},item,{baselineStatus:baselineStatusById[item.id]||'current'});
+    }),
     l3:(recipe.l3Items||[]).slice(),
     intention:{initial:v.intentionInitial!=null?v.intentionInitial:null,current:v.intentionCurrent!=null?v.intentionCurrent:null},
     criteria:{initial:v.criteriaInitial!=null?v.criteriaInitial:null,current:v.criteriaCurrent!=null?v.criteriaCurrent:null},
@@ -2686,7 +2703,9 @@ async function runM2(recipeId, message){
   const baselineAlMomentoDellInvio=KhubReconciliation.computeCurrentBaseline(v);
   const classification=KhubReconciliation.classifyBaseline(v.l2Items||[],baselineAlMomentoDellInvio.baseline_hash);
 
-  const payload=costruisciPayloadM2(recipeId,message);
+  // R3F mini-sprint E2E (FIX 3): classification (già calcolata sopra, mai
+  // ricalcolata) arriva ora esplicitamente al payload — vedi costruisciPayloadM2.
+  const payload=costruisciPayloadM2(recipeId,message,classification);
   if(!payload)return;
 
   const chiaveM2=recipeId+'|'+variantId;
@@ -3312,15 +3331,17 @@ async function runM1(recipeId){
     }));
 
     // Muta lo stato locale solo ora che parsing e validazione sono completi.
-    upLab(recipeId,lab=>({...lab,l2Items:[...(lab.l2Items||[]),...newL2]}));
+    // m1ReadingText nella STESSA mutazione/save degli L2: un solo salvataggio,
+    // mai una seconda chiamata. È un artefatto leggibile (mai memoria
+    // cognitiva): costruisciPayloadM2() non lo referenzia mai.
+    upLab(recipeId,lab=>({...lab,l2Items:[...(lab.l2Items||[]),...newL2],m1ReadingText:userText}));
     const fresh=R(recipeId);
     const ok=await saveToSupabase(fresh);
     if(!ok){
-      // Persistenza fallita: rollback locale — M1 NON è completato (gate 4).
-      upLab(recipeId,lab=>({...lab,l2Items:(lab.l2Items||[]).filter(x=>!newL2.some(n=>n.id===x.id))}));
+      // Persistenza fallita: rollback locale COMPLETO (L2 + prosa) — M1 NON è completato (gate 4).
+      upLab(recipeId,lab=>({...lab,l2Items:(lab.l2Items||[]).filter(x=>!newL2.some(n=>n.id===x.id)),m1ReadingText:null}));
       throw new Error('Salvataggio delle osservazioni non riuscito');
     }
-    S.m1Text[variantId]=userText;
     S.m1Loading=false;S.m1LoadingKey=null;
     toast('Primo Consulto completato','ti-sparkles');
   }catch(e){
@@ -4453,13 +4474,26 @@ function renderLabRecipe(recipe){
       const staCaricandoQuestaBozza=S.m1Loading&&S.m1LoadingKey===chiaveM1;
       const staCaricandoAltrove=S.m1Loading&&!staCaricandoQuestaBozza;
       const erroreM1=S.m1Error[v.id];
-      const testoFresco=S.m1Text[v.id];
+      // R3F mini-sprint E2E (FIX 1): la prosa M1 è ora un artefatto persistito
+      // sulla Bozza (v.m1ReadingText), mai memoria cognitiva — costruisciPayloadM2()
+      // non la referenzia mai. Fallback graceful per M1 storici: se assente
+      // (null), si ricade sulla sola ricostruzione dagli L2, nessun errore.
+      const testoFresco=v.m1ReadingText||null;
       const osservazioniM1=(v.l2Items||[]).filter(x=>x.provenanceType==='m1');
+      // FIX 2: stessa lista di sempre, solo divisa per operational_state —
+      // hasM1()/m1Fatto restano basati sulla sola presenza, invariati.
+      // unengaged/open/affected = criticità potenzialmente ancora attuali;
+      // resolved/superseded = tracciabilità storica, mai presentate come
+      // criticità aperte. Nessun nuovo sistema di toggle/UI.
+      const osservazioniAttuali=osservazioniM1.filter(x=>['unengaged','open','affected'].includes(x.operationalState));
+      const osservazioniRisolte=osservazioniM1.filter(x=>['resolved','superseded'].includes(x.operationalState));
       const legacyPresente=!m1Fatto&&v.primoConsulto;
       if(staCaricandoQuestaBozza){
         return`<div style="display:flex;align-items:center;gap:8px;color:var(--mid);font-size:13px"><i class="ti ti-loader-2"></i> MichelinAI sta analizzando la bozza…</div>`;
       }
       if(m1Fatto){
+        // Parcheggiato (non corretto ora, preesistente): gli L2 M1 non hanno
+        // mai avuto un campo createdAt, quindi tsM1 resta sempre null.
         const primaOss=osservazioniM1[0];
         const tsM1=primaOss&&primaOss.createdAt?new Date(primaOss.createdAt).toLocaleString('it-IT'):null;
         return`
@@ -4467,16 +4501,26 @@ function renderLabRecipe(recipe){
           <i class="ti ti-circle-check"></i> Primo Consulto effettuato
         </div>
         ${testoFresco?`<div style="font-size:14px;color:var(--dark);line-height:1.5;white-space:pre-wrap;margin-bottom:${osservazioniM1.length?'12px':'0'}">${testoFresco}</div>`:''}
-        ${osservazioniM1.length?`
+        ${osservazioniAttuali.length?`
         <div style="display:flex;flex-direction:column;gap:10px">
           ${!testoFresco?`<div style="font-size:12px;color:var(--mid)">Osservazioni emerse dal Primo Consulto:</div>`:''}
-          ${osservazioniM1.map(o=>`
+          ${osservazioniAttuali.map(o=>`
             <div style="border-left:3px solid var(--lab);padding:6px 0 6px 12px">
               <div style="font-size:12px;font-weight:600;color:var(--lab);margin-bottom:2px">${(o.content&&o.content.label)||'Osservazione'}</div>
               <div style="font-size:14px;color:var(--dark);line-height:1.4">${(o.content&&o.content.text)||''}</div>
             </div>
           `).join('')}
-        </div>`:(!testoFresco?`<div style="font-size:13px;color:var(--mid)">Nessuna osservazione strutturata registrata.</div>`:'')}
+        </div>`:(!testoFresco&&osservazioniRisolte.length===0?`<div style="font-size:13px;color:var(--mid)">Nessuna osservazione strutturata registrata.</div>`:'')}
+        ${osservazioniRisolte.length?`
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:${osservazioniAttuali.length||testoFresco?'14px':'0'};padding-top:${osservazioniAttuali.length||testoFresco?'12px':'0'};${osservazioniAttuali.length||testoFresco?'border-top:1px solid var(--border)':''}">
+          <div style="font-size:11px;color:var(--light);text-transform:uppercase;letter-spacing:.03em">Risolte / evolute</div>
+          ${osservazioniRisolte.map(o=>`
+            <div style="border-left:3px solid var(--border);padding:6px 0 6px 12px;opacity:0.7">
+              <div style="font-size:12px;font-weight:600;color:var(--mid);margin-bottom:2px">${(o.content&&o.content.label)||'Osservazione'}</div>
+              <div style="font-size:13px;color:var(--mid);line-height:1.4">${(o.content&&o.content.text)||''}</div>
+            </div>
+          `).join('')}
+        </div>`:''}
         ${tsM1?`<div style="font-size:11px;color:var(--light);margin-top:10px">Consulto di ${v.label||'questa bozza'} del ${tsM1}</div>`:''}
         `;
       }

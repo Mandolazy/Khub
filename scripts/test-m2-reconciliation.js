@@ -203,6 +203,27 @@ test('Q: item probable/none + proposta confirmed + chefAttributedThisTurn === tr
   assert.deepStrictEqual(rejected, []);
 });
 
+test('mini-sprint E2E FIX 3: il gate confirmed resta IDENTICO anche con baselineStatus presente sull\'item — divergent da solo non bypassa nulla', () => {
+  // baselineStatus e' un campo che costruisciPayloadM2() aggiunge SOLO alla
+  // copia inviata al modello (mai all'item PSL reale, mai al contratto
+  // l2_updates in uscita) — questo test verifica in aggiunta che, anche se
+  // comparisse per qualunque motivo, validateL2Update/applyL2Updates lo
+  // ignorano: non e' un campo whitelisted, il gate resta lo stesso.
+  const item = makeL2({ id: 'l2_divergent', decisionState: 'probable', operationalState: 'open', baselineHash: 'hash_vecchio' });
+  item.baselineStatus = 'divergent'; // campo estraneo, mai scritto realmente su un L2 PSL
+  const tentativo = R.applyL2Updates([item], [{ id: 'l2_divergent', decision_state: 'confirmed', baselineStatus: 'divergent' }], currentBaseline, { chefAttributedThisTurn: false });
+  assert.strictEqual(tentativo.items[0].decisionState, 'probable', 'divergent non deve mai bypassare il gate epistemico su confirmed');
+  assert.strictEqual(tentativo.applied.length, 0);
+  assert.strictEqual(tentativo.rejected.length, 1);
+  assert.match(tentativo.rejected[0].reason, /chef-attributable/);
+
+  // Stesso tentativo, ma con attribuzione chef esplicita: valido esattamente
+  // come test Q — la presenza di baselineStatus non cambia nulla nel gate.
+  const riuscito = R.applyL2Updates([item], [{ id: 'l2_divergent', decision_state: 'confirmed', baselineStatus: 'divergent' }], currentBaseline, { chefAttributedThisTurn: true });
+  assert.strictEqual(riuscito.items[0].decisionState, 'confirmed');
+  assert.deepStrictEqual(riuscito.applied, ['l2_divergent']);
+});
+
 console.log('');
 console.log('validazione di forma (vocabolari, id sconosciuto, vincolo unengaged=>none)');
 

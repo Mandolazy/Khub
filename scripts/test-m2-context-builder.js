@@ -47,14 +47,14 @@ function extractFunction(startMarker) {
 
 const srcR = extractFunction('function R(id)');
 const srcCurLab = extractFunction('function curLab(recipe)');
-const srcBuilder = extractFunction('function costruisciPayloadM2(recipeId, message)');
+const srcBuilder = extractFunction('function costruisciPayloadM2(recipeId, message, classification)');
 
 console.log('A. estrazione e caricamento in sandbox');
 
 test('le tre funzioni (R, curLab, costruisciPayloadM2) sono state estratte dal sorgente', () => {
   assert.ok(srcR.startsWith('function R(id)'));
   assert.ok(srcCurLab.startsWith('function curLab(recipe)'));
-  assert.ok(srcBuilder.startsWith('function costruisciPayloadM2(recipeId, message)'));
+  assert.ok(srcBuilder.startsWith('function costruisciPayloadM2(recipeId, message, classification)'));
 });
 
 // Compila le tre funzioni estratte con `new Function`, non con vm: gira
@@ -191,6 +191,53 @@ test('baselineHash/baselineContext degli L2 vengono riportati invariati (nessun 
 });
 
 console.log('');
+console.log('C2. mini-sprint E2E FIX 3 — baselineStatus (classification) verso il payload M2');
+
+test('senza classification esplicita, ogni L2 riceve baselineStatus:"current" di default (retrocompatibile)', () => {
+  const S = { recipes: [fixtureRecipeCompleta()] };
+  const builder = loadBuilder(S);
+  const payload = builder('r1', ''); // nessun terzo argomento
+  payload.l2.forEach(item => assert.strictEqual(item.baselineStatus, 'current'));
+});
+
+test('con classification fornita, ogni L2 riceve baselineStatus mappato correttamente PER ID (mai uniforme/posizionale)', () => {
+  const S = { recipes: [fixtureRecipeCompleta()] };
+  const builder = loadBuilder(S);
+  const classification = [
+    { id: 'l2_m1_a', status: 'divergent' },
+    { id: 'l2_confirmed', status: 'current' },
+  ];
+  const payload = builder('r1', '', classification);
+  assert.strictEqual(payload.l2.find(x => x.id === 'l2_m1_a').baselineStatus, 'divergent');
+  assert.strictEqual(payload.l2.find(x => x.id === 'l2_confirmed').baselineStatus, 'current');
+});
+
+test('baselineHash/baselineContext restano presenti e invariati anche quando baselineStatus viene aggiunto (arricchimento, mai sostituzione)', () => {
+  const S = { recipes: [fixtureRecipeCompleta()] };
+  const builder = loadBuilder(S);
+  const payload = builder('r1', '', [{ id: 'l2_confirmed', status: 'divergent' }]);
+  const item = payload.l2.find(x => x.id === 'l2_confirmed');
+  assert.strictEqual(item.baselineStatus, 'divergent');
+  assert.strictEqual(item.baselineHash, 'hash_v1_b', 'baselineHash non deve sparire ne\' cambiare');
+  assert.deepStrictEqual(item.baselineContext, { note: 'snapshot v1' }, 'baselineContext non deve sparire ne\' cambiare');
+});
+
+test('costruisciPayloadM2 NON ricalcola mai il baseline: nessun riferimento a KhubReconciliation/classifyBaseline/computeCurrentBaseline', () => {
+  ['KhubReconciliation', 'classifyBaseline', 'computeCurrentBaseline', 'KhubBaseline'].forEach(needle => {
+    assert.ok(!srcBuilder.includes(needle), 'costruisciPayloadM2 non deve calcolare il baseline internamente: trovato riferimento a ' + needle);
+  });
+});
+
+test('il builder non muta S/recipe/variant/L2 anche quando classification marca item come divergent', () => {
+  const recipe = fixtureRecipeCompleta();
+  const S = { recipes: [recipe] };
+  const before = JSON.parse(JSON.stringify(S));
+  const builder = loadBuilder(S);
+  builder('r1', 'un messaggio qualsiasi', [{ id: 'l2_m1_a', status: 'divergent' }, { id: 'l2_confirmed', status: 'divergent' }]);
+  assert.deepStrictEqual(S, before, 'S e\' stato mutato dalla chiamata a costruisciPayloadM2 con classification');
+});
+
+console.log('');
 console.log('D. intention/criteria: passthrough senza inferenza');
 
 test('intention_initial/current e criteria_initial/current vengono riportati senza modifica', () => {
@@ -266,7 +313,7 @@ console.log('G. non regressione (controllo leggero — la suite reale resta test
 
 test('costruisciContestoSchedaLAB (R3F): rimossa insieme alla pipeline "Chiedi a MichelinAI" legacy che la usava; costruisciPayloadM2 resta definita', () => {
   const idxOld = html.indexOf('function costruisciContestoSchedaLAB(recipeId)');
-  const idxNew = html.indexOf('function costruisciPayloadM2(recipeId, message)');
+  const idxNew = html.indexOf('function costruisciPayloadM2(recipeId, message, classification)');
   assert.strictEqual(idxOld, -1, 'era usata SOLO da chiediMichelinAI(), rimossa con essa in R3F');
   assert.ok(idxNew !== -1);
 });

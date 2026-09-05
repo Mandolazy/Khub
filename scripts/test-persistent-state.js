@@ -247,6 +247,26 @@ test('khub_mvp.html: makeDefaultLab inizializza i campi PSL (l2Items, intention,
   assert.match(fnBody, /intentionInitial:null,intentionCurrent:null,criteriaInitial:null,criteriaCurrent:null/);
 });
 
+test('khub_mvp.html (mini-sprint E2E FIX 1): variants.m1_reading_text round-trip load<->save, artefatto mai cognitivo', () => {
+  const loadBody = html.slice(html.indexOf('async function loadFromSupabase'), html.indexOf('function parseSteps'));
+  assert.match(loadBody, /m1ReadingText:v\.m1_reading_text\|\|null/, 'load: m1_reading_text -> v.m1ReadingText mancante');
+
+  const saveBody = html.slice(html.indexOf('async function saveToSupabase'), html.indexOf('async function deleteRecipe'));
+  assert.match(saveBody, /m1_reading_text:v\.m1ReadingText\|\|null/, 'save: v.m1ReadingText -> m1_reading_text mancante');
+
+  // Solo il variant LAB (status='lab') lo scrive — stessa scoperta di
+  // variants.primo_consulto: mai per i validatedVariants, che non hanno
+  // consumer per questo artefatto.
+  const validatedBlock = saveBody.slice(saveBody.indexOf('recipe.validatedVariants.forEach'));
+  assert.doesNotMatch(validatedBlock, /m1_reading_text/, 'm1_reading_text non deve essere scritto per i validatedVariants');
+
+  // Invariante piu' importante: non deve MAI finire nel payload M2 (mai
+  // memoria cognitiva) — verificato anche in test-m1.js, ripetuto qui
+  // perche' e' l'invariante PSL centrale di questa fix.
+  const payloadBody = html.slice(html.indexOf('function costruisciPayloadM2'), html.indexOf('async function runM2'));
+  assert.doesNotMatch(payloadBody, /m1ReadingText/);
+});
+
 console.log('');
 console.log('F. verifica preservazione funzionalita\' avanzata (non regressione)');
 

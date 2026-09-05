@@ -39,7 +39,7 @@ function extractFunction(startMarker) {
 
 const srcR = extractFunction('function R(id)');
 const srcCurLab = extractFunction('function curLab(recipe)');
-const srcBuilder = extractFunction('function costruisciPayloadM2(recipeId, message)');
+const srcBuilder = extractFunction('function costruisciPayloadM2(recipeId, message, classification)');
 const srcRunM2 = extractFunction('async function runM2(recipeId, message)');
 const srcUid = extractFunction('function uid()');
 
@@ -158,6 +158,34 @@ async function run() {
     assert.strictEqual(body.variant.id, 'v1');
     assert.strictEqual(body.message, 'Domanda di prova');
     assert.strictEqual(body.l2.length, 3);
+  });
+
+  await test('A2/B2 (mini-sprint E2E FIX 3): classification reale arriva al payload — baselineStatus current/divergent corretto per id', async () => {
+    const recipe = makeRecipe();
+    recipe.labVersions[0].l2Items.push(makeL2({ id: 'l2_stale', operationalState: 'open', decisionState: 'none', baselineHash: 'hash_deliberatamente_vecchio' }));
+    const S = makeS([withRealBaseline(recipe)]); // withRealBaseline tocca SOLO gli item con baselineHash:'CURRENT' — l2_stale resta deliberatamente disallineato
+    const fetchImpl = makeFetch(m2ResponseText('Risposta di prova.', EMPTY_STRUCTURED));
+    const { runM2 } = makeRunM2(S, fetchImpl);
+    await runM2('r1', 'Domanda di prova');
+    const body = fetchImpl.calls[0].body;
+    assert.strictEqual(body.l2.length, 4);
+    const staleItem = body.l2.find(x => x.id === 'l2_stale');
+    const currentItem = body.l2.find(x => x.id === 'l2_unengaged');
+    assert.strictEqual(staleItem.baselineStatus, 'divergent', 'baselineHash non allineato al baseline corrente -> divergent');
+    assert.strictEqual(currentItem.baselineStatus, 'current', 'baselineHash allineato al baseline corrente -> current');
+  });
+
+  await test('regressione: classification e\' calcolata UNA SOLA VOLTA per turno, mai ricalcolata dentro costruisciPayloadM2', () => {
+    // runM2 chiama computeCurrentBaseline due volte per costruzione GIA'
+    // esistente e invariata (prima dell'invio, e di nuovo dopo la risposta
+    // per il controllo di staleness) — non e' questa fix a introdurlo.
+    // classifyBaseline invece va calcolato una sola volta, PRIMA dell'invio:
+    // e' quel singolo risultato (mai un secondo) che deve arrivare al payload.
+    const computeCalls = (srcRunM2.match(/KhubReconciliation\.computeCurrentBaseline\(/g) || []).length;
+    const classifyCalls = (srcRunM2.match(/KhubReconciliation\.classifyBaseline\(/g) || []).length;
+    assert.strictEqual(computeCalls, 2, 'invariato: 1 prima dell\'invio + 1 per il controllo di staleness dopo la risposta, trovati ' + computeCalls);
+    assert.strictEqual(classifyCalls, 1, 'atteso 1 solo classifyBaseline in runM2, trovati ' + classifyCalls);
+    assert.ok(!srcBuilder.includes('KhubReconciliation'), 'costruisciPayloadM2 non deve mai chiamare KhubReconciliation (nessun secondo calcolo)');
   });
 
   console.log('');

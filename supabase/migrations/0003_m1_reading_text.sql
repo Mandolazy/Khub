@@ -1,0 +1,31 @@
+-- ============================================================================
+-- KHUB — MichelinAI 2.0 — R3F mini-sprint E2E: persistenza prosa M1
+-- ============================================================================
+-- Il Primo Consulto (M1) genera, oltre alle osservazioni strutturate (L2,
+-- gia' persistite in l2_items), una prosa discorsiva rivolta allo chef.
+-- Oggi quella prosa vive solo in memoria di sessione (S.m1Text) e sparisce
+-- al refresh: dopo un reload lo chef vede solo la ricostruzione dagli L2,
+-- mai il testo originale del Primo Consulto.
+--
+-- Questa migration aggiunge UNA colonna nullable per persistere quella
+-- prosa come artefatto leggibile della Bozza — MAI memoria cognitiva:
+-- M2 continua a ragionare esclusivamente su L2/L3/intention/criteria,
+-- questa colonna non viene mai letta dal payload M2 (vedi
+-- costruisciPayloadM2() in khub_mvp.html, che non la referenzia).
+--
+-- Deliberatamente NON riusa variants.primo_consulto: quella colonna resta
+-- congelata come storico del vecchio Primo Consulto pre-PSL (shape diversa,
+-- {createdAt, observations}, mai piu' scritta dal codice corrente — vedi
+-- commento su runM1() in khub_mvp.html). Sovrascriverne il significato
+-- avrebbe rotto quella separazione storica senza necessita'.
+--
+-- Additiva, idempotente, nessun impatto su dati esistenti: le Bozze con
+-- M1 gia' fatto prima di questa fix avranno m1_reading_text = null, e il
+-- rendering deve gestirlo con fallback graceful (nessun errore).
+--
+-- PREPARATA MA NON ESEGUITA: da applicare al Supabase reale solo dopo
+-- approvazione esplicita separata.
+-- ============================================================================
+
+alter table variants
+  add column if not exists m1_reading_text text;

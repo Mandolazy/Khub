@@ -159,6 +159,34 @@ test('buildM2UserMessage espone x.evidence delle L2 esistenti (campo gia\' dichi
   assert.match(fnBody, /x\.evidence/);
 });
 
+test('mini-sprint E2E FIX 3: buildM2UserMessage rende esplicito x.baselineStatus per ciascun L2, MAI baseline_hash/baseline_context grezzo', () => {
+  const fnStart = chat.indexOf('function buildM2UserMessage(body)');
+  const fnEnd = chat.indexOf('\nexport default async function handler', fnStart);
+  const fnBody = chat.slice(fnStart, fnEnd);
+  assert.match(fnBody, /x\.baselineStatus/, 'baselineStatus non renderizzato nella riga L2');
+  assert.doesNotMatch(fnBody, /x\.baselineHash/, 'baseline_hash grezzo non deve mai essere renderizzato al modello');
+  assert.doesNotMatch(fnBody, /x\.baselineContext/, 'baseline_context grezzo non deve mai essere renderizzato al modello');
+});
+
+test('mini-sprint E2E FIX 3: il prompt spiega current/divergent, vieta l\'auto-mutazione e non tocca i gate esistenti', () => {
+  const promptStart = chat.indexOf('const M2_SYSTEM_PROMPT = `');
+  const promptEnd = chat.indexOf('`;', promptStart);
+  const prompt = chat.slice(promptStart, promptEnd);
+  assert.match(prompt, /"current"/);
+  assert.match(prompt, /"divergent"/);
+  assert.match(prompt, /Divergent NON significa che l'osservazione sia risolta, ne' che sia diventata affected/);
+  assert.match(prompt, /divergent da solo non autorizza mai un aggiornamento automatico/);
+  // Il divieto di aggiornamento massivo (gia' testato altrove) deve restare
+  // valido esplicitamente anche nel nuovo caso "piu' osservazioni divergent
+  // insieme" — nessuna eccezione introdotta dalla nuova informazione.
+  assert.match(prompt, /vale anche quando piu' osservazioni sono divergent insieme/);
+  // Il gate epistemico su decision_state:"confirmed" resta testualmente
+  // identico (vedi anche sezione D piu' sotto): qui verifichiamo solo che
+  // il nuovo paragrafo non lo duplichi/ridefinisca.
+  const gateOccurrences = (prompt.match(/contiene un'attribuzione chiara ed esplicita/g) || []).length;
+  assert.strictEqual(gateOccurrences, 1, 'il gate epistemico su confirmed deve comparire una sola volta, invariato');
+});
+
 console.log('');
 console.log('C. contratto di output (marcatore + JSON strutturato)');
 
