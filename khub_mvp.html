@@ -3264,7 +3264,37 @@ function renderMichelinAIPendingActions(recipeId,v){
 // ══════════════════════════════════════════════════════════
 function hasM1(v){return((v&&v.l2Items)||[]).some(x=>x.provenanceType==='m1');}
 
+// ══════════════════════════════════════════════════════════
+// DIAGNOSTICA TEMPORANEA DI PRESTAZIONE — solo Primo Consulto (M1).
+// Nessun effetto su comportamento/persistenza: stampa in console un
+// riepilogo dei tempi misurati dai checkpoint T0-T9 (client) e T2-T5
+// (server, ricevuti già come durate calcolate lato server). Da RIMUOVERE
+// a misurazione completata.
+// ══════════════════════════════════════════════════════════
+function stampaReportPerformanceM1TEMP(p){
+  const server=p.server||null;
+  const roundTrip=p.t5b-p.t1;
+  const serverTotal=server?(server.preAnthropicMs+server.anthropicMs+server.postAnthropicMs):null;
+  const reteStimata=server?(roundTrip-serverTotal):null;
+  console.log('=== M1 PERFORMANCE (TEMPORARY DIAGNOSTICS) ===');
+  console.log('Frontend preparation (T0→T1): '+(p.t1-p.t0).toFixed(1)+' ms');
+  console.log('Round trip totale browser↔server (T1→T5b): '+roundTrip.toFixed(1)+' ms');
+  if(server){
+    console.log('  di cui, calcolato internamente lato server (T2→T5 — durate, non timestamp assoluti confrontabili col clock client):');
+    console.log('    server pre-Anthropic (T2→T3): '+server.preAnthropicMs.toFixed(1)+' ms');
+    console.log('    Anthropic (T3→T4): '+server.anthropicMs.toFixed(1)+' ms');
+    console.log('    server post-Anthropic (T4→T5): '+server.postAnthropicMs.toFixed(1)+' ms');
+    console.log('  rete outbound+return stimata per differenza (round trip - durate server; le due gambe non sono separabili senza clock sincronizzati): '+reteStimata.toFixed(1)+' ms');
+  }else{
+    console.log('  (diagnostica server assente nella risposta: nessun dettaglio server disponibile per questo run)');
+  }
+  console.log('Frontend parse/validazione/baseline/L2 (T5b→T6): '+(p.t6-p.t5b).toFixed(1)+' ms');
+  console.log('Supabase persistence (T7→T8): '+(p.t8-p.t7).toFixed(1)+' ms');
+  console.log('Total perceived (T0→T9): '+(p.t9-p.t0).toFixed(1)+' ms');
+}
+
 async function runM1(recipeId){
+  const __m1t0=performance.now(); // TEMPORARY diagnostics — T0: inizio runM1
   const recipe=R(recipeId);
   const v=recipe&&curLab(recipe);
   if(!v)return; // M1 è disponibile solo su status='lab'
@@ -3272,6 +3302,7 @@ async function runM1(recipeId){
   if(S.m1Loading)return; // doppio clic / seconda chiamata mentre la prima è attiva
   const variantId=v.id; // catturato ORA: è la bozza a cui il risultato resterà legato
   const chiaveM1=recipeId+'|'+variantId;
+  let __m1PerfTemp=null; // TEMPORARY diagnostics — popolato solo se il run arriva a completamento
 
   const snapshot={
     ingredients:(v.ingredients||[]).map(i=>({name:i.name,qty:i.qty,unit:i.unit})),
@@ -3291,7 +3322,9 @@ async function runM1(recipeId){
       criteria:{initial:v.criteriaInitial||null,current:v.criteriaCurrent||null},
       l3:(recipe.l3Items||[]).slice(0,20).map(x=>({distilledContent:x.distilledContent,contextConditions:x.contextConditions,knownLimits:x.knownLimits})),
     };
+    const __m1t1=performance.now(); // TEMPORARY diagnostics — T1: immediatamente prima del fetch mode:m1
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    const __m1t5b=performance.now(); // TEMPORARY diagnostics — T5b: fetch M1 risolto, prima di res.json()
     const data=await res.json().catch(()=>null);
     if(!res.ok||!data)throw new Error('Chiamata AI non riuscita');
     const text=(data.content||[]).map(c=>c.text||'').join('');
@@ -3329,6 +3362,7 @@ async function runM1(recipeId){
       evidence:null,provenanceType:'m1',sourceL2ItemId:null,
       baselineHash:baseline.baseline_hash,baselineContext:baseline.baseline_context,
     }));
+    const __m1t6=performance.now(); // TEMPORARY diagnostics — T6: parsing/validazione/baseline/L2 completati
 
     // Muta lo stato locale solo ora che parsing e validazione sono completi.
     // m1ReadingText nella STESSA mutazione/save degli L2: un solo salvataggio,
@@ -3336,7 +3370,9 @@ async function runM1(recipeId){
     // cognitiva): costruisciPayloadM2() non lo referenzia mai.
     upLab(recipeId,lab=>({...lab,l2Items:[...(lab.l2Items||[]),...newL2],m1ReadingText:userText}));
     const fresh=R(recipeId);
+    const __m1t7=performance.now(); // TEMPORARY diagnostics — T7: immediatamente prima di saveToSupabase
     const ok=await saveToSupabase(fresh);
+    const __m1t8=performance.now(); // TEMPORARY diagnostics — T8: saveToSupabase completato
     if(!ok){
       // Persistenza fallita: rollback locale COMPLETO (L2 + prosa) — M1 NON è completato (gate 4).
       upLab(recipeId,lab=>({...lab,l2Items:(lab.l2Items||[]).filter(x=>!newL2.some(n=>n.id===x.id)),m1ReadingText:null}));
@@ -3344,12 +3380,17 @@ async function runM1(recipeId){
     }
     S.m1Loading=false;S.m1LoadingKey=null;
     toast('Primo Consulto completato','ti-sparkles');
+    // TEMPORARY diagnostics — server=durate T2-T5 calcolate lato server (mai inviate ad Anthropic, mai persistite).
+    __m1PerfTemp={t0:__m1t0,t1:__m1t1,t5b:__m1t5b,t6:__m1t6,t7:__m1t7,t8:__m1t8,server:(data&&data.__m1PerfTemp)||null};
   }catch(e){
     console.error('[M1] errore:',e);
     S.m1Loading=false;S.m1LoadingKey=null;
     S.m1Error[variantId]=e.message||'Errore nel Primo Consulto';
   }
   render();
+  if(__m1PerfTemp){ // TEMPORARY diagnostics — T9: UI finale completata + stampa report
+    stampaReportPerformanceM1TEMP({...__m1PerfTemp,t9:performance.now()});
+  }
 }
 
 // LEGACY (D1) — runPrimoConsulto() non è più collegato a nessun pulsante

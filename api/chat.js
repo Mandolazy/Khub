@@ -388,7 +388,9 @@ export default async function handler(req, res) {
     }
 
     if (body.mode === 'm1') {
+      const __m1t2 = Date.now(); // TEMPORARY diagnostics — T2: ingresso handler M1
       const userMessage = buildM1UserMessage(body);
+      const __m1t3 = Date.now(); // TEMPORARY diagnostics — T3: immediatamente prima della chiamata Anthropic
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -403,7 +405,20 @@ export default async function handler(req, res) {
           messages: [{ role: 'user', content: userMessage }],
         }),
       });
+      const __m1t4 = Date.now(); // TEMPORARY diagnostics — T4: fetch Anthropic risolto
       const data = await response.json();
+      const __m1t5 = Date.now(); // TEMPORARY diagnostics — T5: immediatamente prima della risposta al browser
+      // TEMPORARY diagnostics — durate calcolate qui, lato server: mai inviate ad
+      // Anthropic (il fetch sopra è già partito), mai persistite, non lette da
+      // parsing/validazione client (che ignora questo campo). Da RIMUOVERE a
+      // misurazione completata.
+      if (data && typeof data === 'object') {
+        data.__m1PerfTemp = {
+          preAnthropicMs: __m1t3 - __m1t2,
+          anthropicMs: __m1t4 - __m1t3,
+          postAnthropicMs: __m1t5 - __m1t4,
+        };
+      }
       return res.status(response.status).json(data);
     }
 
