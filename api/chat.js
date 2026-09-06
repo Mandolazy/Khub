@@ -417,6 +417,11 @@ export default async function handler(req, res) {
           preAnthropicMs: __m1t3 - __m1t2,
           anthropicMs: __m1t4 - __m1t3,
           postAnthropicMs: __m1t5 - __m1t4,
+          // TEMPORARY diagnostics — letti dalla risposta Anthropic gia' presente
+          // in `data`, mai un secondo giro di rete: outputTokens e' il conteggio
+          // REALE del modello (data.usage.output_tokens), non una stima.
+          outputTokens: (data.usage && data.usage.output_tokens) || null,
+          stopReason: data.stop_reason || null,
         };
       }
       return res.status(response.status).json(data);
