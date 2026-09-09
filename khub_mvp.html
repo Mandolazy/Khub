@@ -368,6 +368,7 @@ async function loadFromSupabase(){
         ingredients:(data.ingredients||[]).filter(i=>i.variant_id===v.id).sort((a,b)=>a.sort_order-b.sort_order).map(i=>({
           id:i.id,name:i.name,qty:parseFloat(i.qty)||0,unit:i.unit||'g',
           isSubRecipe:i.is_sub_recipe||false,subRecipeId:i.sub_recipe_id||null,
+          estimatedYieldPct:i.estimated_yield_pct!==undefined&&i.estimated_yield_pct!==null?i.estimated_yield_pct:null,
         })),
         steps:parseSteps(v.steps),
         mediaUrl:v.media_url||null,
@@ -378,6 +379,7 @@ async function loadFromSupabase(){
         portionsCount:v.portions_count||4,gramsPerPortion:v.grams_per_portion||200,
         ingredients:(data.ingredients||[]).filter(i=>i.variant_id===v.id).sort((a,b)=>a.sort_order-b.sort_order).map(i=>({
           id:i.id,name:i.name,qty:parseFloat(i.qty)||0,unit:i.unit||'g',
+          estimatedYieldPct:i.estimated_yield_pct!==undefined&&i.estimated_yield_pct!==null?i.estimated_yield_pct:null,
         })),
         steps:parseSteps(v.steps),
         mediaUrl:v.media_url||null,
@@ -429,6 +431,7 @@ async function saveToSupabase(recipe){
           name:ing.name,qty:parseFloat(ing.qty)||0,unit:ing.unit||'g',
           is_sub_recipe:ing.isSubRecipe||false,sub_recipe_id:ing.subRecipeId||null,
           sort_order:idx,
+          estimated_yield_pct:ing.estimatedYieldPct!==undefined&&ing.estimatedYieldPct!==null?ing.estimatedYieldPct:null,
         });
       });
     });
@@ -446,6 +449,7 @@ async function saveToSupabase(recipe){
           name:ing.name,qty:parseFloat(ing.qty)||0,unit:ing.unit||'g',
           is_sub_recipe:false,sub_recipe_id:null,
           sort_order:idx,
+          estimated_yield_pct:ing.estimatedYieldPct!==undefined&&ing.estimatedYieldPct!==null?ing.estimatedYieldPct:null,
         });
       });
     });
@@ -617,7 +621,7 @@ function addIngredient(recipeId){
   const qtyEl=document.getElementById('new-ing-qty');
   const unitEl=document.getElementById('new-ing-unit');
   if(!nameEl||!nameEl.value.trim())return;
-  const ing={id:uid(),name:nameEl.value.trim(),qty:parseFloat(qtyEl?.value)||0,unit:unitEl?.value||'g',isSubRecipe:false,subRecipeId:null};
+  const ing={id:uid(),name:nameEl.value.trim(),qty:parseFloat(qtyEl?.value)||0,unit:unitEl?.value||'g',isSubRecipe:false,subRecipeId:null,estimatedYieldPct:null};
   upLab(recipeId,v=>({...v,ingredients:[...v.ingredients,ing]}));
   nameEl.value='';if(qtyEl)qtyEl.value='';
 }
@@ -630,6 +634,13 @@ function onIngUnit(recipeId,ingId,val){
 }
 function onIngName(recipeId,ingId,val){
   upLab(recipeId,v=>({...v,ingredients:v.ingredients.map(i=>i.id===ingId?{...i,name:val}:i)}));
+}
+// Resa stimata (%): contestuale a questo ingrediente in questa versione LAB.
+// Campo vuoto -> null ("resa non ancora modellata"), mai un default a 0/100.
+function onIngYield(recipeId,ingId,val){
+  const trimmed=(val===null||val===undefined)?'':String(val).trim();
+  const pct=trimmed===''?null:parseFloat(trimmed);
+  upLab(recipeId,v=>({...v,ingredients:v.ingredients.map(i=>i.id===ingId?{...i,estimatedYieldPct:(pct===null||isNaN(pct))?null:pct}:i)}));
 }
 function delIngredient(recipeId,ingId){
   upLab(recipeId,v=>({...v,ingredients:v.ingredients.filter(i=>i.id!==ingId)}));
@@ -1015,7 +1026,7 @@ function renderLabRecipe(recipe){
   <div class="card">
     <div class="card-label"><i class="ti ti-list-details"></i> Ingredienti</div>
     <table class="ing-table">
-      <thead><tr><th>Ingrediente</th><th>Quantità</th><th>Unità</th><th style="text-align:right">%</th><th></th></tr></thead>
+      <thead><tr><th>Ingrediente</th><th>Quantità</th><th>Unità</th><th style="text-align:right">%</th><th style="text-align:right">Resa%</th><th></th></tr></thead>
       <tbody>
         ${v.ingredients.map(ing=>`
         <tr>
@@ -1023,6 +1034,7 @@ function renderLabRecipe(recipe){
           <td><input class="ing-qty-input" type="number" value="${ing.qty}" onchange="onIngQty('${recipe.id}','${ing.id}',this.value)"></td>
           <td><select class="ing-unit-select" onchange="onIngUnit('${recipe.id}','${ing.id}',this.value)">${UNITS.map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}</select></td>
           <td class="ing-pct">${tot>0?(cnum(ing.qty)/tot*100).toFixed(1):0}%</td>
+          <td><input class="ing-qty-input" type="number" style="width:64px;text-align:right" placeholder="—" title="Resa % stimata per questo ingrediente in questa Ricetta/versione (100=invariato, <100=perdita, >100=aumento/assorbimento, 0=non contribuisce al finito)" value="${ing.estimatedYieldPct!=null?ing.estimatedYieldPct:''}" onchange="onIngYield('${recipe.id}','${ing.id}',this.value)"></td>
           <td><button onclick="delIngredient('${recipe.id}','${ing.id}')" style="background:none;border:none;cursor:pointer;color:var(--light);font-size:13px;padding:4px;transition:color 0.12s" onmouseover="this.style.color='#c0392b'" onmouseout="this.style.color='var(--light)'"><i class="ti ti-x"></i></button></td>
         </tr>`).join('')}
       </tbody>
