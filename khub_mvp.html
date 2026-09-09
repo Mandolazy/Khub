@@ -311,6 +311,9 @@ const S = {
   mediaRecorder: null,
   voiceNotes: {},
   isLoading: false,
+  yieldAnalysis: null,        // {recipeId, suggestions:[{ingredientId,ingName,currentYield,suggestedYield,reason}]}
+  yieldAnalysisLoading: false,
+  yieldAnalysisError: null,
 };
 
 const UNITS = ['g','ml','kg','l','n','tbsp','tsp','cl'];
@@ -715,6 +718,111 @@ function applyAISugg(recipeId){
 }
 
 // ══════════════════════════════════════════════════════════
+// MICHELINAI — ANALISI RESE (contestuale alla Ricetta/versione LAB)
+// analyzeYields() NON scrive mai su upLab: costruisce solo S.yieldAnalysis.
+// La scrittura avviene solo con applyYieldSuggestion/applyAllYieldSuggestions,
+// su azione esplicita dello chef.
+// ══════════════════════════════════════════════════════════
+async function analyzeYields(recipeId){
+  const recipe=R(recipeId);
+  const v=recipe&&curLab(recipe);
+  if(!v||!v.ingredients.length){toast('Aggiungi ingredienti prima di analizzare.','ti-alert-circle');return;}
+  S.yieldAnalysisLoading=true;
+  S.yieldAnalysis=null;
+  S.yieldAnalysisError=null;
+  render();
+
+  const ingredientiContesto=v.ingredients.map(i=>({
+    ingredientId:i.id,
+    nome:i.name,
+    quantita:i.qty,
+    unita:i.unit,
+    estimatedYieldPct:(i.estimatedYieldPct!==undefined&&i.estimatedYieldPct!==null)?i.estimatedYieldPct:null,
+  }));
+  const procedimento=(v.steps||[]).filter(s=>s&&s.trim());
+
+  const prompt=
+    'Sei MichelinAI, esperto di cucina professionale. Il tuo compito è stimare la resa gastronomica di ciascun ingrediente NEL CONTESTO di questa specifica Ricetta e del suo procedimento — non una resa generica e universale dell\'ingrediente.\n\n'
+    +'RICETTA: '+recipe.name+(recipe.category?' ('+recipe.category+')':'')+'\n\n'
+    +'INGREDIENTI (usa esattamente il valore ingredientId indicato per ogni suggerimento, è l\'unico modo con cui l\'app riconosce a quale riga ti riferisci):\n'
+    +ingredientiContesto.map(i=>'- ingredientId:'+i.ingredientId+' | '+i.nome+': '+i.quantita+i.unita+(i.estimatedYieldPct!=null?' (resa attuale già dichiarata: '+i.estimatedYieldPct+'%)':''))
+      .join('\n')
+    +'\n\n'+(procedimento.length
+        ?'PROCEDIMENTO:\n'+procedimento.map((s,idx)=>(idx+1)+'. '+s).join('\n')
+        :'PROCEDIMENTO: non ancora scritto in questa versione LAB. Se manca, basa la stima solo sulla natura dell\'ingrediente e dichiaralo nella motivazione.')
+    +'\n\nPer ogni ingrediente stima la resa considerando le trasformazioni previste dal procedimento di QUESTA ricetta (pulizia, mondatura, pelatura, disosso/deliscatura, taglio, cottura, metodo di cottura, evaporazione, assorbimento, altre trasformazioni). La stessa materia prima può avere rese diverse a seconda di come viene lavorata qui (es. una patata lessata, al forno o alla brace hanno rese diverse).\n\n'
+    +'Semantica di estimatedYieldPct:\n- 100 = quantità sostanzialmente invariata\n- <100 = perdita (es. 70 = perde il 30%)\n- >100 = aumento/assorbimento di liquidi (es. 200 = raddoppia)\n- 0 = l\'ingrediente/componente non contribuisce materialmente al prodotto finito dopo il processo descritto\nNon esiste un limite massimo: usa il valore realistico anche se superiore a 100.\n\n'
+    +'Rispondi SOLO con JSON valido, nessun altro testo prima o dopo, in questo formato esatto:\n'
+    +'{"suggestions":[{"ingredientId":"id esatto fornito sopra","estimatedYieldPct":numero,"reason":"motivazione sintetica gastronomicamente utile, max 20 parole, in italiano"}]}';
+
+  try{
+    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:1200,messages:[{role:'user',content:prompt}]})});
+    if(!res.ok)throw new Error('http_'+res.status);
+    const data=await res.json();
+    const text=(data.content||[]).map(c=>c.text||'').join('').replace(/```json|```/g,'').trim();
+    let parsed;
+    try{parsed=JSON.parse(text);}catch(e){throw new Error('parse_error');}
+    const rawSuggestions=Array.isArray(parsed.suggestions)?parsed.suggestions:[];
+    const validIds=new Set(v.ingredients.map(i=>i.id));
+
+    // STEP D — validazione: un suggerimento senza ingredientId valido o con resa
+    // non numerica viene scartato silenziosamente (nessun fallback per nome/fuzzy:
+    // l'ingrediente corrispondente resta semplicemente senza suggerimento).
+    const suggestions=rawSuggestions.map(s=>{
+      if(!s||typeof s.ingredientId!=='string'||!validIds.has(s.ingredientId))return null;
+      const pct=typeof s.estimatedYieldPct==='number'?s.estimatedYieldPct:parseFloat(s.estimatedYieldPct);
+      if(isNaN(pct))return null;
+      const ing=v.ingredients.find(i=>i.id===s.ingredientId);
+      return{
+        ingredientId:s.ingredientId,
+        ingName:ing.name,
+        currentYield:(ing.estimatedYieldPct!==undefined&&ing.estimatedYieldPct!==null)?ing.estimatedYieldPct:null,
+        suggestedYield:pct,
+        reason:(typeof s.reason==='string'&&s.reason.trim())?s.reason.trim():'',
+      };
+    }).filter(Boolean);
+
+    if(suggestions.length===0){
+      S.yieldAnalysisError='MichelinAI non ha restituito suggerimenti utilizzabili per questa ricetta. Riprova.';
+    }else{
+      S.yieldAnalysis={recipeId,suggestions};
+    }
+  }catch(e){
+    S.yieldAnalysisError='Errore durante l\'analisi MichelinAI. Nessuna resa è stata modificata. Riprova.';
+  }
+  S.yieldAnalysisLoading=false;
+  render();
+}
+
+function applyYieldSuggestion(recipeId,ingredientId,val){
+  const pct=typeof val==='number'?val:parseFloat(val);
+  if(isNaN(pct))return;
+  upLab(recipeId,v=>({...v,ingredients:v.ingredients.map(i=>i.id===ingredientId?{...i,estimatedYieldPct:pct}:i)}));
+  if(S.yieldAnalysis){
+    S.yieldAnalysis={...S.yieldAnalysis,suggestions:S.yieldAnalysis.suggestions.filter(s=>s.ingredientId!==ingredientId)};
+  }
+  toast('Resa applicata','ti-check');
+}
+
+function dismissYieldSuggestion(ingredientId){
+  if(S.yieldAnalysis){
+    S.yieldAnalysis={...S.yieldAnalysis,suggestions:S.yieldAnalysis.suggestions.filter(s=>s.ingredientId!==ingredientId)};
+  }
+  render();
+}
+
+function applyAllYieldSuggestions(recipeId){
+  if(!S.yieldAnalysis||!S.yieldAnalysis.suggestions.length)return;
+  const toApply=S.yieldAnalysis.suggestions;
+  upLab(recipeId,v=>({...v,ingredients:v.ingredients.map(i=>{
+    const s=toApply.find(x=>x.ingredientId===i.id);
+    return s?{...i,estimatedYieldPct:s.suggestedYield}:i;
+  })}));
+  S.yieldAnalysis=null;
+  toast('Rese applicate a tutti gli ingredienti','ti-check');
+}
+
+// ══════════════════════════════════════════════════════════
 // VOICE
 // ══════════════════════════════════════════════════════════
 async function toggleRecording(recipeId){
@@ -978,6 +1086,46 @@ function renderPreview(){
   </div>`;
 }
 
+// Pannello "Analisi rese MichelinAI": stato idle / analisi in corso / risultati / errore.
+// Mostra solo suggerimenti già validati (STEP D avvenuto in analyzeYields).
+function renderYieldAnalysisPanel(recipe,v){
+  const isLoading=S.yieldAnalysisLoading;
+  const analysis=(S.yieldAnalysis&&S.yieldAnalysis.recipeId===recipe.id)?S.yieldAnalysis:null;
+  const error=S.yieldAnalysisError;
+  const hasSuggestions=!!(analysis&&analysis.suggestions.length>0);
+  return `
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <div class="card-label" style="margin-bottom:0"><i class="ti ti-chef-hat"></i> Analisi rese MichelinAI</div>
+      <button class="btn btn-lab btn-sm" id="btn-analyze-yields" ${isLoading?'disabled':''}>
+        ${isLoading?'<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Analisi in corso...':'<i class="ti ti-sparkles"></i> Analizza rese con MichelinAI'}
+      </button>
+    </div>
+    ${error?`<div style="margin-top:12px;font-size:13px;color:#c0392b;background:rgba(192,57,43,0.08);border-radius:var(--r-sm);padding:10px 12px">${error}</div>`:''}
+    ${hasSuggestions?`
+    <div style="font-size:11px;color:var(--mid);font-weight:600;text-transform:uppercase;letter-spacing:.05em;margin:14px 0 4px">Rese suggerite — accetta, correggi o ignora</div>
+    ${analysis.suggestions.map(s=>`
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 0;border-top:1px solid var(--border)">
+      <div style="flex:1;min-width:140px">
+        <div style="font-size:13px;font-weight:500;color:var(--dark)">${s.ingName}</div>
+        ${s.reason?`<div style="font-size:11px;color:var(--mid);margin-top:2px">${s.reason}</div>`:''}
+      </div>
+      ${s.currentYield!=null?`<span style="font-size:11px;color:var(--light);text-decoration:line-through">${s.currentYield}%</span>`:''}
+      <input type="number" value="${s.suggestedYield}" id="yield-sugg-${s.ingredientId}" style="width:64px;padding:5px 6px;border:1.5px solid var(--sage);border-radius:6px;font-family:'DM Mono',monospace;font-size:13px;text-align:right;outline:none">
+      <span style="font-size:11px;color:var(--mid)">%</span>
+      <button class="btn btn-lab btn-sm" onclick="applyYieldSuggestion('${recipe.id}','${s.ingredientId}',document.getElementById('yield-sugg-${s.ingredientId}').value)"><i class="ti ti-check"></i> Applica</button>
+      <button class="btn btn-outline btn-sm" onclick="dismissYieldSuggestion('${s.ingredientId}')">Ignora</button>
+    </div>`).join('')}
+    ${analysis.suggestions.length>1?`
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+      <button class="btn btn-lab btn-sm" onclick="applyAllYieldSuggestions('${recipe.id}')"><i class="ti ti-check-all"></i> Applica tutti</button>
+      <button class="btn btn-outline btn-sm" onclick="S.yieldAnalysis=null;render()">Ignora tutti</button>
+    </div>`:''}
+    `:''}
+    ${analysis&&analysis.suggestions.length===0&&!error?`<div style="margin-top:12px;font-size:13px;color:var(--sage-dark)"><i class="ti ti-check"></i> Nessun suggerimento residuo: applicati o ignorati.</div>`:''}
+  </div>`;
+}
+
 function renderLabRecipe(recipe){
   const v=curLab(recipe);if(!v)return'';
   const tot=v.ingredients.reduce((s,i)=>s+cnum(i.qty),0);
@@ -1046,6 +1194,8 @@ function renderLabRecipe(recipe){
       <button class="btn btn-outline btn-sm" onclick="addIngredient('${recipe.id}')"><i class="ti ti-plus"></i> Aggiungi</button>
     </div>
   </div>
+
+  ${renderYieldAnalysisPanel(recipe,v)}
 
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
@@ -1386,6 +1536,10 @@ function bindEvents(){
   if(btnSendAI&&recipe)btnSendAI.addEventListener('click',()=>sendAI(recipe.id));
   const aiInput=document.getElementById('ai-input');
   if(aiInput&&recipe)aiInput.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendAI(recipe.id);}});
+
+  // MichelinAI — Analisi rese
+  const btnAnalyzeYields=document.getElementById('btn-analyze-yields');
+  if(btnAnalyzeYields&&recipe)btnAnalyzeYields.addEventListener('click',()=>analyzeYields(recipe.id));
 
   // Voice
   const btnVoice=document.getElementById('btn-voice');
