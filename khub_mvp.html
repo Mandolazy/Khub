@@ -862,6 +862,7 @@ const S = {
   michelinAILastResponse: null, // ultima prosa M2 (S.m2Result[..].response al momento dell'invio)
   yieldAnalysis: null,      // {recipeId, suggestions:[{ingId,ingName,currentYield,suggestedYield,reason}]}
   yieldAnalysisLoading: false, // true mentre MichelinAI sta analizzando
+  yieldAnalysisError: null, // messaggio d'errore dell'ultima analisi rese, null se nessuno
   primoConsultoLoading: false, // legacy (D1): runPrimoConsulto() non è più collegato a nessun pulsante, resta solo per lettura storica
   primoConsultoLoadingKey: null, // legacy (D1)
   m1Loading: false, // true mentre MichelinAI sta eseguendo M1 — Primo Consulto (sostituisce il vecchio Primo Consulto, D1)
@@ -2484,28 +2485,47 @@ async function analyzeYields(recipeId){
   if(!v||!v.ingredients.length){toast('Aggiungi ingredienti prima di analizzare.','ti-alert-circle');return;}
   S.yieldAnalysisLoading=true;
   S.yieldAnalysis=null;
+  S.yieldAnalysisError=null;
   render();
-  const ingList=v.ingredients.map((i,idx)=>(idx+1)+'. '+i.name+': '+i.qty+i.unit+(i.estimatedYieldPct!=null?' (resa attuale: '+i.estimatedYieldPct+'%)':'')).join('\n');
-  const proc=(v.steps||[]).join(' ');
-  const prompt='Sei MichelinAI, esperto di cucina professionale italiana. Analizza questa ricetta e suggerisci la resa% per ogni ingrediente.\n\nRICETTA: '+recipe.name+' ('+recipe.category+')\nINGREDIENTI:\n'+ingList+(proc?'\nPROCEDIMENTO:\n'+proc:'')+'\n\nPer ogni ingrediente indica:\n- estimatedYieldPct: numero intero (100=invariato, 70=perde 30%, 200=raddoppia, 0=evapora completamente)\n- reason: spiegazione breve in italiano (max 10 parole)\n\nRispondi SOLO con JSON valido, niente altro:\n{"suggestions":[{"ingName":"nome esatto","estimatedYieldPct":70,"reason":"perde acqua in cottura"}]}';
+  // ingId esplicito per ogni riga: e' l'unico identificatore che il matching
+  // della risposta AI puo' usare (vedi validazione sotto) — mai il nome.
+  const ingList=v.ingredients.map(i=>'- ingId:'+i.id+' | '+i.name+': '+i.qty+i.unit+(i.estimatedYieldPct!=null?' (resa attuale dichiarata: '+i.estimatedYieldPct+'%)':'')).join('\n');
+  const proc=(v.steps||[]).filter(s=>s&&s.trim());
+  const prompt='Sei MichelinAI, esperto di cucina professionale italiana. Stima la resa% di ogni ingrediente nel contesto SPECIFICO di questa Ricetta e del suo procedimento — non una resa generica e universale dell\'ingrediente (es. una patata lessata, al forno o alla brace hanno rese diverse).\n\nRICETTA: '+recipe.name+' ('+recipe.category+')\n\nINGREDIENTI (usa esattamente il valore ingId indicato per ogni suggerimento, è l\'unico modo con cui l\'app riconosce a quale riga ti riferisci):\n'+ingList
+    +'\n\n'+(proc.length?'PROCEDIMENTO:\n'+proc.map((s,idx)=>(idx+1)+'. '+s).join('\n'):'PROCEDIMENTO: non ancora scritto. Se manca, basa la stima solo sulla natura dell\'ingrediente e dichiaralo nella motivazione.')
+    +'\n\nPer ogni ingrediente indica:\n- ingId: esattamente il valore fornito sopra\n- estimatedYieldPct: numero (100=invariato, <100=perdita, >100=aumento/assorbimento, 0=non contribuisce al prodotto finito). Nessun limite massimo.\n- reason: motivazione sintetica e gastronomicamente utile, in italiano (max 15 parole)\n\nRispondi SOLO con JSON valido, niente altro:\n{"suggestions":[{"ingId":"id esatto fornito sopra","estimatedYieldPct":70,"reason":"perde acqua in cottura"}]}';
 
   try{
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,
+      body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1200,
         messages:[{role:'user',content:prompt}]})});
+    if(!res.ok)throw new Error('http_'+res.status);
     const data=await res.json();
     const text=(data.content||[]).map(c=>c.text||'').join('').replace(/```json|```/g,'').trim();
-    const parsed=JSON.parse(text);
-    // Abbina i suggerimenti agli ingredienti per id
-    const suggestions=(parsed.suggestions||[]).map(s=>{
-      const ing=v.ingredients.find(i=>i.name.toLowerCase().trim()===s.ingName.toLowerCase().trim())
-                ||v.ingredients.find(i=>i.name.toLowerCase().includes(s.ingName.toLowerCase()));
-      return ing?{ingId:ing.id,ingName:ing.name,currentYield:ing.estimatedYieldPct,
-                  suggestedYield:s.estimatedYieldPct,reason:s.reason}:null;
+    let parsed;
+    try{parsed=JSON.parse(text);}catch(e){throw new Error('parse_error');}
+    const rawSuggestions=Array.isArray(parsed.suggestions)?parsed.suggestions:[];
+    const validIds=new Set(v.ingredients.map(i=>i.id));
+    // Matching esclusivamente per ingId: un suggerimento con id inesistente
+    // o resa non numerica viene scartato, senza alcun fallback per nome/fuzzy —
+    // l'ingrediente corrispondente resta semplicemente senza suggerimento.
+    const suggestions=rawSuggestions.map(s=>{
+      if(!s||typeof s.ingId!=='string'||!validIds.has(s.ingId))return null;
+      const pct=typeof s.estimatedYieldPct==='number'?s.estimatedYieldPct:parseFloat(s.estimatedYieldPct);
+      if(isNaN(pct))return null;
+      const ing=v.ingredients.find(i=>i.id===s.ingId);
+      return{ingId:s.ingId,ingName:ing.name,
+             currentYield:(ing.estimatedYieldPct!==undefined&&ing.estimatedYieldPct!==null)?ing.estimatedYieldPct:null,
+             suggestedYield:pct,
+             reason:(typeof s.reason==='string'&&s.reason.trim())?s.reason.trim():''};
     }).filter(Boolean);
-    S.yieldAnalysis={recipeId,suggestions};
+    if(suggestions.length===0){
+      S.yieldAnalysisError='MichelinAI non ha restituito suggerimenti utilizzabili per questa ricetta. Riprova.';
+    }else{
+      S.yieldAnalysis={recipeId,suggestions};
+    }
   }catch(e){
-    toast('Errore analisi MichelinAI. Riprova.','ti-alert-circle');
+    S.yieldAnalysisError='Errore durante l\'analisi MichelinAI. Nessuna resa è stata modificata. Riprova.';
   }
   S.yieldAnalysisLoading=false;
   render();
@@ -3454,74 +3474,55 @@ async function runPrimoConsulto(recipeId){
   render();
 }
 
+// Stessa famiglia visiva di M1/M2 (card-label + btn-lab/btn-outline btn-sm):
+// e' una capacita' specialistica della sezione Ingredienti, non un modulo
+// MichelinAI separato — vive dentro la card Ingredienti, non accanto a M2.
 function renderYieldAnalysisPanel(recipe,v){
   const isLoading=S.yieldAnalysisLoading;
   const analysis=S.yieldAnalysis&&S.yieldAnalysis.recipeId===recipe.id?S.yieldAnalysis:null;
+  const error=S.yieldAnalysisError;
   const hasSuggestions=analysis&&analysis.suggestions.length>0;
 
   return `
-  <div style="background:var(--white);border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;margin-top:8px">
-    <div style="padding:12px 16px;background:linear-gradient(135deg,#1a1a2e,#16213e);display:flex;align-items:center;justify-content:space-between">
-      <div style="display:flex;align-items:center;gap:8px">
-        <i class="ti ti-chef-hat" style="color:#f0c040;font-size:18px"></i>
-        <span style="color:white;font-weight:600;font-size:14px">Analisi MichelinAI</span>
-      </div>
-      <button onclick="analyzeYields('${recipe.id}')" ${isLoading?'disabled':''} style="background:#f0c040;color:#1a1a2e;border:none;border-radius:var(--r-sm);padding:6px 12px;font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:6px">
-        ${isLoading?'<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Analisi in corso...':`<i class="ti ti-sparkles"></i> Analizza rese`}
+  <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+      <div class="card-label" style="margin-bottom:0"><i class="ti ti-chef-hat"></i> Analisi rese MichelinAI</div>
+      <button class="btn btn-lab btn-sm" ${isLoading?'disabled':''} onclick="analyzeYields('${recipe.id}')">
+        <i class="ti ${isLoading?'ti-loader-2':'ti-sparkles'}"></i> ${isLoading?'Analisi in corso...':'Analizza rese'}
       </button>
     </div>
 
-    ${!analysis&&!isLoading?`
-    <div style="padding:16px;font-size:13px;color:var(--mid);text-align:center">
-      <i class="ti ti-wand" style="font-size:24px;display:block;margin-bottom:8px;color:var(--border)"></i>
-      Premi "Analizza rese" per ottenere suggerimenti sulle rese di ogni ingrediente basati sul procedimento.
-    </div>`:''}
+    ${error?`<div style="margin-top:10px;font-size:13px;color:#c0392b"><i class="ti ti-alert-circle"></i> ${error}</div>`:''}
+
+    ${!analysis&&!isLoading&&!error?`
+    <div style="font-size:12px;color:var(--light);margin-top:8px">Suggerisce una resa % per ogni ingrediente in base al procedimento di questa Ricetta.</div>`:''}
 
     ${hasSuggestions?`
-    <div style="padding:12px 16px 4px;font-size:12px;color:var(--mid);font-weight:500">
-      RESE SUGGERITE - accetta, modifica o ignora
-    </div>
+    <div style="font-size:11px;color:var(--mid);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin:12px 0 4px">Rese suggerite — accetta, correggi o ignora</div>
     ${analysis.suggestions.map(s=>`
-    <div style="padding:10px 16px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--border)">
       <div style="flex:1;min-width:120px">
         <div style="font-size:13px;font-weight:500;color:var(--dark)">${s.ingName}</div>
-        <div style="font-size:11px;color:var(--mid);margin-top:2px">${s.reason}</div>
+        ${s.reason?`<div style="font-size:11px;color:var(--mid);margin-top:2px">${s.reason}</div>`:''}
       </div>
-      <div style="display:flex;align-items:center;gap:6px">
-        ${s.currentYield!=null?`<span style="font-size:11px;color:var(--light);text-decoration:line-through">${s.currentYield}%</span>`:''}
-        <input type="number" value="${s.suggestedYield}" min="0" max="500"
-          style="width:58px;padding:4px 6px;border:1.5px solid var(--sage);border-radius:var(--r-sm);font-family:inherit;font-size:13px;color:var(--dark);text-align:center"
-          onchange="this.dataset.val=this.value"
-          id="yield-input-${s.ingId}"
-        >
-        <span style="font-size:11px;color:var(--mid)">%</span>
-        <button onclick="applyYieldSuggestion('${recipe.id}','${s.ingId}',parseFloat(document.getElementById('yield-input-${s.ingId}').value))"
-          style="background:var(--sage);color:white;border:none;border-radius:var(--r-sm);padding:5px 10px;font-family:inherit;font-size:12px;cursor:pointer">
-          Applica
-        </button>
-        <button onclick="dismissYieldSuggestion('${s.ingId}')"
-          style="background:transparent;color:var(--light);border:1px solid var(--border);border-radius:var(--r-sm);padding:5px 8px;font-family:inherit;font-size:12px;cursor:pointer">
-          Ignora
-        </button>
-      </div>
+      ${s.currentYield!=null?`<span style="font-size:11px;color:var(--light);text-decoration:line-through">${s.currentYield}%</span>`:''}
+      <input type="number" value="${s.suggestedYield}" id="yield-input-${s.ingId}"
+        style="width:58px;padding:4px 6px;border:1.5px solid var(--sage);border-radius:var(--r-sm);font-family:inherit;font-size:13px;color:var(--dark);text-align:center;outline:none">
+      <span style="font-size:11px;color:var(--mid)">%</span>
+      <button class="btn btn-lab btn-sm" onclick="applyYieldSuggestion('${recipe.id}','${s.ingId}',parseFloat(document.getElementById('yield-input-${s.ingId}').value))">
+        <i class="ti ti-check"></i> Applica
+      </button>
+      <button class="btn btn-outline btn-sm" onclick="dismissYieldSuggestion('${s.ingId}')">Ignora</button>
     </div>`).join('')}
     ${analysis.suggestions.length>1?`
-    <div style="padding:10px 16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px">
-      <button onclick="applyAllYieldSuggestions('${recipe.id}')"
-        style="background:var(--lab);color:white;border:none;border-radius:var(--r-sm);padding:7px 14px;font-family:inherit;font-size:13px;font-weight:500;cursor:pointer">
-        <i class="ti ti-check-all"></i> Applica tutti
-      </button>
-      <button onclick="S.yieldAnalysis=null;render()"
-        style="background:transparent;color:var(--mid);border:1px solid var(--border);border-radius:var(--r-sm);padding:7px 12px;font-family:inherit;font-size:13px;cursor:pointer">
-        Ignora tutti
-      </button>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
+      <button class="btn btn-lab btn-sm" onclick="applyAllYieldSuggestions('${recipe.id}')"><i class="ti ti-check-all"></i> Applica tutti</button>
+      <button class="btn btn-outline btn-sm" onclick="S.yieldAnalysis=null;render()">Ignora tutti</button>
     </div>`:''}
     `:''}
 
-    ${analysis&&analysis.suggestions.length===0?`
-    <div style="padding:14px 16px;font-size:13px;color:var(--sage);text-align:center">
-      <i class="ti ti-check"></i> Tutti i suggerimenti sono stati applicati.
-    </div>`:''}
+    ${analysis&&analysis.suggestions.length===0&&!error?`
+    <div style="font-size:13px;color:var(--sage-dark);margin-top:10px"><i class="ti ti-check"></i> Tutti i suggerimenti sono stati applicati.</div>`:''}
   </div>`;
 }
 
@@ -4432,6 +4433,7 @@ function renderLabRecipe(recipe){
         <span>G/porzione finiti: <strong style="color:var(--sage)">${gppStimati}g</strong></span>
       </div>`;
     })()}
+    ${renderYieldAnalysisPanel(recipe,v)}
   </div>
 
   <div class="card">
@@ -4575,7 +4577,6 @@ function renderLabRecipe(recipe){
   </div>
 
   <div class="card">
-    ${renderYieldAnalysisPanel(recipe,v)}
     ${labSectionHeader(recipe.id,'ai','ti-chef-hat','MichelinAI',sectionsOpen.ai)}
     ${sectionsOpen.ai?(()=>{
       const chiaveBozzaAttuale=recipe.id+'|'+v.id;
