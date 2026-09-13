@@ -2507,6 +2507,284 @@ function computeScaleFactor(vv, targetPortions, targetGpp){
   return pesoFinitoTarget/pesoFinitoAttuale;
 }
 
+// ══════════════════════════════════════════════════════════
+// SPRINT PRODUZIONE — Micro-Step 7: computeSessionScaling + contratto
+// snapshot (A5.1-A5.17). Funzioni pure, NON ancora collegate ad alcuna UI,
+// ad alcun salvataggio o a "Manda in Produzione": nessuna Sessione viene
+// creata dal client in questo Micro-Step. NON sostituiscono e non toccano
+// il motore legacy sopra (computeFinishedWeightProd/computeScaleFactor,
+// usato da onVarPortions/onVarGpp/onVarIngQty): coesistono, distinti.
+//
+// computeSessionScaling non legge mai S.recipes ne' Supabase, non muta gli
+// oggetti ricevuti in input, non persiste nulla: a parita' di input
+// restituisce sempre lo stesso output (o lancia un errore esplicito, mai
+// un risultato parziale).
+// ══════════════════════════════════════════════════════════
+
+// Famiglie di conversione GENERICHE e deterministiche (mai g=ml): solo
+// massa<->massa e volume<->volume. Qualunque altra conversione (n->g,
+// ml->g/densita', spoon->massa/volume, o qualunque unita' non elencata qui)
+// richiede sempre una conversion fact ingredient-specific gia' risolta dal
+// chiamante (mai una ricerca online, mai un'invenzione).
+var SESSION_SCALING_MASS_TO_GRAMS={g:1,kg:1000};
+var SESSION_SCALING_VOLUME_TO_ML={ml:1,l:1000,cl:10};
+
+// Classifica l'unita' nella propria famiglia generica e restituisce il
+// fattore deterministico verso l'unita' canonica di quella famiglia
+// (massa: g; volume: ml). Le unita' non riconosciute sono la propria
+// famiglia a se' (canonicalUnit = l'unita' stessa, fattore 1): per queste
+// (n, tbsp, tsp, spoon, o qualunque altra unita' ingredient-specific) non
+// esiste alcuna conversione generica possibile.
+function classifySessionScalingUnitFamily(unit){
+  if(Object.prototype.hasOwnProperty.call(SESSION_SCALING_MASS_TO_GRAMS,unit)){
+    return{family:'mass',canonicalUnit:'g',toCanonicalFactor:SESSION_SCALING_MASS_TO_GRAMS[unit]};
+  }
+  if(Object.prototype.hasOwnProperty.call(SESSION_SCALING_VOLUME_TO_ML,unit)){
+    return{family:'volume',canonicalUnit:'ml',toCanonicalFactor:SESSION_SCALING_VOLUME_TO_ML[unit]};
+  }
+  return{family:'other',canonicalUnit:unit,toCanonicalFactor:1};
+}
+
+// Risolve il fattore di conversione totale (grammi per 1 unita' originale
+// dell'ingrediente) usando SOLO: (a) la tabella generica massa<->massa
+// quando l'unita' e' g/kg (nessuna fact necessaria, nessuna ambiguita'
+// possibile: sono la stessa sostanza); (b) una conversion fact
+// ingredient-specific gia' risolta per qualunque altro caso (volume, count,
+// spoon, ecc.) — la fact rappresenta sempre "grammi per 1 unita' canonica
+// della famiglia" (es. grammi per 1 ml per la famiglia volume, grammi per
+// 1 n per la famiglia "other" con canonicalUnit='n'), MAI un'equivalenza
+// g=ml arbitraria. Non lancia eccezioni: restituisce {error:...} cosi' il
+// chiamante puo' comporre un messaggio d'errore con il contesto completo
+// dell'ingrediente (nome/itemKey), senza duplicare qui quella logica.
+function resolveSessionScalingConversionToGrams(unit,conversionFact){
+  var fam=classifySessionScalingUnitFamily(unit);
+  if(fam.family==='mass'){
+    return{
+      conversionFactorToBase:fam.toCanonicalFactor,
+      conversionOrigin:unit==='g'?'none':'generic_unit_table',
+      conversionSourceType:null,
+      conversionFactId:null,
+    };
+  }
+  if(!conversionFact||typeof conversionFact!=='object'){
+    return{error:'missing_conversion'};
+  }
+  var f=conversionFact.factor;
+  if(typeof f!=='number'||!isFinite(f)||f<=0){
+    return{error:'invalid_conversion_factor'};
+  }
+  return{
+    conversionFactorToBase:fam.toCanonicalFactor*f,
+    conversionOrigin:'ingredient_conversion_fact',
+    conversionSourceType:conversionFact.sourceType!=null?conversionFact.sourceType:null,
+    conversionFactId:conversionFact.id!=null?conversionFact.id:null,
+  };
+}
+
+// Funzione pura: calcola lo scaling di una Sessione di Produzione a partire
+// da un target di prodotto finito (targetPortions x targetGramsPerPortion),
+// SENZA mai leggere S.recipes/Supabase, senza mutare l'input, senza
+// persistere nulla. Lancia un Error esplicito (mai un risultato parziale)
+// alla prima validazione fallita.
+//
+// input = {
+//   recipeId,recipeName,variantId,variantName,category,
+//   ingredients:[{itemKey|id,sourceIngredientId,name,qty,unit,
+//                 estimatedYieldPct,isSubRecipe,subRecipeId,conversionFact}],
+//   steps:[{id,order,text,expectedDurationSeconds}],
+//   targetPortions,targetGramsPerPortion,
+// }
+//
+// Sub-ricette (A5.10): trattate come qualunque altro ingrediente operativo
+// (stessa qty/unit/resa/conversione) — MAI espanse, MAI ricalcolate
+// ricorsivamente sui propri ingredienti interni. Se una sub-ricetta non
+// fornisce un dato di normalizzazione affidabile, fallisce con lo stesso
+// identico percorso d'errore di un ingrediente normale (nessuna eccezione
+// speciale, nessuna invenzione).
+function computeSessionScaling(input){
+  input=input||{};
+  var ingredientsIn=Array.isArray(input.ingredients)?input.ingredients:[];
+  var stepsIn=Array.isArray(input.steps)?input.steps:[];
+  var targetPortions=input.targetPortions;
+  var targetGramsPerPortion=input.targetGramsPerPortion;
+
+  if(typeof targetPortions!=='number'||!isFinite(targetPortions)||targetPortions<=0){
+    throw new Error('computeSessionScaling: targetPortions deve essere un numero > 0');
+  }
+  if(typeof targetGramsPerPortion!=='number'||!isFinite(targetGramsPerPortion)||targetGramsPerPortion<=0){
+    throw new Error('computeSessionScaling: targetGramsPerPortion deve essere un numero > 0');
+  }
+  var targetFinishedTotal=targetPortions*targetGramsPerPortion;
+  if(!(targetFinishedTotal>0)){
+    throw new Error('computeSessionScaling: targetFinishedTotal deve essere > 0');
+  }
+  if(ingredientsIn.length===0){
+    throw new Error('computeSessionScaling: e\' necessario almeno un ingrediente');
+  }
+
+  var resolved=ingredientsIn.map(function(ing,idx){
+    if(!ing||typeof ing!=='object'){
+      throw new Error('computeSessionScaling: ingrediente in posizione '+idx+' non valido');
+    }
+    var label=ing.name||ing.itemKey||ing.id||('#'+idx);
+    var itemKey=ing.itemKey!=null?ing.itemKey:(ing.id!=null?ing.id:null);
+    if(itemKey==null||itemKey===''){
+      throw new Error('computeSessionScaling: itemKey/id mancante per ingrediente "'+label+'"');
+    }
+    var qty=ing.qty;
+    if(typeof qty!=='number'||!isFinite(qty)){
+      throw new Error('computeSessionScaling: qty non numerica per ingrediente "'+label+'"');
+    }
+    if(qty<0){
+      throw new Error('computeSessionScaling: qty negativa per ingrediente "'+label+'"');
+    }
+    var unit=ing.unit;
+    if(typeof unit!=='string'||!unit){
+      throw new Error('computeSessionScaling: unit mancante per ingrediente "'+label+'"');
+    }
+    var yieldPct=(ing.estimatedYieldPct===undefined)?null:ing.estimatedYieldPct;
+    var effectiveYield;
+    if(yieldPct===null){
+      effectiveYield=1; // CASO 6: yield null -> effectiveYield 100%
+    }else{
+      if(typeof yieldPct!=='number'||!isFinite(yieldPct)||yieldPct<=0){
+        throw new Error('computeSessionScaling: estimatedYieldPct non valida per ingrediente "'+label+'"');
+      }
+      effectiveYield=yieldPct/100;
+    }
+
+    var conv=resolveSessionScalingConversionToGrams(unit,ing.conversionFact||null);
+    if(conv.error==='missing_conversion'){
+      throw new Error('computeSessionScaling: conversione mancante per ingrediente "'+label+'" (unita\' "'+unit+'")');
+    }
+    if(conv.error==='invalid_conversion_factor'){
+      throw new Error('computeSessionScaling: conversion factor non valido per ingrediente "'+label+'"');
+    }
+
+    var normalizedContribution=qty*conv.conversionFactorToBase*effectiveYield;
+
+    return{
+      itemKey:itemKey,
+      sourceIngredientId:ing.id!=null?ing.id:(ing.sourceIngredientId!=null?ing.sourceIngredientId:null),
+      name:ing.name!=null?ing.name:'',
+      unit:unit,
+      baseQty:qty,
+      estimatedYieldPct:yieldPct,
+      isSubRecipe:ing.isSubRecipe===true,
+      subRecipeId:ing.subRecipeId!=null?ing.subRecipeId:null,
+      conversionFactorToBase:conv.conversionFactorToBase,
+      conversionOrigin:conv.conversionOrigin,
+      conversionSourceType:conv.conversionSourceType,
+      conversionFactId:conv.conversionFactId,
+      normalizedContribution:normalizedContribution,
+    };
+  });
+
+  var baseExpectedFinishedTotal=resolved.reduce(function(sum,x){return sum+x.normalizedContribution;},0);
+  if(!(baseExpectedFinishedTotal>0)){
+    throw new Error('computeSessionScaling: baseExpectedFinishedTotal deve essere > 0');
+  }
+
+  var scaleFactor=targetFinishedTotal/baseExpectedFinishedTotal;
+
+  var ingredientsOut=resolved.map(function(x){
+    return{
+      itemKey:x.itemKey,
+      sourceIngredientId:x.sourceIngredientId,
+      name:x.name,
+      unit:x.unit,
+      baseQty:x.baseQty,
+      operativeQty:x.baseQty*scaleFactor, // stessa unita' operativa originale dell'ingrediente
+      estimatedYieldPct:x.estimatedYieldPct,
+      isSubRecipe:x.isSubRecipe,
+      subRecipeId:x.subRecipeId,
+      conversionFactorToBase:x.conversionFactorToBase,
+      conversionOrigin:x.conversionOrigin,
+      conversionSourceType:x.conversionSourceType,
+      conversionFactId:x.conversionFactId,
+    };
+  });
+
+  var stepsOut=stepsIn.map(function(st,idx){
+    if(!st||typeof st.id!=='string'||!st.id){
+      throw new Error('computeSessionScaling: step in posizione '+idx+' privo di id valido');
+    }
+    return{
+      stepId:st.id,
+      order:typeof st.order==='number'?st.order:idx,
+      text:st.text!=null?st.text:'',
+      expectedDurationSeconds:st.expectedDurationSeconds!=null?st.expectedDurationSeconds:null,
+    };
+  });
+
+  return{
+    targetPortions:targetPortions,
+    targetGramsPerPortion:targetGramsPerPortion,
+    targetFinishedTotal:targetFinishedTotal,
+    baseExpectedFinishedTotal:baseExpectedFinishedTotal,
+    scaleFactor:scaleFactor,
+    normalizationUnit:'g',
+    ingredients:ingredientsOut,
+    steps:stepsOut,
+  };
+}
+
+// Helper puro: assembla il contratto snapshot_version=1 a partire dai
+// metadati della Ricetta/Ricetta attiva (invariati, mai letti da
+// S.recipes qui dentro: arrivano gia' risolti nell'input) e dal risultato
+// di computeSessionScaling. Non persiste nulla, non crea alcuna
+// production_sessions: costruisce solo l'oggetto payload concettuale.
+function buildSessionSnapshotV1(meta,computed){
+  meta=meta||{};
+  return{
+    snapshotVersion:1,
+    recipe:{
+      recipeId:meta.recipeId!=null?meta.recipeId:null,
+      recipeName:meta.recipeName!=null?meta.recipeName:null,
+      category:meta.category!=null?meta.category:null,
+      variantId:meta.variantId!=null?meta.variantId:null,
+      variantName:meta.variantName!=null?meta.variantName:null,
+    },
+    target:{
+      targetPortions:computed.targetPortions,
+      targetGramsPerPortion:computed.targetGramsPerPortion,
+      targetFinishedTotal:computed.targetFinishedTotal,
+      baseExpectedFinishedTotal:computed.baseExpectedFinishedTotal,
+      scaleFactor:computed.scaleFactor,
+      normalizationUnit:computed.normalizationUnit,
+    },
+    ingredients:computed.ingredients.map(function(ing){
+      return{
+        itemKey:ing.itemKey,
+        sourceIngredientId:ing.sourceIngredientId,
+        name:ing.name,
+        unit:ing.unit,
+        baseQty:ing.baseQty,
+        operativeQty:ing.operativeQty,
+        estimatedYieldPct:ing.estimatedYieldPct,
+        isSubRecipe:ing.isSubRecipe,
+        subRecipeId:ing.subRecipeId,
+        conversionFactorToBase:ing.conversionFactorToBase,
+        conversionOrigin:ing.conversionOrigin,
+        conversionSourceType:ing.conversionSourceType,
+        conversionFactId:ing.conversionFactId,
+      };
+    }),
+    steps:computed.steps.map(function(st){
+      return{
+        stepId:st.stepId,
+        order:st.order,
+        text:st.text,
+        expectedDurationSeconds:st.expectedDurationSeconds,
+      };
+    }),
+    media:{
+      mediaUrl:meta.mediaUrl!=null?meta.mediaUrl:null,
+      videoUrl:meta.videoUrl!=null?meta.videoUrl:null,
+    },
+  };
+}
+
 function onVarPortions(recipeId,varId,val){
   upRec(recipeId,r=>{
     const vv=r.validatedVariants.find(v=>v.id===varId);if(!vv)return r;
