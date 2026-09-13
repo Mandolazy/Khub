@@ -132,6 +132,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
 .step-drag{padding:4px 6px;background:transparent;border:none;color:var(--light);cursor:grab;border-radius:6px;font-size:13px;flex-shrink:0;touch-action:none;}
 .step-drag:active{cursor:grabbing;}
 .step-item.drag-over{border-top:2px solid var(--lab);margin-top:-2px;}
+.step-duration{width:52px;flex-shrink:0;background:var(--cream);border:1px solid transparent;border-radius:var(--r-sm);padding:7px 6px;font-size:12px;color:var(--dark);outline:none;text-align:center;margin-top:0;}
+.step-duration:focus{border-color:var(--sage);background:var(--white);}
+.step-duration-wrap{display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0;}
+.step-duration-label{font-size:9.5px;color:var(--light);text-transform:uppercase;letter-spacing:.03em;}
 
 /* ── MEDIA ── */
 .media-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
@@ -1475,6 +1479,34 @@ function stepsV2ToLegacyArray(stepsV2){
   return(stepsV2||[]).slice().sort(function(a,b){return a.order-b.order;}).map(function(s){return s.text||'';});
 }
 
+// Sprint Produzione — Micro-Step 5 (A5.8): tempo previsto per step.
+// Converte expectedDurationSeconds (integer>=0 oppure null) nel valore
+// minuti da mostrare nel campo UI. Semantica scelta: null E zero sono
+// entrambi "nessun tempo previsto" e mostrati come campo vuoto (simmetrico
+// a parseExpectedDurationMinutesInput sotto, che tratta "vuoto" e "0" allo
+// stesso modo in scrittura).
+function formatExpectedDurationMinutes(seconds){
+  if(seconds==null||seconds===0)return'';
+  return String(seconds/60);
+}
+
+// Converte il valore testuale del campo minuti in expectedDurationSeconds.
+// Ritorna:
+// - null se il campo e' vuoto o il valore e' 0 ("nessun tempo previsto" —
+//   stessa semantica di uno step legacy appena convertito/di un nuovo step);
+// - un intero secondi (arrotondato) se il valore e' un numero valido > 0;
+// - undefined se il valore non e' un numero valido o e' negativo: segnale
+//   per il chiamante di NON applicare alcuna modifica (input rifiutato,
+//   nessuna logica di correzione/clamping).
+function parseExpectedDurationMinutesInput(val){
+  if(val===''||val===null||val===undefined)return null;
+  var n=parseFloat(val);
+  if(isNaN(n))return undefined;
+  if(n<0)return undefined;
+  if(n===0)return null;
+  return Math.round(n*60);
+}
+
 function makeDefaultLab(recipeId,name){
   return{id:'lv_'+uid(),label:'Bozza 1',name:name||'',note:'',portionsCount:1,gramsPerPortion:0,portionSize:0,portionUnit:'g',ingredients:[],steps:[],stepsV2:[],mediaUrl:null,videoUrl:null,active:false,originVariantId:null,
     l2Items:[],intentionInitial:null,intentionCurrent:null,criteriaInitial:null,criteriaCurrent:null,m1ReadingText:null};
@@ -2432,6 +2464,20 @@ function delStep(recipeId,idx){
     // solo order/posizione viene riallineato.
     const sv2=getStructuredSteps(v.steps,v.stepsV2).filter((_,i)=>i!==idx).map((st,i)=>({...st,order:i}));
     return{...v,steps:v.steps.filter((_,i)=>i!==idx),stepsV2:sv2};
+  });
+}
+
+// A5.8: imposta/modifica/rimuove il tempo previsto di uno step, senza mai
+// toccare id/text/order dello step, ne' variants.steps (legacy, invariato).
+// Input non valido (non numerico o negativo) -> nessuna modifica applicata.
+function onStepDuration(recipeId,idx,val){
+  var parsed=parseExpectedDurationMinutesInput(val);
+  if(parsed===undefined)return;
+  upLab(recipeId,function(v){
+    var sv2=getStructuredSteps(v.steps,v.stepsV2).map(function(st,i){
+      return i===idx?Object.assign({},st,{expectedDurationSeconds:parsed}):st;
+    });
+    return Object.assign({},v,{stepsV2:sv2});
   });
 }
 
@@ -4568,12 +4614,19 @@ function renderLabRecipe(recipe){
       <button class="btn btn-outline btn-sm" onclick="addStep('${recipe.id}')"><i class="ti ti-plus"></i> Aggiungi passo</button>
     </div>
     ${v.steps&&v.steps.length?`<div class="steps-list" id="steps-list-${recipe.id}">
-      ${v.steps.map((s,i)=>`<div class="step-item" draggable="true" data-step-idx="${i}" data-recipe="${recipe.id}">
+      ${v.steps.map((s,i)=>{
+        const stEsteso=(v.stepsV2||[])[i];
+        const durMin=formatExpectedDurationMinutes(stEsteso&&stEsteso.expectedDurationSeconds);
+        return `<div class="step-item" draggable="true" data-step-idx="${i}" data-recipe="${recipe.id}">
         <button class="step-drag" title="Trascina per riordinare"><i class="ti ti-grip-vertical"></i></button>
         <div class="step-num">${i+1}</div>
         <textarea class="step-text" rows="2" onchange="onStepText('${recipe.id}',${i},this.value)">${s}</textarea>
+        <div class="step-duration-wrap">
+          <div class="step-duration-label">min</div>
+          <input class="step-duration" type="number" min="0" step="0.5" inputmode="decimal" placeholder="—" title="Tempo previsto (minuti). Lascia vuoto per nessun tempo previsto." value="${durMin}" onchange="onStepDuration('${recipe.id}',${i},this.value)">
+        </div>
         <button class="step-del" onclick="delStep('${recipe.id}',${i})"><i class="ti ti-x"></i></button>
-      </div>`).join('')}
+      </div>`;}).join('')}
     </div>`:`<div style="font-size:13px;color:var(--light);padding:8px 0">Nessun passo. Clicca "+ Aggiungi passo".</div>`}
   </div>
 
