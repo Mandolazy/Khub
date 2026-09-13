@@ -2529,52 +2529,83 @@ function computeScaleFactor(vv, targetPortions, targetGpp){
 var SESSION_SCALING_MASS_TO_GRAMS={g:1,kg:1000};
 var SESSION_SCALING_VOLUME_TO_ML={ml:1,l:1000,cl:10};
 
-// Classifica l'unita' nella propria famiglia generica e restituisce il
-// fattore deterministico verso l'unita' canonica di quella famiglia
-// (massa: g; volume: ml). Le unita' non riconosciute sono la propria
-// famiglia a se' (canonicalUnit = l'unita' stessa, fattore 1): per queste
-// (n, tbsp, tsp, spoon, o qualunque altra unita' ingredient-specific) non
-// esiste alcuna conversione generica possibile.
-function classifySessionScalingUnitFamily(unit){
-  if(Object.prototype.hasOwnProperty.call(SESSION_SCALING_MASS_TO_GRAMS,unit)){
-    return{family:'mass',canonicalUnit:'g',toCanonicalFactor:SESSION_SCALING_MASS_TO_GRAMS[unit]};
-  }
-  if(Object.prototype.hasOwnProperty.call(SESSION_SCALING_VOLUME_TO_ML,unit)){
-    return{family:'volume',canonicalUnit:'ml',toCanonicalFactor:SESSION_SCALING_VOLUME_TO_ML[unit]};
-  }
-  return{family:'other',canonicalUnit:unit,toCanonicalFactor:1};
+// Famiglia generica di un'unita' (per la sola composizione di conversioni
+// deterministiche omogenee, MAI per interpretare una conversion fact):
+// 'mass' per g/kg, 'volume' per ml/l/cl, null per qualunque altra unita'
+// (n, tbsp, tsp, spoon, ...) priva di una tabella generica.
+function sessionScalingUnitFamily(unit){
+  if(Object.prototype.hasOwnProperty.call(SESSION_SCALING_MASS_TO_GRAMS,unit))return'mass';
+  if(Object.prototype.hasOwnProperty.call(SESSION_SCALING_VOLUME_TO_ML,unit))return'volume';
+  return null;
+}
+function sessionScalingGenericFamilyTable(family){
+  return family==='mass'?SESSION_SCALING_MASS_TO_GRAMS:SESSION_SCALING_VOLUME_TO_ML;
 }
 
-// Risolve il fattore di conversione totale (grammi per 1 unita' originale
-// dell'ingrediente) usando SOLO: (a) la tabella generica massa<->massa
-// quando l'unita' e' g/kg (nessuna fact necessaria, nessuna ambiguita'
-// possibile: sono la stessa sostanza); (b) una conversion fact
-// ingredient-specific gia' risolta per qualunque altro caso (volume, count,
-// spoon, ecc.) — la fact rappresenta sempre "grammi per 1 unita' canonica
-// della famiglia" (es. grammi per 1 ml per la famiglia volume, grammi per
-// 1 n per la famiglia "other" con canonicalUnit='n'), MAI un'equivalenza
-// g=ml arbitraria. Non lancia eccezioni: restituisce {error:...} cosi' il
-// chiamante puo' comporre un messaggio d'errore con il contesto completo
-// dell'ingrediente (nome/itemKey), senza duplicare qui quella logica.
+// Risolve il fattore di conversione totale (grammi per 1 unita' ORIGINALE
+// dell'ingrediente) secondo il contratto reale di una conversion fact
+// persistente (ingredient_conversions, Micro-Step 2): { fromUnit, toUnit,
+// factor, sourceType, id }, dove factor = quantita' in toUnit per 1
+// fromUnit (MAI reinterpretato come "per unita' canonica della famiglia").
+//
+// (a) g/kg: nessuna fact necessaria, nessuna ambiguita' possibile (stessa
+//     sostanza) — tabella generica massa<->massa.
+// (b) qualunque altra unita': serve SEMPRE una conversion fact con
+//     toUnit==='g' (la normalizzazione di questa versione dello snapshot e'
+//     sempre in grammi). E' consentito comporre AL PIU' una conversione
+//     generica deterministica, e solo se unit e fact.fromUnit appartengono
+//     alla STESSA famiglia generica (es. l -> ml prima di applicare una
+//     fact ml->g), con la fact applicata per ultima. Se unit===fact.fromUnit
+//     la composizione e' diretta (rapporto 1), nessuna tabella generica
+//     coinvolta (vale anche per 'n' o altre unita' senza famiglia). Nessuna
+//     catena arbitraria: se le famiglie non coincidono (e le unita' non
+//     sono uguali), o la fact non porta a 'g', o factor non e' un numero
+//     positivo, o fromUnit/toUnit mancano: errore esplicito.
+//
+// Non lancia eccezioni: restituisce {error:...} cosi' il chiamante puo'
+// comporre un messaggio con il contesto completo dell'ingrediente.
 function resolveSessionScalingConversionToGrams(unit,conversionFact){
-  var fam=classifySessionScalingUnitFamily(unit);
-  if(fam.family==='mass'){
+  var massFactor=SESSION_SCALING_MASS_TO_GRAMS[unit];
+  if(massFactor!=null){
     return{
-      conversionFactorToBase:fam.toCanonicalFactor,
+      conversionFactorToBase:massFactor,
       conversionOrigin:unit==='g'?'none':'generic_unit_table',
       conversionSourceType:null,
       conversionFactId:null,
     };
   }
+
   if(!conversionFact||typeof conversionFact!=='object'){
     return{error:'missing_conversion'};
   }
-  var f=conversionFact.factor;
-  if(typeof f!=='number'||!isFinite(f)||f<=0){
+  var fromUnit=conversionFact.fromUnit;
+  var toUnit=conversionFact.toUnit;
+  if(typeof fromUnit!=='string'||!fromUnit||typeof toUnit!=='string'||!toUnit){
+    return{error:'incomplete_conversion_fact'};
+  }
+  if(toUnit!=='g'){
+    return{error:'conversion_fact_wrong_target'};
+  }
+  var factor=conversionFact.factor;
+  if(typeof factor!=='number'||!isFinite(factor)||factor<=0){
     return{error:'invalid_conversion_factor'};
   }
+
+  var genericRatio; // quante unita' fromUnit ci sono in 1 unita' originale
+  if(unit===fromUnit){
+    genericRatio=1;
+  }else{
+    var unitFamily=sessionScalingUnitFamily(unit);
+    var factFamily=sessionScalingUnitFamily(fromUnit);
+    if(unitFamily==null||factFamily==null||unitFamily!==factFamily){
+      return{error:'incompatible_conversion_fact'};
+    }
+    var table=sessionScalingGenericFamilyTable(unitFamily);
+    genericRatio=table[unit]/table[fromUnit];
+  }
+
   return{
-    conversionFactorToBase:fam.toCanonicalFactor*f,
+    conversionFactorToBase:genericRatio*factor,
     conversionOrigin:'ingredient_conversion_fact',
     conversionSourceType:conversionFact.sourceType!=null?conversionFact.sourceType:null,
     conversionFactId:conversionFact.id!=null?conversionFact.id:null,
@@ -2590,7 +2621,8 @@ function resolveSessionScalingConversionToGrams(unit,conversionFact){
 // input = {
 //   recipeId,recipeName,variantId,variantName,category,
 //   ingredients:[{itemKey|id,sourceIngredientId,name,qty,unit,
-//                 estimatedYieldPct,isSubRecipe,subRecipeId,conversionFact}],
+//                 estimatedYieldPct,isSubRecipe,subRecipeId,
+//                 conversionFact:{id,fromUnit,toUnit,factor,sourceType}}],
 //   steps:[{id,order,text,expectedDurationSeconds}],
 //   targetPortions,targetGramsPerPortion,
 // }
@@ -2656,6 +2688,15 @@ function computeSessionScaling(input){
     var conv=resolveSessionScalingConversionToGrams(unit,ing.conversionFact||null);
     if(conv.error==='missing_conversion'){
       throw new Error('computeSessionScaling: conversione mancante per ingrediente "'+label+'" (unita\' "'+unit+'")');
+    }
+    if(conv.error==='incomplete_conversion_fact'){
+      throw new Error('computeSessionScaling: conversion fact priva di fromUnit/toUnit per ingrediente "'+label+'"');
+    }
+    if(conv.error==='conversion_fact_wrong_target'){
+      throw new Error('computeSessionScaling: la conversion fact per ingrediente "'+label+'" non porta a grammi (toUnit non e\' "g")');
+    }
+    if(conv.error==='incompatible_conversion_fact'){
+      throw new Error('computeSessionScaling: conversion fact incompatibile con l\'unita\' "'+unit+'" per ingrediente "'+label+'"');
     }
     if(conv.error==='invalid_conversion_factor'){
       throw new Error('computeSessionScaling: conversion factor non valido per ingrediente "'+label+'"');
