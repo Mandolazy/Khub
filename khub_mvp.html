@@ -2826,6 +2826,127 @@ function buildSessionSnapshotV1(meta,computed){
   };
 }
 
+// ══════════════════════════════════════════════════════════
+// SPRINT PRODUZIONE — Micro-Step 8: createProductionSession.
+// Servizio applicativo (NON puro: fa I/O verso /api/chat), NON ancora
+// collegato ad alcuna UI/"Manda in Produzione". Dimostra soltanto che
+// KHUB puo' creare correttamente e persistentemente una Sessione a
+// partire da un input gia' completo (nessuna richiesta interattiva di
+// conversioni qui dentro).
+//
+// Riusa ESCLUSIVAMENTE le azioni Supabase generiche gia' esistenti in
+// api/chat.js: 'update' (upsert generico su qualunque tabella, singola
+// riga o array — usato identico da onValidate/saveToSupabase per
+// recipes/variants/ingredients) e 'delete' (delete generico per id).
+// Nessuna nuova azione server e' stata necessaria: api/chat.js non e'
+// stato toccato in questo Micro-Step.
+// ══════════════════════════════════════════════════════════
+
+async function _supabaseUpsertRow(table,data){
+  try{
+    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'update',table:table,data:data})});
+    return await r.json();
+  }catch(e){
+    return{error:String(e&&e.message||e)};
+  }
+}
+async function _supabaseDeleteRow(table,id){
+  // Best-effort: nessun layer transazionale reale e' disponibile in questo
+  // repository (il 'save' esistente e' gia' documentato come fail-fast,
+  // MAI una transazione — vedi commento su D4 in api/chat.js). Questa
+  // DELETE serve solo a innescare ON DELETE CASCADE sulle tabelle figlie
+  // (session_ingredient_state/session_step_state), rimuovendo cosi' ogni
+  // child gia' scritto prima del fallimento. Un errore qui viene loggato
+  // ma non rilanciato: il chiamante deve comunque propagare l'errore
+  // originale, non uno di cleanup.
+  try{
+    await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'delete',table:table,id:id})});
+  }catch(e){
+    console.error('createProductionSession: cleanup fallito per',table,id,e);
+  }
+}
+
+// Crea persistentemente una nuova Sessione di Produzione.
+//
+// preparedInput deve arrivare gia' completo (stesso oggetto passato a
+// computeSessionScaling, con in aggiunta i metadati Ricetta/Variante e i
+// media):
+//   { recipeId,recipeName,category,variantId,variantName,
+//     ingredients:[...],steps:[...],
+//     targetPortions,targetGramsPerPortion,
+//     mediaUrl,videoUrl }
+//
+// Sequenza: (A) computeSessionScaling — se fallisce, throw immediato,
+// NESSUNA scrittura; (B) buildSessionSnapshotV1 — se fallisce, throw
+// immediato, NESSUNA scrittura; (C) genera un nuovo id di Sessione
+// (stesso pattern uid() gia' in uso in tutto il repository, mai un UUID
+// server-side); (D) upsert production_sessions; (E) upsert
+// session_ingredient_state (item_key = snapshot.ingredients[].itemKey);
+// (F) upsert session_step_state (item_key = snapshot.steps[].stepId).
+// Nessuna session_notes iniziale.
+//
+// Non modifica MAI preparedInput (ricetta/variante/ingredienti/steps/
+// conversion facts/target sorgente restano intatti): lo snapshot e' una
+// copia operativa indipendente. Ogni chiamata riuscita crea sempre una
+// Sessione nuova (nessuna ricerca di duplicati, nessun merge, nessun
+// overwrite).
+//
+// Se (E) o (F) falliscono dopo che (D) e' gia' stata scritta: tenta un
+// cleanup best-effort cancellando la Sessione appena creata, lasciando
+// che ON DELETE CASCADE rimuova gli eventuali child gia' inseriti, poi
+// rilancia comunque l'errore originale — mai una Sessione lasciata
+// silenziosamente a meta'.
+async function createProductionSession(preparedInput){
+  const computed=computeSessionScaling(preparedInput);
+  const snapshot=buildSessionSnapshotV1(preparedInput,computed);
+
+  const sessionId='ps'+uid();
+  const sessionRow={
+    id:sessionId,
+    recipe_id:preparedInput.recipeId!=null?preparedInput.recipeId:null,
+    source_variant_id:preparedInput.variantId!=null?preparedInput.variantId:null,
+    status:'pending',
+    snapshot_version:1,
+    snapshot:snapshot,
+    target_finished_total:computed.targetFinishedTotal,
+    // created_at: NON incluso — lasciato al DEFAULT now() del DB (0007).
+    started_at:null,
+    completed_at:null,
+    actual_yield_qty:null,
+    actual_yield_unit:null,
+  };
+
+  const sessionRes=await _supabaseUpsertRow('production_sessions',sessionRow);
+  if(sessionRes&&sessionRes.error){
+    throw new Error('createProductionSession: creazione production_sessions fallita: '+sessionRes.error);
+  }
+
+  const ingredientStateRows=snapshot.ingredients.map(function(ing){
+    return{id:'pis'+uid(),session_id:sessionId,item_key:ing.itemKey,checked:false,checked_at:null};
+  });
+  const stepStateRows=snapshot.steps.map(function(st){
+    return{id:'pss'+uid(),session_id:sessionId,item_key:st.stepId,checked:false,checked_at:null,timer_started_at:null,timer_actual_seconds:null};
+  });
+
+  if(ingredientStateRows.length){
+    const ingRes=await _supabaseUpsertRow('session_ingredient_state',ingredientStateRows);
+    if(ingRes&&ingRes.error){
+      await _supabaseDeleteRow('production_sessions',sessionId);
+      throw new Error('createProductionSession: creazione session_ingredient_state fallita, Sessione ripulita: '+ingRes.error);
+    }
+  }
+
+  if(stepStateRows.length){
+    const stepRes=await _supabaseUpsertRow('session_step_state',stepStateRows);
+    if(stepRes&&stepRes.error){
+      await _supabaseDeleteRow('production_sessions',sessionId);
+      throw new Error('createProductionSession: creazione session_step_state fallita, Sessione ripulita: '+stepRes.error);
+    }
+  }
+
+  return{sessionId:sessionId,snapshot:snapshot};
+}
+
 function onVarPortions(recipeId,varId,val){
   upRec(recipeId,r=>{
     const vv=r.validatedVariants.find(v=>v.id===varId);if(!vv)return r;
