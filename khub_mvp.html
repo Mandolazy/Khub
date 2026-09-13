@@ -1357,6 +1357,7 @@ async function loadFromSupabase(){
           measuredYieldPct:i.measured_yield_pct!==undefined&&i.measured_yield_pct!==null?i.measured_yield_pct:null,   // Step 1: resa misurata
         })),
         steps:parseSteps(v.steps),
+        stepsV2:getStructuredSteps(parseSteps(v.steps),Array.isArray(v.steps_v2)?v.steps_v2:null),
         mediaUrl:v.media_url||null,
         videoUrl:v.video_url||null,
         active:false, // le bozze LAB non sono mai attive (D2: active, non shared, e' la source of truth)
@@ -1379,6 +1380,7 @@ async function loadFromSupabase(){
           measuredYieldPct:i.measured_yield_pct!==undefined&&i.measured_yield_pct!==null?i.measured_yield_pct:null,   // Step 1: resa misurata
         })),
         steps:parseSteps(v.steps),
+        stepsV2:getStructuredSteps(parseSteps(v.steps),Array.isArray(v.steps_v2)?v.steps_v2:null),
         mediaUrl:v.media_url||null,
         videoUrl:v.video_url||null,
         status:v.status||'approved', // Fase 5: legge status da Supabase
@@ -1448,8 +1450,33 @@ function parseSteps(raw){
   try{const p=JSON.parse(raw);return Array.isArray(p)?p:[];}catch(e){return[];}
 }
 
+// Sprint Produzione — Micro-Step 4 (A5.9/A5.14): step strutturati.
+// Ottiene la rappresentazione strutturata degli step di una variante: se
+// stepsV2 e' gia' un array (anche vuoto), lo usa cosi' com'e' — preservando
+// SEMPRE gli id esistenti, mai rigenerati. Solo se stepsV2 e' assente/null
+// genera automaticamente la struttura dal legacy variants.steps: un id
+// nuovo e stabile per ciascuno step, order = posizione originale, text =
+// stringa originale, expectedDurationSeconds sempre null in questo
+// Micro-Step. Nessuna conferma dello chef: conversione trasparente, nessuna
+// modifica semantica al procedimento.
+function getStructuredSteps(legacySteps,stepsV2){
+  if(Array.isArray(stepsV2))return stepsV2;
+  return(legacySteps||[]).map(function(text,i){
+    return{id:'st'+uid(),order:i,text:text||'',expectedDurationSeconds:null};
+  });
+}
+
+// Deriva l'array legacy di stringhe dagli step strutturati (ordinati per
+// `order`) — usato al salvataggio per garantire che variants.steps resti
+// sempre sincronizzata con variants.steps_v2, per i molti consumer esistenti
+// che leggono ancora variants.steps come string[] (LAB, Ricetta attiva,
+// Produzione legacy, export PDF, M1/M2/Context Builder).
+function stepsV2ToLegacyArray(stepsV2){
+  return(stepsV2||[]).slice().sort(function(a,b){return a.order-b.order;}).map(function(s){return s.text||'';});
+}
+
 function makeDefaultLab(recipeId,name){
-  return{id:'lv_'+uid(),label:'Bozza 1',name:name||'',note:'',portionsCount:1,gramsPerPortion:0,portionSize:0,portionUnit:'g',ingredients:[],steps:[],mediaUrl:null,videoUrl:null,active:false,originVariantId:null,
+  return{id:'lv_'+uid(),label:'Bozza 1',name:name||'',note:'',portionsCount:1,gramsPerPortion:0,portionSize:0,portionUnit:'g',ingredients:[],steps:[],stepsV2:[],mediaUrl:null,videoUrl:null,active:false,originVariantId:null,
     l2Items:[],intentionInitial:null,intentionCurrent:null,criteriaInitial:null,criteriaCurrent:null,m1ReadingText:null};
 }
 
@@ -1475,10 +1502,16 @@ async function saveToSupabase(recipe){
       });
     };
     recipe.labVersions.forEach(v=>{
+      // Micro-Step 4 (A5.9/A5.14): steps_v2 e' ora la rappresentazione
+      // strutturata persistente; variants.steps (legacy) viene derivata da
+      // essa per garantire che restino sempre sincronizzate, senza alcuna
+      // modifica semantica al procedimento (stesso testo, stesso ordine).
+      const structuredStepsLab=getStructuredSteps(v.steps,v.stepsV2);
       allVariants.push({
         id:v.id,recipe_id:recipe.id,name:v.name||recipe.name,label:v.label,note:v.note||'',
         status:'lab',portions_count:v.portionsCount,grams_per_portion:v.gramsPerPortion,portion_unit:v.portionUnit||'g',
-        steps:JSON.stringify(v.steps||[]),
+        steps:JSON.stringify(stepsV2ToLegacyArray(structuredStepsLab)),
+        steps_v2:structuredStepsLab,
         media_url:v.mediaUrl||null,video_url:v.videoUrl||null,
         primo_consulto:v.primoConsulto||null,
         m1_reading_text:v.m1ReadingText||null, // R3F mini-sprint E2E: artefatto leggibile, mai memoria cognitiva (mai letto da costruisciPayloadM2)
@@ -1503,11 +1536,13 @@ async function saveToSupabase(recipe){
       pushL2(v.l2Items,v.id);
     });
     recipe.validatedVariants.forEach(vv=>{
+      const structuredStepsVal=getStructuredSteps(vv.steps,vv.stepsV2);
       allVariants.push({
         id:vv.id,recipe_id:recipe.id,name:vv.name,label:vv.name,note:'',
         status:vv.status==='retired'?'retired':'validated', // simmetria con la lettura: 'retired' deve sopravvivere al save
         portions_count:vv.portionsCount,grams_per_portion:vv.gramsPerPortion,portion_unit:vv.portionUnit||'g',
-        steps:JSON.stringify(vv.steps||[]),
+        steps:JSON.stringify(stepsV2ToLegacyArray(structuredStepsVal)),
+        steps_v2:structuredStepsVal,
         validated_at:vv.validatedAt?new Date(vv.validatedAt.split('/').reverse().join('-')).toISOString():new Date().toISOString(),
         media_url:vv.mediaUrl||null,video_url:vv.videoUrl||null,
         // D2: scriviamo SOLO active, mai piu' shared — il campo shared resta
@@ -1900,6 +1935,7 @@ function creaBozzaDaSorgente(recipeId,attiva){
     portionUnit:sorgente.portionUnit||'g',
     ingredients:(sorgente.ingredients||[]).map(function(i){return Object.assign({},i,{id:"li"+uid()});}),
     steps:[].concat(sorgente.steps||[]),
+    stepsV2:getStructuredSteps(sorgente.steps,sorgente.stepsV2).map(function(s){return Object.assign({},s);}),
     mediaUrl:null,videoUrl:null,active:false,
     originVariantId:attiva?attiva.id:null, // memoria certa: da quale Ricetta attiva è nata (o esplicitamente nessuna)
   };
@@ -1949,6 +1985,7 @@ function duplicaVersioneLAB(recipeId){
     portionUnit:v.portionUnit||'g',               // Step 1
     ingredients:v.ingredients.map(function(i){return Object.assign({},i,{id:"li"+uid()});} ),
     steps:[...v.steps],
+    stepsV2:getStructuredSteps(v.steps,v.stepsV2).map(s=>({...s})),
     mediaUrl:null,
     videoUrl:null,
     active:false,
@@ -1987,6 +2024,7 @@ async function creaSchedaDaLab(recipeId){
     portionSize:v.portionSize||v.gramsPerPortion,portionUnit:v.portionUnit||'g',
     ingredients:v.ingredients.map(i=>({...i,id:uid()})),
     steps:[...(v.steps||[])],
+    stepsV2:getStructuredSteps(v.steps,v.stepsV2).map(s=>({...s})),
     mediaUrl:null,videoUrl:null,active:false,
     l2Items:[],intentionInitial:null,intentionCurrent:null,criteriaInitial:null,criteriaCurrent:null,m1ReadingText:null,
   };
@@ -2060,6 +2098,7 @@ function rendiAttiva(recipeId){
       measuredYieldPct:i.measuredYieldPct!==undefined&&i.measuredYieldPct!==null?i.measuredYieldPct:null,
     })),
     steps:[...(v.steps||[])],
+    stepsV2:getStructuredSteps(v.steps,v.stepsV2).map(s=>({...s})),
     mediaUrl:v.mediaUrl||null,videoUrl:v.videoUrl||null,
     originVariantId:v.originVariantId||null, // D3: sopravvive alla transizione di lifecycle
     l2Items:v.l2Items||[], // PSL: L2 segue la Ricetta, mai copiato in una nuova identita'
@@ -2108,6 +2147,7 @@ function onValidate(){
       measuredYieldPct:i.measuredYieldPct!==undefined&&i.measuredYieldPct!==null?i.measuredYieldPct:null,
     })),
     steps:[...v.steps],
+    stepsV2:getStructuredSteps(v.steps,v.stepsV2).map(s=>({...s})),
     mediaUrl:v.mediaUrl||null,videoUrl:v.videoUrl||null,
     originVariantId:v.originVariantId||null, // D3: sopravvive alla transizione di lifecycle
     l2Items:v.l2Items||[], // PSL: L2 segue la Ricetta, mai copiato in una nuova identita'
@@ -2361,18 +2401,38 @@ function moveStep(recipeId,fromIdx,toIdx){
     var steps=[].concat(v.steps);
     var moved=steps.splice(fromIdx,1)[0];
     steps.splice(toIdx,0,moved);
-    return Object.assign({},v,{steps:steps});
+    // A5.9: il riordino sposta l'oggetto step strutturato (id incluso), mai
+    // lo rigenera — solo order/posizione cambiano.
+    var sv2=getStructuredSteps(v.steps,v.stepsV2).slice();
+    var movedSv2=sv2.splice(fromIdx,1)[0];
+    sv2.splice(toIdx,0,movedSv2);
+    sv2=sv2.map(function(s,i){return Object.assign({},s,{order:i});});
+    return Object.assign({},v,{steps:steps,stepsV2:sv2});
   });
 }
 
 function addStep(recipeId){
-  upLab(recipeId,v=>({...v,steps:[...v.steps,'']}));
+  upLab(recipeId,v=>{
+    var sv2=getStructuredSteps(v.steps,v.stepsV2);
+    var newStep={id:'st'+uid(),order:sv2.length,text:'',expectedDurationSeconds:null};
+    return{...v,steps:[...v.steps,''],stepsV2:[...sv2,newStep]};
+  });
 }
 function onStepText(recipeId,idx,val){
-  upLab(recipeId,v=>{const s=[...v.steps];s[idx]=val;return{...v,steps:s};});
+  upLab(recipeId,v=>{
+    const s=[...v.steps];s[idx]=val;
+    // A5.9: solo il testo cambia, l'id dello step resta lo stesso.
+    const sv2=getStructuredSteps(v.steps,v.stepsV2).map((st,i)=>i===idx?{...st,text:val}:st);
+    return{...v,steps:s,stepsV2:sv2};
+  });
 }
 function delStep(recipeId,idx){
-  upLab(recipeId,v=>({...v,steps:v.steps.filter((_,i)=>i!==idx)}));
+  upLab(recipeId,v=>{
+    // A5.9: rimuovere uno step non rigenera gli id degli step rimanenti,
+    // solo order/posizione viene riallineato.
+    const sv2=getStructuredSteps(v.steps,v.stepsV2).filter((_,i)=>i!==idx).map((st,i)=>({...st,order:i}));
+    return{...v,steps:v.steps.filter((_,i)=>i!==idx),stepsV2:sv2};
+  });
 }
 
 // ── STEP 4: SCALING CON RESE ─────────────────────────────
@@ -3698,7 +3758,11 @@ function voiceToSteps(recipeId){
     var t=(data.content||[]).map(function(c){return c.text||"";}).join("").replace(/```json|```/g,"").trim();
     try{
       var steps=JSON.parse(t);
-      upLab(recipeId,function(v){return Object.assign({},v,{steps:v.steps.concat(steps)});});
+      upLab(recipeId,function(v){
+        var sv2=getStructuredSteps(v.steps,v.stepsV2);
+        var newSv2=steps.map(function(text,i){return{id:'st'+uid(),order:sv2.length+i,text:text||'',expectedDurationSeconds:null};});
+        return Object.assign({},v,{steps:v.steps.concat(steps),stepsV2:sv2.concat(newSv2)});
+      });
       delete S.pendingVoiceText[recipeId];
       toast("Passi aggiunti al procedimento","ti-list-numbers");
     }catch(e){toast("Non ho trovato passi nella nota","ti-alert-circle");}
