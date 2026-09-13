@@ -295,6 +295,23 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // Sprint Produzione — Micro-Step 2: persistenza conversioni
+    // ingredient-specific (ingredient_conversions). Sola lettura/scrittura,
+    // nessuna logica di "fact piu' recente" qui: la selezione della fact
+    // corrente resta lato client (stesso stile di loadFamilies/saveFamily).
+    if (body.supabaseAction === 'loadConversions') {
+      const r = await fetch(SB + '/rest/v1/ingredient_conversions?select=*&order=confirmed_at.asc', { headers: SH_READ });
+      const conversions = await r.json();
+      return res.status(200).json({ conversions });
+    }
+
+    if (body.supabaseAction === 'saveConversion') {
+      // Sempre un INSERT di una nuova fact: body.conversion porta sempre un
+      // id nuovo (generato client-side), mai un update di una riga esistente.
+      await sbPost('ingredient_conversions', body.conversion);
+      return res.status(200).json({ ok: true });
+    }
+
     if (body.supabaseAction === 'load') {
       const [r1, r2, r3, r4, r5] = await Promise.all([
         fetch(SB + '/rest/v1/recipes?select=*&order=created_at.asc', { headers: SH_READ }),

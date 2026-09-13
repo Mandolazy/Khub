@@ -1218,6 +1218,11 @@ function retireVariant(recipeId,variantId){
 
 function uid(){return 'id'+Date.now()+Math.random().toString(36).slice(2,7);}
 function cnum(n){return isNaN(parseFloat(n))?0:parseFloat(n);}
+// Normalizzazione centralizzata del nome ingrediente per le conversioni
+// ingredient-specific (chiave di S.unitWeights e di ingredient_conversions).
+// Stesso criterio gia' in uso (lowercase+trim), solo centralizzato in un
+// unico punto deterministico invece di essere ripetuto inline.
+function normalizeIngredientName(name){return(name||'').toLowerCase().trim();}
 
 let _saveTimer={};
 let _saveIndicatorTimer=null;
@@ -1408,6 +1413,32 @@ async function loadFromSupabase(){
         fd.variantFamilies.forEach(function(vf){if(!S.variantFamilies[vf.variant_id])S.variantFamilies[vf.variant_id]=[];S.variantFamilies[vf.variant_id].push(vf.family_id);});
       }
     }catch(e){console.error('Load families error',e);}
+    // Carica conversioni ingrediente persistite (Micro-Step 2: solo n->g).
+    // La fact piu' recente per ciascun ingrediente sovrascrive l'eventuale
+    // valore seed hardcoded in S.unitWeights — S.unitWeights resta la
+    // struttura di lookup effettivamente letta da onIngUnit/onVarIngUnit
+    // (nessuna modifica alla loro logica), ma ora viene popolata anche
+    // dalla persistenza reale, non solo dai seed. Fallimento isolato: non
+    // deve mai bloccare il resto del caricamento (stesso pattern di
+    // "Carica famiglie" sopra).
+    try{
+      const rc=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'loadConversions'})});
+      const cd=await rc.json();
+      if(Array.isArray(cd.conversions)){
+        const latestByName={};
+        cd.conversions.forEach(function(c){
+          if(c.from_unit!=='n'||c.to_unit!=='g')return; // Micro-Step 2: solo n->g
+          var name=normalizeIngredientName(c.ingredient_name);
+          var prev=latestByName[name];
+          if(!prev||new Date(c.confirmed_at)>new Date(prev.confirmedAt)){
+            latestByName[name]={factor:c.factor,confirmedAt:c.confirmed_at};
+          }
+        });
+        Object.keys(latestByName).forEach(function(name){
+          S.unitWeights[name]=parseFloat(latestByName[name].factor);
+        });
+      }
+    }catch(e){console.error('Load conversions error',e);}
   }catch(e){console.error('Load error',e);}
 }
 
@@ -2224,7 +2255,7 @@ function onIngUnit(recipeId,ingId,val){
   var recipe=R(recipeId);var v=curLab(recipe);
   var ing=v&&v.ingredients.find(function(i){return i.id===ingId;});
   if(ing&&ing.unit==='n'&&val==='g'){
-    var name=ing.name.toLowerCase().trim();
+    var name=normalizeIngredientName(ing.name);
     var pesoNoto=S.unitWeights[name];
     if(pesoNoto){
       // Peso noto: converti subito
@@ -2258,8 +2289,13 @@ function confirmUnitConversion(pesoMedio){
   if(!p)return;
   var peso=parseFloat(pesoMedio);
   if(!peso||isNaN(peso)){S.pendingUnitConversion=null;render();return;}
-  // Salva in tabella pesi
-  S.unitWeights[p.ingName.toLowerCase().trim()]=peso;
+  var normName=normalizeIngredientName(p.ingName);
+  // Cache/runtime immediata (invariato) + persistenza come nuova fact
+  // storicizzata in ingredient_conversions (Micro-Step 2): il chef ha
+  // appena confermato questo dato esplicitamente, quindi source_type e'
+  // sempre 'chef_confirmed' in questo flusso.
+  S.unitWeights[normName]=peso;
+  saveIngredientConversion(normName,'n','g',peso,'chef_confirmed');
   if(p.varId){
     // Produzione: aggiorna variante validata
     upRec(p.recipeId,r=>({...r,validatedVariants:r.validatedVariants.map(v=>{
@@ -2285,6 +2321,32 @@ function confirmUnitConversion(pesoMedio){
 function cancelUnitConversion(){
   S.pendingUnitConversion=null;
   render();
+}
+
+// Persiste una conversione ingredient-specific appena confermata dallo chef
+// come nuova fact in ingredient_conversions (mai un UPDATE: ogni chiamata
+// inserisce una riga nuova con un id nuovo, le fact precedenti per la
+// stessa coppia ingredient_name+from_unit+to_unit restano intatte).
+// Fire-and-forget rispetto al flusso UI, che non deve attendere la rete:
+// se la scrittura fallisce, la conversione resta comunque valida per
+// questa sessione in S.unitWeights, semplicemente non sara' ancora
+// disponibile dopo un refresh finche' non verra' riconfermata.
+async function saveIngredientConversion(ingredientName,fromUnit,toUnit,factor,sourceType,sourceDetail){
+  try{
+    await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      supabaseAction:'saveConversion',
+      conversion:{
+        id:'ic'+uid(),
+        ingredient_name:ingredientName,
+        from_unit:fromUnit,
+        to_unit:toUnit,
+        factor:factor,
+        source_type:sourceType,
+        source_detail:sourceDetail||null,
+        confirmed_at:new Date().toISOString(),
+      }
+    })});
+  }catch(e){console.error('Save conversion error',e);}
 }
 function onIngName(recipeId,ingId,val){
   upLab(recipeId,v=>({...v,ingredients:v.ingredients.map(i=>i.id===ingId?{...i,name:val}:i)}));
@@ -2445,7 +2507,7 @@ function onVarIngUnit(recipeId,varId,ingId,val){
   if(!ing)return;
   // Caso speciale: n → g con peso medio
   if(ing.unit==='n'&&val==='g'){
-    const name=ing.name.toLowerCase().trim();
+    const name=normalizeIngredientName(ing.name);
     const pesoNoto=S.unitWeights[name];
     if(pesoNoto){
       upRec(recipeId,r=>({...r,validatedVariants:r.validatedVariants.map(v=>{
