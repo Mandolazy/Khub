@@ -921,6 +921,14 @@ const S = {
     'fetta di pane':30,'fette di pane':30,
   },
   pendingUnitConversion: null, // {recipeId, ingId, ingName, newUnit} — conversione n→g in attesa del peso medio
+  // Sprint Produzione — Micro-Step 9: {nomeIngredienteNormalizzato:{id,sourceType}}
+  // — provenance (id/sourceType) della fact n→g vincente per nome, popolata
+  // in parallelo a unitWeights da loadFromSupabase (stessi dati gia'
+  // caricati, mai una nuova richiesta Supabase). Serve solo a congelare
+  // conversionFactId/conversionSourceType nello snapshot di una Sessione;
+  // unitWeights resta l'unica struttura letta da onIngUnit/onVarIngUnit.
+  unitWeightFacts: {},
+  pendingMandaInProduzione: null, // {recipeId,variantId,portions,gpp,error,loading} — modal target Sessione
 };
 
 const UNITS = ['g','ml','kg','l','n','tbsp','tsp','cl'];
@@ -1437,11 +1445,16 @@ async function loadFromSupabase(){
           var name=normalizeIngredientName(c.ingredient_name);
           var prev=latestByName[name];
           if(!prev||new Date(c.confirmed_at)>new Date(prev.confirmedAt)){
-            latestByName[name]={factor:c.factor,confirmedAt:c.confirmed_at};
+            latestByName[name]={factor:c.factor,confirmedAt:c.confirmed_at,id:c.id,sourceType:c.source_type};
           }
         });
         Object.keys(latestByName).forEach(function(name){
           S.unitWeights[name]=parseFloat(latestByName[name].factor);
+          // Micro-Step 9: stessa fact vincente gia' individuata sopra, si
+          // conserva anche id/sourceType (dati gia' presenti nella stessa
+          // risposta, nessuna richiesta aggiuntiva) per congelare la
+          // provenance reale nello snapshot di una Sessione.
+          S.unitWeightFacts[name]={id:latestByName[name].id!=null?latestByName[name].id:null,sourceType:latestByName[name].sourceType!=null?latestByName[name].sourceType:null};
         });
       }
     }catch(e){console.error('Load conversions error',e);}
@@ -2945,6 +2958,172 @@ async function createProductionSession(preparedInput){
   }
 
   return{sessionId:sessionId,snapshot:snapshot};
+}
+
+// ══════════════════════════════════════════════════════════
+// SPRINT PRODUZIONE — Micro-Step 9: "Manda in Produzione" (UI minimale).
+// Collega per la prima volta la Ricetta attiva/validata al nuovo sistema
+// Sessioni: target di produzione -> preparedInput -> createProductionSession.
+// NON tocca computeSessionScaling/buildSessionSnapshotV1/createProductionSession
+// (Micro-Step 7/8, invariati), NON modifica la Ricetta attiva/variante
+// sorgente, NON naviga verso alcuna schermata Sessione (non ancora
+// esistente).
+// ══════════════════════════════════════════════════════════
+
+function openMandaInProduzione(recipeId,variantId){
+  S.pendingMandaInProduzione={recipeId:recipeId,variantId:variantId,portions:'',gpp:'',error:null,loading:false};
+  render();
+}
+function closeMandaInProduzione(){
+  S.pendingMandaInProduzione=null;
+  render();
+}
+function onMandaInProduzioneField(field,val){
+  var p=S.pendingMandaInProduzione;
+  if(!p)return;
+  p[field]=val;
+  p.error=null; // il chef sta correggendo: l'errore precedente non è più pertinente
+  render();
+}
+
+// Costruisce preparedInput ESCLUSIVAMENTE dalla Ricetta attiva/variante
+// validata corrente (mai da S.recipes modificato, mai da LAB). Gli step
+// provengono da stepsV2 strutturati (getStructuredSteps, Micro-Step 4):
+// mai ricostruiti dal testo legacy quando stepsV2 è già disponibile (lo è
+// sempre, dopo il caricamento). La conversionFact allegata a un
+// ingrediente in 'n' riusa ESCLUSIVAMENTE S.unitWeights/S.unitWeightFacts,
+// il flusso di conversione già esistente e già caricato in app (Micro-Step
+// 2): nessuna nuova richiesta, nessuna invenzione, nessuna equivalenza
+// g=ml. Per qualunque altra unità priva di una fact persistita oggi (ml,
+// l, cl, tbsp, tsp) non viene allegata alcuna conversionFact: se quella
+// conversione risulta necessaria, computeSessionScaling lo segnalerà con
+// un errore esplicito (gestito da confirmMandaInProduzione sotto).
+function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion){
+  return{
+    recipeId:recipe.id,
+    recipeName:recipe.name,
+    category:recipe.category,
+    variantId:vv.id,
+    variantName:vv.name,
+    ingredients:vv.ingredients.map(function(ing){
+      var mapped={
+        itemKey:ing.id,
+        sourceIngredientId:ing.id,
+        name:ing.name,
+        qty:cnum(ing.qty),
+        unit:ing.unit,
+        estimatedYieldPct:ing.estimatedYieldPct!=null?ing.estimatedYieldPct:null,
+        isSubRecipe:ing.isSubRecipe===true,
+        subRecipeId:ing.subRecipeId!=null?ing.subRecipeId:null,
+      };
+      if(ing.unit==='n'){
+        var normName=normalizeIngredientName(ing.name);
+        var weight=S.unitWeights[normName];
+        if(weight!=null){
+          var factMeta=S.unitWeightFacts[normName]||{};
+          mapped.conversionFact={
+            id:factMeta.id!=null?factMeta.id:null,
+            fromUnit:'n',
+            toUnit:'g',
+            factor:weight,
+            sourceType:factMeta.sourceType!=null?factMeta.sourceType:null,
+          };
+        }
+      }
+      return mapped;
+    }),
+    steps:getStructuredSteps(vv.steps,vv.stepsV2),
+    targetPortions:targetPortions,
+    targetGramsPerPortion:targetGramsPerPortion,
+    mediaUrl:vv.mediaUrl||null,
+    videoUrl:vv.videoUrl||null,
+  };
+}
+
+async function confirmMandaInProduzione(){
+  var p=S.pendingMandaInProduzione;
+  if(!p||p.loading)return;
+
+  var portions=parseFloat(p.portions);
+  var gpp=parseFloat(p.gpp);
+  if(!p.portions||isNaN(portions)||portions<=0){
+    p.error='Inserisci un numero di porzioni valido (maggiore di zero).';
+    render();return;
+  }
+  if(!p.gpp||isNaN(gpp)||gpp<=0){
+    p.error='Inserisci i grammi finiti per porzione (maggiore di zero).';
+    render();return;
+  }
+
+  var recipe=R(p.recipeId);
+  var vv=recipe&&recipe.validatedVariants.find(function(v){return v.id===p.variantId;});
+  if(!recipe||!vv){
+    p.error='Ricetta non trovata. Chiudi e riprova.';
+    render();return;
+  }
+
+  p.loading=true;p.error=null;render();
+
+  var preparedInput=buildPreparedInputDaRicettaAttiva(recipe,vv,portions,gpp);
+  try{
+    await createProductionSession(preparedInput);
+    S.pendingMandaInProduzione=null;
+    toast('Produzione creata','ti-chef-hat');
+    render();
+  }catch(e){
+    // Nessuna Sessione creata (computeSessionScaling/createProductionSession
+    // falliscono PRIMA di scrivere qualunque cosa — Micro-Step 7/8). Il
+    // modal resta aperto e utilizzabile, nessuna falsa conferma. Un
+    // "conversione mancante" qui segnala che serve il Micro-Step 9b
+    // (risoluzione interattiva delle conversioni mancanti) — vedi report.
+    p.loading=false;
+    p.error=(e&&e.message)?e.message:'Errore nella creazione della produzione. Riprova.';
+    render();
+  }
+}
+
+function renderMandaInProduzioneModal(){
+  var p=S.pendingMandaInProduzione;
+  if(!p)return'';
+  var portionsNum=parseFloat(p.portions);
+  var gppNum=parseFloat(p.gpp);
+  var haveBoth=p.portions&&p.gpp&&!isNaN(portionsNum)&&!isNaN(gppNum)&&portionsNum>0&&gppNum>0;
+  var totale=haveBoth?Math.round(portionsNum*gppNum*100)/100:null;
+  return`
+  <div style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200;display:flex;align-items:center;justify-content:center;padding:24px">
+    <div style="background:var(--white);border-radius:var(--r-lg);padding:24px;width:100%;max-width:380px;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
+      <div style="font-size:16px;font-weight:700;color:var(--dark);margin-bottom:6px">Manda in Produzione</div>
+      <div style="font-size:14px;color:var(--mid);margin-bottom:18px">Quanto vuoi produrre?</div>
+      <div style="display:flex;flex-direction:column;gap:14px;margin-bottom:18px">
+        <div>
+          <label style="font-size:12px;font-weight:600;color:var(--mid);display:block;margin-bottom:4px">Porzioni</label>
+          <input type="number" min="1" placeholder="es. 20" value="${p.portions}"
+            style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:16px;color:var(--dark);outline:none"
+            onchange="onMandaInProduzioneField('portions',this.value)">
+        </div>
+        <div>
+          <label style="font-size:12px;font-weight:600;color:var(--mid);display:block;margin-bottom:4px">Grammi finiti per porzione</label>
+          <input type="number" min="1" placeholder="es. 150" value="${p.gpp}"
+            style="width:100%;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:16px;color:var(--dark);outline:none"
+            onchange="onMandaInProduzioneField('gpp',this.value)">
+        </div>
+      </div>
+      <div style="background:var(--cream);border-radius:var(--r-md);padding:12px 14px;margin-bottom:18px;font-size:14px;color:var(--dark)">
+        Totale finito: <strong>${haveBoth?totale+' g':'—'}</strong>
+      </div>
+      ${p.error?`<div style="font-size:13px;color:#c0392b;margin-bottom:14px">${p.error}</div>`:''}
+      <div style="display:flex;gap:8px">
+        <button onclick="confirmMandaInProduzione()" ${p.loading?'disabled':''}
+          style="flex:1;padding:10px;background:var(--sage,#3d7a5c);color:white;border:none;border-radius:var(--r-md);font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;opacity:${p.loading?'0.7':'1'}">
+          ${p.loading?'Creazione…':'Crea produzione'}
+        </button>
+        <button onclick="closeMandaInProduzione()" ${p.loading?'disabled':''}
+          style="padding:10px 16px;background:transparent;color:var(--mid);border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:14px;cursor:pointer">
+          Annulla
+        </button>
+      </div>
+    </div>
+  </div>`;
 }
 
 function onVarPortions(recipeId,varId,val){
@@ -5285,6 +5464,7 @@ function renderProdRecipe(recipe){
       </div>
     </div>
     <div class="header-actions">
+      ${vv.status!=='retired'?`<button class="btn btn-sm" style="background:var(--sage,#3d7a5c);color:#fff;border:none" onclick="openMandaInProduzione('${recipe.id}','${vv.id}')" title="Crea una Sessione di Produzione"><i class="ti ti-chef-hat"></i> Manda in Produzione</button>`:''}
       <button class="btn btn-ghost btn-sm" onclick="openFamilyManager('${vv.id}')" title="Famiglie di questa Ricetta"><i class="ti ti-tags"></i> Famiglie Ricetta</button>
       <button class="btn btn-ghost btn-sm" onclick="shareVariant('${recipe.id}','${vv.id}')" title="Condividi"><i class="ti ti-share"></i> Condividi</button>
       <button class="btn btn-ghost btn-sm" onclick="exportPDF('${recipe.id}','${vv.id}')" title="Scarica PDF"><i class="ti ti-file-type-pdf"></i> PDF</button>
@@ -5980,7 +6160,7 @@ function render(){
   else if(S.view==='lab-globale'){mainContent=renderLabGlobale();}
 
   const main=document.getElementById('main');
-  if(main)main.innerHTML=mainContent+(S.showFamilyPicker?renderFamilyPicker():'')+(S.showMergePicker?renderMergePicker():'')+(S.showMergeConfirm?renderMergeConfirm():'')+(S.showSchedeFamiglie?renderSchedeFamigliePicker():'')+(S.showCondividiStaff?renderCondividiStaffModal():'')+(S.showOnboarding?renderOnboarding():'')+(S.toastAction?renderToastAction():S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:'')+renderUnitConversionModal();
+  if(main)main.innerHTML=mainContent+(S.showFamilyPicker?renderFamilyPicker():'')+(S.showMergePicker?renderMergePicker():'')+(S.showMergeConfirm?renderMergeConfirm():'')+(S.showSchedeFamiglie?renderSchedeFamigliePicker():'')+(S.showCondividiStaff?renderCondividiStaffModal():'')+(S.showOnboarding?renderOnboarding():'')+(S.toastAction?renderToastAction():S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:'')+renderUnitConversionModal()+renderMandaInProduzioneModal();
 
   // Bottom nav
   const bn=document.getElementById('bottom-nav');
