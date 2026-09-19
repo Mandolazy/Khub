@@ -1283,6 +1283,34 @@ function cnum(n){return isNaN(parseFloat(n))?0:parseFloat(n);}
 // unico punto deterministico invece di essere ripetuto inline.
 function normalizeIngredientName(name){return(name||'').toLowerCase().trim();}
 
+// Reliable Reference Engine (A5.16) — gerarchia frozen fra fact
+// ingredient-specific persistite in ingredient_conversions, per la STESSA
+// coppia ingredient_name/from_unit/to_unit:
+//   1. chef_confirmed
+//   2. reference_data
+// chef_confirmed prevale SEMPRE su reference_data, indipendentemente da
+// confirmed_at — confirmed_at decide solo fra fact dello stesso livello
+// (la piu' recente vince). Nessun altro source_type e' atteso oggi (CHECK
+// ingredient_conversions_source_type_chk): un valore imprevisto riceve la
+// priorita' piu' bassa, mai un errore qui — il dato resta comunque
+// storicizzato, solo non favorito nella selezione della fact vincente.
+function conversionFactSourcePriority(sourceType){
+  if(sourceType==='chef_confirmed')return 2;
+  if(sourceType==='reference_data')return 1;
+  return 0;
+}
+// Confronta due fact candidate (gia' nella forma interna
+// {sourceType,confirmedAt,...}) e restituisce true se `candidate` deve
+// sostituire `current` come fact vincente, secondo la gerarchia sopra.
+// `current` puo' essere null/undefined (nessuna fact vincente ancora).
+function isBetterConversionFact(candidate,current){
+  if(!current)return true;
+  var pCandidate=conversionFactSourcePriority(candidate.sourceType);
+  var pCurrent=conversionFactSourcePriority(current.sourceType);
+  if(pCandidate!==pCurrent)return pCandidate>pCurrent;
+  return new Date(candidate.confirmedAt)>new Date(current.confirmedAt);
+}
+
 let _saveTimer={};
 let _saveIndicatorTimer=null;
 function checkOnboarding(){
@@ -1483,13 +1511,22 @@ async function loadFromSupabase(){
       }
     }catch(e){console.error('Load families error',e);}
     // Carica conversioni ingrediente persistite (Micro-Step 2: solo n->g).
-    // La fact piu' recente per ciascun ingrediente sovrascrive l'eventuale
+    // La fact VINCENTE per ciascun ingrediente sovrascrive l'eventuale
     // valore seed hardcoded in S.unitWeights — S.unitWeights resta la
     // struttura di lookup effettivamente letta da onIngUnit/onVarIngUnit
     // (nessuna modifica alla loro logica), ma ora viene popolata anche
     // dalla persistenza reale, non solo dai seed. Fallimento isolato: non
     // deve mai bloccare il resto del caricamento (stesso pattern di
     // "Carica famiglie" sopra).
+    // Reliable Reference Engine (A5.16): la fact vincente non e' piu'
+    // semplicemente "la piu' recente" (non ci si affida all'ordine/ai
+    // timestamp restituiti da Supabase per decidere la precedenza fra
+    // livelli) — e' scelta da isBetterConversionFact, che applica prima la
+    // priorita' chef_confirmed > reference_data e SOLO a parita' di
+    // priorita' usa confirmed_at come discriminante. Stessa identica
+    // funzione riusata per entrambe le cache sotto (latestByName per n->g,
+    // latestByKey per qualunque altra coppia): un solo algoritmo di
+    // precedenza, mai due.
     try{
       const rc=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'loadConversions'})});
       const cd=await rc.json();
@@ -1507,30 +1544,31 @@ async function loadFromSupabase(){
         const latestByKey={};
         cd.conversions.forEach(function(c){
           var name=normalizeIngredientName(c.ingredient_name);
+          var sourceDetail=c.source_detail!=null?c.source_detail:null;
           if(c.from_unit!=='n'){
             var key=name+'|'+c.from_unit+'|'+c.to_unit;
-            var prevKey=latestByKey[key];
-            if(!prevKey||new Date(c.confirmed_at)>new Date(prevKey.confirmedAt)){
-              latestByKey[key]={factor:c.factor,confirmedAt:c.confirmed_at,id:c.id,sourceType:c.source_type};
+            var candidateKey={factor:c.factor,confirmedAt:c.confirmed_at,id:c.id,sourceType:c.source_type,sourceDetail:sourceDetail};
+            if(isBetterConversionFact(candidateKey,latestByKey[key])){
+              latestByKey[key]=candidateKey;
             }
           }
           if(c.from_unit!=='n'||c.to_unit!=='g')return; // Micro-Step 2: solo n->g
-          var prev=latestByName[name];
-          if(!prev||new Date(c.confirmed_at)>new Date(prev.confirmedAt)){
-            latestByName[name]={factor:c.factor,confirmedAt:c.confirmed_at,id:c.id,sourceType:c.source_type};
+          var candidateName={factor:c.factor,confirmedAt:c.confirmed_at,id:c.id,sourceType:c.source_type,sourceDetail:sourceDetail};
+          if(isBetterConversionFact(candidateName,latestByName[name])){
+            latestByName[name]=candidateName;
           }
         });
         Object.keys(latestByName).forEach(function(name){
           S.unitWeights[name]=parseFloat(latestByName[name].factor);
           // Micro-Step 9: stessa fact vincente gia' individuata sopra, si
-          // conserva anche id/sourceType (dati gia' presenti nella stessa
-          // risposta, nessuna richiesta aggiuntiva) per congelare la
-          // provenance reale nello snapshot di una Sessione.
-          S.unitWeightFacts[name]={id:latestByName[name].id!=null?latestByName[name].id:null,sourceType:latestByName[name].sourceType!=null?latestByName[name].sourceType:null};
+          // conserva anche id/sourceType/sourceDetail (dati gia' presenti
+          // nella stessa risposta, nessuna richiesta aggiuntiva) per
+          // congelare la provenance reale nello snapshot di una Sessione.
+          S.unitWeightFacts[name]={id:latestByName[name].id!=null?latestByName[name].id:null,sourceType:latestByName[name].sourceType!=null?latestByName[name].sourceType:null,sourceDetail:latestByName[name].sourceDetail!=null?latestByName[name].sourceDetail:null};
         });
         Object.keys(latestByKey).forEach(function(key){
           var w=latestByKey[key];
-          S.productionConversionFacts[key]={id:w.id!=null?w.id:null,factor:parseFloat(w.factor),sourceType:w.sourceType!=null?w.sourceType:null,confirmedAt:w.confirmedAt};
+          S.productionConversionFacts[key]={id:w.id!=null?w.id:null,factor:parseFloat(w.factor),sourceType:w.sourceType!=null?w.sourceType:null,sourceDetail:w.sourceDetail!=null?w.sourceDetail:null,confirmedAt:w.confirmedAt};
         });
       }
     }catch(e){console.error('Load conversions error',e);}
@@ -3139,11 +3177,12 @@ function resolveKnownProductionConversionFact(normalizedName,unit){
       fromUnit:'n',toUnit:'g',
       factor:peso,
       sourceType:provenance?provenance.sourceType:'reference_data',
+      sourceDetail:provenance?(provenance.sourceDetail!=null?provenance.sourceDetail:null):null,
     };
   }
   var known=S.productionConversionFacts[normalizedName+'|'+askUnit+'|g'];
   if(!known)return null;
-  return{id:known.id,fromUnit:askUnit,toUnit:'g',factor:known.factor,sourceType:known.sourceType};
+  return{id:known.id,fromUnit:askUnit,toUnit:'g',factor:known.factor,sourceType:known.sourceType,sourceDetail:known.sourceDetail!=null?known.sourceDetail:null};
 }
 
 function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion){
@@ -3333,10 +3372,10 @@ async function confirmConversionPreflightStep(rawValue){
   // S.productionConversionFacts.
   if(askUnit==='n'){
     S.unitWeights[normName]=conv.factor;
-    S.unitWeightFacts[normName]={id:conv.id,sourceType:conv.source_type};
+    S.unitWeightFacts[normName]={id:conv.id,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null};
   }else{
     var key=normName+'|'+askUnit+'|g';
-    S.productionConversionFacts[key]={id:conv.id,factor:conv.factor,sourceType:conv.source_type,confirmedAt:conv.confirmed_at};
+    S.productionConversionFacts[key]={id:conv.id,factor:conv.factor,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null,confirmedAt:conv.confirmed_at};
   }
 
   var recipe=R(pf.recipeId);
