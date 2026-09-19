@@ -945,14 +945,14 @@ const S = {
   // unitWeights resta l'unica struttura letta da onIngUnit/onVarIngUnit.
   unitWeightFacts: {},
   pendingMandaInProduzione: null, // {recipeId,variantId,portions,gpp,error,loading} — modal target Sessione
-  // Sprint Produzione — Micro-Step 9b: {"nomeNormalizzato|fromUnit|toUnit":{id,factor,sourceType,confirmedAt}}
-  // — cache runtime generica (qualunque from_unit, non solo 'n') delle
-  // conversion fact vincenti, popolata da loadFromSupabase riusando gli
-  // stessi dati gia' caricati per S.unitWeights (nessuna nuova richiesta).
-  // NON sostituisce S.unitWeights/S.unitWeightFacts (che restano invariate,
-  // lette solo dal vecchio flusso onIngUnit/onVarIngUnit/confirmUnitConversion):
-  // e' una vista aggiuntiva sugli stessi dati, usata solo dal preflight
-  // conversioni di "Manda in Produzione".
+  // Sprint Produzione — Micro-Step 9b (corretta): {"nomeNormalizzato|fromUnit|toUnit":{id,factor,sourceType,confirmedAt}}
+  // — cache runtime generica delle conversion fact confermate persistite,
+  // popolata da loadFromSupabase riusando gli stessi dati gia' caricati
+  // (nessuna nuova richiesta). Copre SOLO le coppie from_unit diverse da
+  // 'n' (es. ml->g): il caso n->g ha un'unica fonte di verita', condivisa
+  // col vecchio flusso, ed e' S.unitWeights/S.unitWeightFacts (vedi
+  // resolveKnownProductionConversionFact) — nessuna voce 'n' viene scritta
+  // qui, per non mantenere due copie della stessa conoscenza.
   productionConversionFacts: {},
   pendingConversionPreflight: null, // {recipeId,variantId,portions,gpp,missing,value,error,loading,finalError}
   // Sprint Produzione — Micro-Step 10: PRODUZIONE GUIDATA. Source of truth
@@ -1474,18 +1474,24 @@ async function loadFromSupabase(){
       const cd=await rc.json();
       if(Array.isArray(cd.conversions)){
         const latestByName={};
-        // Micro-Step 9b: cache generica "fact vincente" per QUALUNQUE coppia
-        // from_unit/to_unit (non solo n->g), sugli STESSI dati gia' ricevuti
-        // in questa risposta — nessuna richiesta Supabase aggiuntiva. Usata
-        // solo dal preflight conversioni di "Manda in Produzione"; non
-        // sostituisce ne' modifica la logica n->g qui sotto.
+        // Micro-Step 9b (corretta): cache generica "fact vincente" per
+        // qualunque coppia from_unit/to_unit DIVERSA da 'n' (es. ml->g),
+        // sugli STESSI dati gia' ricevuti in questa risposta — nessuna
+        // richiesta Supabase aggiuntiva. Usata solo dal preflight
+        // conversioni di "Manda in Produzione". Il caso n->g resta
+        // interamente nella logica S.unitWeights/S.unitWeightFacts qui
+        // sotto (unica fonte, condivisa col vecchio flusso): non viene
+        // duplicato qui, altrimenti esisterebbero due copie della stessa
+        // conoscenza per lo stesso ingrediente.
         const latestByKey={};
         cd.conversions.forEach(function(c){
           var name=normalizeIngredientName(c.ingredient_name);
-          var key=name+'|'+c.from_unit+'|'+c.to_unit;
-          var prevKey=latestByKey[key];
-          if(!prevKey||new Date(c.confirmed_at)>new Date(prevKey.confirmedAt)){
-            latestByKey[key]={factor:c.factor,confirmedAt:c.confirmed_at,id:c.id,sourceType:c.source_type};
+          if(c.from_unit!=='n'){
+            var key=name+'|'+c.from_unit+'|'+c.to_unit;
+            var prevKey=latestByKey[key];
+            if(!prevKey||new Date(c.confirmed_at)>new Date(prevKey.confirmedAt)){
+              latestByKey[key]={factor:c.factor,confirmedAt:c.confirmed_at,id:c.id,sourceType:c.source_type};
+            }
           }
           if(c.from_unit!=='n'||c.to_unit!=='g')return; // Micro-Step 2: solo n->g
           var prev=latestByName[name];
@@ -3049,14 +3055,18 @@ function onMandaInProduzioneField(field,val){
 // validata corrente (mai da S.recipes modificato, mai da LAB). Gli step
 // provengono da stepsV2 strutturati (getStructuredSteps, Micro-Step 4):
 // mai ricostruiti dal testo legacy quando stepsV2 è già disponibile (lo è
-// sempre, dopo il caricamento). La conversionFact allegata a un
-// ingrediente in 'n' riusa ESCLUSIVAMENTE S.unitWeights/S.unitWeightFacts,
-// il flusso di conversione già esistente e già caricato in app (Micro-Step
-// 2): nessuna nuova richiesta, nessuna invenzione, nessuna equivalenza
-// g=ml. Per qualunque altra unità priva di una fact persistita oggi (ml,
-// l, cl, tbsp, tsp) non viene allegata alcuna conversionFact: se quella
-// conversione risulta necessaria, computeSessionScaling lo segnalerà con
-// un errore esplicito (gestito da confirmMandaInProduzione sotto).
+// sempre, dopo il caricamento). La conversionFact allegata a un ingrediente
+// riusa UN SOLO sistema concettuale di conoscenza (Correzione Micro-Step
+// 9b): KNOWN CONFIRMED -> RELIABLE REFERENCE -> nessuna fact (si chiederà
+// allo chef). Per 'n' questa conoscenza è la stessa già esistente e già
+// caricata in app (Micro-Step 2), letta da S.unitWeights/S.unitWeightFacts
+// — sia il valore medio storico (seed) sia una fact confermata più
+// recente: vedi resolveKnownProductionConversionFact. Nessuna nuova
+// richiesta, nessuna invenzione, nessuna equivalenza g=ml. Per qualunque
+// altra unità priva di una fact persistita oggi (ml, l, cl, tbsp, tsp) non
+// viene allegata alcuna conversionFact: se quella conversione risulta
+// necessaria, computeSessionScaling lo segnalerà con un errore esplicito
+// (gestito da confirmMandaInProduzione sotto).
 // Sprint Produzione — Micro-Step 9b: unità di riferimento a cui chiedere
 // allo chef una conversione mancante. Per unità count/non-family (es. 'n')
 // si chiede letteralmente quella unità. Per la famiglia volume si chiede
@@ -3068,14 +3078,44 @@ function chooseConversionAskUnit(unit){
   return sessionScalingUnitFamily(unit)==='volume'?'ml':unit;
 }
 
-// Cerca nella cache runtime generica (S.productionConversionFacts, popolata
-// da loadFromSupabase riusando gli stessi dati di S.unitWeights) una fact
-// già nota per riportare `unit` a grammi. Nessuna unità di massa (g/kg)
-// arriva mai qui: quelle sono generiche, gestite direttamente da
-// resolveSessionScalingConversionToGrams senza bisogno di alcuna fact.
+// Cerca una fact già nota per riportare `unit` a grammi, secondo l'unica
+// gerarchia concettuale di conoscenza (Correzione Micro-Step 9b): KNOWN
+// CONFIRMED -> RELIABLE REFERENCE -> null (si chiederà allo chef). Nessuna
+// unità di massa (g/kg) arriva mai qui: quelle sono generiche, gestite
+// direttamente da resolveSessionScalingConversionToGrams senza bisogno di
+// alcuna fact.
+//
+// Caso 'n' (a pezzi): stessa identica conoscenza già disponibile al
+// vecchio flusso onIngUnit/onVarIngUnit/confirmUnitConversion — legge
+// S.unitWeights, che loadFromSupabase popola già secondo questa esatta
+// gerarchia (fact confermata più recente se esiste, altrimenti il seed
+// storico di riferimento invariato dal caricamento pagina). Nessuna
+// seconda fonte: se S.unitWeights non conosce il peso, non lo conosce
+// nemmeno il preflight. Provenance: id/sourceType reali se la conoscenza
+// viene da una fact confermata (S.unitWeightFacts), altrimenti
+// 'reference_data' (stesso termine già riservato dal CHECK di
+// ingredient_conversions per un valore medio/riferimento, mai una nuova
+// invenzione) con id null, perché il seed non è mai stato persistito.
+//
+// Ogni altra unità (oggi solo la famiglia volume, chiesta come 'ml'):
+// il vecchio sistema non la copriva affatto, quindi l'unica fonte
+// possibile è una fact confermata in S.productionConversionFacts — nessun
+// valore medio da inventare qui (vedi anche il vincolo esplicito di non
+// introdurre un'equivalenza g=ml).
 function resolveKnownProductionConversionFact(normalizedName,unit){
   if(sessionScalingUnitFamily(unit)==='mass')return null;
   var askUnit=chooseConversionAskUnit(unit);
+  if(askUnit==='n'){
+    var peso=S.unitWeights[normalizedName];
+    if(peso==null)return null;
+    var provenance=S.unitWeightFacts[normalizedName];
+    return{
+      id:provenance?provenance.id:null,
+      fromUnit:'n',toUnit:'g',
+      factor:peso,
+      sourceType:provenance?provenance.sourceType:'reference_data',
+    };
+  }
   var known=S.productionConversionFacts[normalizedName+'|'+askUnit+'|g'];
   if(!known)return null;
   return{id:known.id,fromUnit:askUnit,toUnit:'g',factor:known.factor,sourceType:known.sourceType};
@@ -3218,17 +3258,29 @@ function cancelConversionPreflight(){
   render();
 }
 
-async function confirmConversionPreflightStep(){
+// Correzione Micro-Step 9b: il valore viene letto direttamente dal DOM al
+// momento del click/Enter (rawValue, passato dai chiamanti in
+// renderConversionPreflightModal leggendo document.getElementById(...)
+// .value), esattamente come già fa confirmUnitConversion col vecchio
+// modal — mai da S.pendingConversionPreflight.value da solo, che onchange
+// aggiorna solo alla perdita del focus: un click diretto sul pulsante
+// senza blur preventivo dell'input non garantisce quell'ordine in ogni
+// browser/dispositivo. pf.value resta comunque aggiornato, per preservare
+// il testo digitato attraverso un eventuale re-render non causato da
+// questo submit.
+async function confirmConversionPreflightStep(rawValue){
   var pf=S.pendingConversionPreflight;
   if(!pf||pf.loading||pf.finalError)return;
   var current=pf.missing[0];
   if(!current)return;
 
-  var factor=parseFloat(pf.value);
-  if(!pf.value||isNaN(factor)||factor<=0){
+  var valStr=(rawValue!=null)?rawValue:pf.value;
+  var factor=parseFloat(valStr);
+  if(!valStr||isNaN(factor)||factor<=0){
     pf.error='Inserisci un peso valido (maggiore di zero).';
     render();return;
   }
+  pf.value=valStr;
 
   pf.loading=true;pf.error=null;render();
 
@@ -3247,14 +3299,19 @@ async function confirmConversionPreflightStep(){
   // Aggiorna lo stato runtime necessario affinché il tentativo corrente
   // possa proseguire senza reload — stessa struttura già usata da
   // buildPreparedInputDaRicettaAttiva/resolveKnownProductionConversionFact.
-  var key=normName+'|'+askUnit+'|g';
-  S.productionConversionFacts[key]={id:conv.id,factor:conv.factor,sourceType:conv.source_type,confirmedAt:conv.confirmed_at};
+  // Correzione Micro-Step 9b: un solo posto per ciascuna conoscenza, mai
+  // due copie della stessa fact. Per 'n' l'unica fonte è S.unitWeights/
+  // S.unitWeightFacts (stessa struttura del vecchio flusso n->g,
+  // Micro-Step 2/9: la rendiamo visibile anche lì, così il vecchio modal
+  // non la richiede più nella stessa sessione applicativa). Per qualunque
+  // altra unità (oggi solo volume->g) l'unica fonte resta
+  // S.productionConversionFacts.
   if(askUnit==='n'){
-    // Stessa fact, stessa struttura del vecchio flusso n->g (Micro-Step
-    // 2/9): la rendiamo visibile anche lì, così il vecchio modal non la
-    // richiede più nella stessa sessione applicativa.
     S.unitWeights[normName]=conv.factor;
     S.unitWeightFacts[normName]={id:conv.id,sourceType:conv.source_type};
+  }else{
+    var key=normName+'|'+askUnit+'|g';
+    S.productionConversionFacts[key]={id:conv.id,factor:conv.factor,sourceType:conv.source_type,confirmedAt:conv.confirmed_at};
   }
 
   var recipe=R(pf.recipeId);
@@ -3324,12 +3381,12 @@ function renderConversionPreflightModal(){
         <input id="conv-preflight-input" type="number" min="0" step="any" placeholder="es. 55" value="${pf.value}"
           style="flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:16px;color:var(--dark);outline:none"
           onchange="onConversionPreflightValue(this.value)"
-          onkeydown="if(event.key==='Enter'){onConversionPreflightValue(this.value);confirmConversionPreflightStep()}">
+          onkeydown="if(event.key==='Enter'){confirmConversionPreflightStep(document.getElementById('conv-preflight-input').value)}">
         <span style="font-size:14px;color:var(--mid);font-weight:500">g</span>
       </div>
       ${pf.error?`<div style="font-size:13px;color:#c0392b;margin-bottom:14px">${pf.error}</div>`:''}
       <div style="display:flex;gap:8px">
-        <button onclick="confirmConversionPreflightStep()" ${pf.loading?'disabled':''}
+        <button onclick="confirmConversionPreflightStep(document.getElementById('conv-preflight-input').value)" ${pf.loading?'disabled':''}
           style="flex:1;padding:10px;background:var(--sage,#3d7a5c);color:white;border:none;border-radius:var(--r-md);font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;opacity:${pf.loading?'0.7':'1'}">
           ${pf.loading?'Salvataggio…':'Salva e continua'}
         </button>
