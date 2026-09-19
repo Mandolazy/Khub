@@ -308,8 +308,11 @@ export default async function handler(req, res) {
     if (body.supabaseAction === 'saveConversion') {
       // Sempre un INSERT di una nuova fact: body.conversion porta sempre un
       // id nuovo (generato client-side), mai un update di una riga esistente.
-      await sbPost('ingredient_conversions', body.conversion);
-      return res.status(200).json({ ok: true });
+      // Micro-Step 9b: propaga l'esito reale di sbPost (bug preesistente —
+      // prima rispondeva sempre {ok:true} anche se l'INSERT falliva,
+      // rendendo impossibile rilevare un errore di persistenza dal client).
+      const r = await sbPost('ingredient_conversions', body.conversion);
+      return res.status(200).json(r);
     }
 
     if (body.supabaseAction === 'load') {

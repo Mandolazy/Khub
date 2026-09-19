@@ -929,6 +929,16 @@ const S = {
   // unitWeights resta l'unica struttura letta da onIngUnit/onVarIngUnit.
   unitWeightFacts: {},
   pendingMandaInProduzione: null, // {recipeId,variantId,portions,gpp,error,loading} — modal target Sessione
+  // Sprint Produzione — Micro-Step 9b: {"nomeNormalizzato|fromUnit|toUnit":{id,factor,sourceType,confirmedAt}}
+  // — cache runtime generica (qualunque from_unit, non solo 'n') delle
+  // conversion fact vincenti, popolata da loadFromSupabase riusando gli
+  // stessi dati gia' caricati per S.unitWeights (nessuna nuova richiesta).
+  // NON sostituisce S.unitWeights/S.unitWeightFacts (che restano invariate,
+  // lette solo dal vecchio flusso onIngUnit/onVarIngUnit/confirmUnitConversion):
+  // e' una vista aggiuntiva sugli stessi dati, usata solo dal preflight
+  // conversioni di "Manda in Produzione".
+  productionConversionFacts: {},
+  pendingConversionPreflight: null, // {recipeId,variantId,portions,gpp,missing,value,error,loading,finalError}
 };
 
 const UNITS = ['g','ml','kg','l','n','tbsp','tsp','cl'];
@@ -1440,9 +1450,20 @@ async function loadFromSupabase(){
       const cd=await rc.json();
       if(Array.isArray(cd.conversions)){
         const latestByName={};
+        // Micro-Step 9b: cache generica "fact vincente" per QUALUNQUE coppia
+        // from_unit/to_unit (non solo n->g), sugli STESSI dati gia' ricevuti
+        // in questa risposta — nessuna richiesta Supabase aggiuntiva. Usata
+        // solo dal preflight conversioni di "Manda in Produzione"; non
+        // sostituisce ne' modifica la logica n->g qui sotto.
+        const latestByKey={};
         cd.conversions.forEach(function(c){
-          if(c.from_unit!=='n'||c.to_unit!=='g')return; // Micro-Step 2: solo n->g
           var name=normalizeIngredientName(c.ingredient_name);
+          var key=name+'|'+c.from_unit+'|'+c.to_unit;
+          var prevKey=latestByKey[key];
+          if(!prevKey||new Date(c.confirmed_at)>new Date(prevKey.confirmedAt)){
+            latestByKey[key]={factor:c.factor,confirmedAt:c.confirmed_at,id:c.id,sourceType:c.source_type};
+          }
+          if(c.from_unit!=='n'||c.to_unit!=='g')return; // Micro-Step 2: solo n->g
           var prev=latestByName[name];
           if(!prev||new Date(c.confirmed_at)>new Date(prev.confirmedAt)){
             latestByName[name]={factor:c.factor,confirmedAt:c.confirmed_at,id:c.id,sourceType:c.source_type};
@@ -1455,6 +1476,10 @@ async function loadFromSupabase(){
           // risposta, nessuna richiesta aggiuntiva) per congelare la
           // provenance reale nello snapshot di una Sessione.
           S.unitWeightFacts[name]={id:latestByName[name].id!=null?latestByName[name].id:null,sourceType:latestByName[name].sourceType!=null?latestByName[name].sourceType:null};
+        });
+        Object.keys(latestByKey).forEach(function(key){
+          var w=latestByKey[key];
+          S.productionConversionFacts[key]={id:w.id!=null?w.id:null,factor:parseFloat(w.factor),sourceType:w.sourceType!=null?w.sourceType:null,confirmedAt:w.confirmedAt};
         });
       }
     }catch(e){console.error('Load conversions error',e);}
@@ -2416,22 +2441,32 @@ function cancelUnitConversion(){
 // se la scrittura fallisce, la conversione resta comunque valida per
 // questa sessione in S.unitWeights, semplicemente non sara' ancora
 // disponibile dopo un refresh finche' non verra' riconfermata.
+// Micro-Step 9b: ora restituisce la fact salvata (con id/confirmed_at) in
+// caso di successo, o null in caso di fallimento — invariato per i
+// chiamanti esistenti che ignorano il valore di ritorno (fire-and-forget,
+// es. confirmUnitConversion), necessario per il nuovo preflight conversioni
+// che deve sapere se il salvataggio e' riuscito prima di procedere e deve
+// conoscere l'id/sourceType reali per congelarli nello snapshot.
 async function saveIngredientConversion(ingredientName,fromUnit,toUnit,factor,sourceType,sourceDetail){
+  var conversion={
+    id:'ic'+uid(),
+    ingredient_name:ingredientName,
+    from_unit:fromUnit,
+    to_unit:toUnit,
+    factor:factor,
+    source_type:sourceType,
+    source_detail:sourceDetail||null,
+    confirmed_at:new Date().toISOString(),
+  };
   try{
-    await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      supabaseAction:'saveConversion',
-      conversion:{
-        id:'ic'+uid(),
-        ingredient_name:ingredientName,
-        from_unit:fromUnit,
-        to_unit:toUnit,
-        factor:factor,
-        source_type:sourceType,
-        source_detail:sourceDetail||null,
-        confirmed_at:new Date().toISOString(),
-      }
-    })});
-  }catch(e){console.error('Save conversion error',e);}
+    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'saveConversion',conversion:conversion})});
+    const data=await r.json().catch(function(){return null;});
+    if(!r.ok||(data&&data.error)){
+      console.error('Save conversion error',data&&data.error);
+      return null;
+    }
+    return conversion;
+  }catch(e){console.error('Save conversion error',e);return null;}
 }
 function onIngName(recipeId,ingId,val){
   upLab(recipeId,v=>({...v,ingredients:v.ingredients.map(i=>i.id===ingId?{...i,name:val}:i)}));
@@ -2998,6 +3033,30 @@ function onMandaInProduzioneField(field,val){
 // l, cl, tbsp, tsp) non viene allegata alcuna conversionFact: se quella
 // conversione risulta necessaria, computeSessionScaling lo segnalerà con
 // un errore esplicito (gestito da confirmMandaInProduzione sotto).
+// Sprint Produzione — Micro-Step 9b: unità di riferimento a cui chiedere
+// allo chef una conversione mancante. Per unità count/non-family (es. 'n')
+// si chiede letteralmente quella unità. Per la famiglia volume si chiede
+// sempre 'ml' come base comprensibile e coerente: le conversioni generiche
+// l/cl<->ml (già gestite da resolveSessionScalingConversionToGrams) fanno
+// poi comporre correttamente l->ml->g o cl->ml->g da un'unica fact ml->g,
+// senza dover risolvere una fact per ciascuna unità di volume.
+function chooseConversionAskUnit(unit){
+  return sessionScalingUnitFamily(unit)==='volume'?'ml':unit;
+}
+
+// Cerca nella cache runtime generica (S.productionConversionFacts, popolata
+// da loadFromSupabase riusando gli stessi dati di S.unitWeights) una fact
+// già nota per riportare `unit` a grammi. Nessuna unità di massa (g/kg)
+// arriva mai qui: quelle sono generiche, gestite direttamente da
+// resolveSessionScalingConversionToGrams senza bisogno di alcuna fact.
+function resolveKnownProductionConversionFact(normalizedName,unit){
+  if(sessionScalingUnitFamily(unit)==='mass')return null;
+  var askUnit=chooseConversionAskUnit(unit);
+  var known=S.productionConversionFacts[normalizedName+'|'+askUnit+'|g'];
+  if(!known)return null;
+  return{id:known.id,fromUnit:askUnit,toUnit:'g',factor:known.factor,sourceType:known.sourceType};
+}
+
 function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion){
   return{
     recipeId:recipe.id,
@@ -3016,20 +3075,8 @@ function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsP
         isSubRecipe:ing.isSubRecipe===true,
         subRecipeId:ing.subRecipeId!=null?ing.subRecipeId:null,
       };
-      if(ing.unit==='n'){
-        var normName=normalizeIngredientName(ing.name);
-        var weight=S.unitWeights[normName];
-        if(weight!=null){
-          var factMeta=S.unitWeightFacts[normName]||{};
-          mapped.conversionFact={
-            id:factMeta.id!=null?factMeta.id:null,
-            fromUnit:'n',
-            toUnit:'g',
-            factor:weight,
-            sourceType:factMeta.sourceType!=null?factMeta.sourceType:null,
-          };
-        }
-      }
+      var fact=resolveKnownProductionConversionFact(normalizeIngredientName(ing.name),ing.unit);
+      if(fact)mapped.conversionFact=fact;
       return mapped;
     }),
     steps:getStructuredSteps(vv.steps,vv.stepsV2),
@@ -3038,6 +3085,33 @@ function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsP
     mediaUrl:vv.mediaUrl||null,
     videoUrl:vv.videoUrl||null,
   };
+}
+
+// Helper puro (Micro-Step 9b — FASE 2): individua quali ingredienti NON
+// possono essere normalizzati in grammi con le sole conversioni generiche
+// deterministiche (g<->kg, ml<->l<->cl) o con una conversionFact già
+// allegata. Riusa ESATTAMENTE resolveSessionScalingConversionToGrams
+// (Micro-Step 7, corretta): stessa identica logica di computeSessionScaling,
+// nessuna duplicazione — se qui restituisce [], computeSessionScaling non
+// può fallire per conversione mancante su questi stessi ingredienti. Non
+// legge S.recipes, non modifica preparedInput, non interroga il DB, non
+// salva nulla, non crea alcuna Sessione.
+function findMissingProductionConversions(preparedInput){
+  var ingredients=(preparedInput&&preparedInput.ingredients)||[];
+  var missing=[];
+  ingredients.forEach(function(ing){
+    if(!ing||typeof ing.unit!=='string')return;
+    var res=resolveSessionScalingConversionToGrams(ing.unit,ing.conversionFact||null);
+    if(res&&res.error){
+      missing.push({
+        itemKey:ing.itemKey!=null?ing.itemKey:null,
+        ingredientName:ing.name||'',
+        currentUnit:ing.unit,
+        requiredTargetUnit:'g',
+      });
+    }
+  });
+  return missing;
 }
 
 async function confirmMandaInProduzione(){
@@ -3065,6 +3139,22 @@ async function confirmMandaInProduzione(){
   p.loading=true;p.error=null;render();
 
   var preparedInput=buildPreparedInputDaRicettaAttiva(recipe,vv,portions,gpp);
+
+  // Micro-Step 9b — FASE 2/3: preflight PRIMA di qualunque persistenza. Se
+  // manca una conversione necessaria, si passa al flusso di risoluzione
+  // interattiva sequenziale: createProductionSession non viene MAI chiamata
+  // finché il preflight non restituisce [].
+  var missing=findMissingProductionConversions(preparedInput);
+  if(missing.length>0){
+    S.pendingMandaInProduzione=null;
+    S.pendingConversionPreflight={
+      recipeId:p.recipeId,variantId:p.variantId,portions:portions,gpp:gpp,
+      missing:missing,value:'',error:null,loading:false,finalError:null,
+    };
+    render();
+    return;
+  }
+
   try{
     await createProductionSession(preparedInput);
     S.pendingMandaInProduzione=null;
@@ -3073,13 +3163,159 @@ async function confirmMandaInProduzione(){
   }catch(e){
     // Nessuna Sessione creata (computeSessionScaling/createProductionSession
     // falliscono PRIMA di scrivere qualunque cosa — Micro-Step 7/8). Il
-    // modal resta aperto e utilizzabile, nessuna falsa conferma. Un
-    // "conversione mancante" qui segnala che serve il Micro-Step 9b
-    // (risoluzione interattiva delle conversioni mancanti) — vedi report.
+    // modal resta aperto e utilizzabile, nessuna falsa conferma.
     p.loading=false;
     p.error=(e&&e.message)?e.message:'Errore nella creazione della produzione. Riprova.';
     render();
   }
+}
+
+// ══════════════════════════════════════════════════════════
+// SPRINT PRODUZIONE — Micro-Step 9b: risoluzione interattiva delle
+// conversioni mancanti, UNA alla volta, PRIMA di createProductionSession.
+// Riusa saveIngredientConversion() (sistema ingredient_conversions già
+// esistente, Micro-Step 2) — nessun secondo sistema di conversioni.
+// ══════════════════════════════════════════════════════════
+
+function onConversionPreflightValue(val){
+  var pf=S.pendingConversionPreflight;
+  if(!pf)return;
+  pf.value=val;
+  pf.error=null;
+  render();
+}
+
+// Annulla in qualunque momento della risoluzione: nessuna Sessione viene
+// creata. Le eventuali fact già confermate in questo tentativo restano
+// persistite (sono conoscenza valida indipendente dalla Sessione, mai
+// annullate/cancellate).
+function cancelConversionPreflight(){
+  S.pendingConversionPreflight=null;
+  render();
+}
+
+async function confirmConversionPreflightStep(){
+  var pf=S.pendingConversionPreflight;
+  if(!pf||pf.loading||pf.finalError)return;
+  var current=pf.missing[0];
+  if(!current)return;
+
+  var factor=parseFloat(pf.value);
+  if(!pf.value||isNaN(factor)||factor<=0){
+    pf.error='Inserisci un peso valido (maggiore di zero).';
+    render();return;
+  }
+
+  pf.loading=true;pf.error=null;render();
+
+  var normName=normalizeIngredientName(current.ingredientName);
+  var askUnit=chooseConversionAskUnit(current.currentUnit);
+  var conv=await saveIngredientConversion(normName,askUnit,'g',factor,'chef_confirmed');
+  if(!conv){
+    // Errore di persistenza: non si procede alla conversione successiva,
+    // nessuna Sessione viene creata, il passaggio corrente resta attivo.
+    pf.loading=false;
+    pf.error='Errore nel salvataggio della conversione. Riprova.';
+    render();
+    return;
+  }
+
+  // Aggiorna lo stato runtime necessario affinché il tentativo corrente
+  // possa proseguire senza reload — stessa struttura già usata da
+  // buildPreparedInputDaRicettaAttiva/resolveKnownProductionConversionFact.
+  var key=normName+'|'+askUnit+'|g';
+  S.productionConversionFacts[key]={id:conv.id,factor:conv.factor,sourceType:conv.source_type,confirmedAt:conv.confirmed_at};
+  if(askUnit==='n'){
+    // Stessa fact, stessa struttura del vecchio flusso n->g (Micro-Step
+    // 2/9): la rendiamo visibile anche lì, così il vecchio modal non la
+    // richiede più nella stessa sessione applicativa.
+    S.unitWeights[normName]=conv.factor;
+    S.unitWeightFacts[normName]={id:conv.id,sourceType:conv.source_type};
+  }
+
+  var recipe=R(pf.recipeId);
+  var vv=recipe&&recipe.validatedVariants.find(function(v){return v.id===pf.variantId;});
+  if(!recipe||!vv){
+    pf.loading=false;
+    pf.error='Ricetta non trovata. Chiudi e riprova.';
+    render();return;
+  }
+
+  var preparedInput=buildPreparedInputDaRicettaAttiva(recipe,vv,pf.portions,pf.gpp);
+  var stillMissing=findMissingProductionConversions(preparedInput);
+
+  if(stillMissing.length>0){
+    // Un'altra conversione manca ancora: si prosegue sequenzialmente,
+    // NESSUNA Sessione viene creata finché non sono risolte tutte.
+    pf.missing=stillMissing;
+    pf.value='';
+    pf.loading=false;
+    render();
+    return;
+  }
+
+  // Tutte le conversioni sono risolte: crea la Sessione ora.
+  try{
+    await createProductionSession(preparedInput);
+    S.pendingConversionPreflight=null;
+    toast('Produzione creata','ti-chef-hat');
+    render();
+  }catch(e){
+    // Le fact confermate in questo tentativo restano valide e salvate; solo
+    // la Sessione non viene creata. Messaggio chiaro, nessuna falsa conferma.
+    pf.loading=false;
+    pf.missing=[];
+    pf.finalError=(e&&e.message)?e.message:'Errore nella creazione della produzione. Riprova.';
+    render();
+  }
+}
+
+function renderConversionPreflightModal(){
+  var pf=S.pendingConversionPreflight;
+  if(!pf)return'';
+  if(pf.finalError){
+    return`
+    <div style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200;display:flex;align-items:center;justify-content:center;padding:24px">
+      <div style="background:var(--white);border-radius:var(--r-lg);padding:24px;width:100%;max-width:380px;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
+        <div style="font-size:16px;font-weight:700;color:var(--dark);margin-bottom:6px">Produzione non creata</div>
+        <div style="font-size:14px;color:#c0392b;margin-bottom:18px">${pf.finalError}</div>
+        <div style="font-size:12px;color:var(--light);margin-bottom:18px">Le conversioni confermate restano salvate per i prossimi tentativi.</div>
+        <button onclick="cancelConversionPreflight()" style="width:100%;padding:10px;background:transparent;color:var(--mid);border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:14px;cursor:pointer">Chiudi</button>
+      </div>
+    </div>`;
+  }
+  var current=pf.missing[0];
+  if(!current)return'';
+  var askUnit=chooseConversionAskUnit(current.currentUnit);
+  var domanda=askUnit==='n'
+    ?('Quanto pesa 1 '+current.ingredientName+'?')
+    :('Quanto pesa 1 '+askUnit+' di '+current.ingredientName+'?');
+  var progresso=pf.missing.length>1?(' ('+pf.missing.length+' conversioni da confermare)'):'';
+  return`
+  <div style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200;display:flex;align-items:center;justify-content:center;padding:24px">
+    <div style="background:var(--white);border-radius:var(--r-lg);padding:24px;width:100%;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
+      <div style="font-size:14px;color:var(--mid);margin-bottom:4px">Per calcolare correttamente la produzione${progresso}</div>
+      <div style="font-size:16px;font-weight:700;color:var(--dark);margin-bottom:18px">${domanda}</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
+        <input id="conv-preflight-input" type="number" min="0" step="any" placeholder="es. 55" value="${pf.value}"
+          style="flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:16px;color:var(--dark);outline:none"
+          onchange="onConversionPreflightValue(this.value)"
+          onkeydown="if(event.key==='Enter'){onConversionPreflightValue(this.value);confirmConversionPreflightStep()}">
+        <span style="font-size:14px;color:var(--mid);font-weight:500">g</span>
+      </div>
+      ${pf.error?`<div style="font-size:13px;color:#c0392b;margin-bottom:14px">${pf.error}</div>`:''}
+      <div style="display:flex;gap:8px">
+        <button onclick="confirmConversionPreflightStep()" ${pf.loading?'disabled':''}
+          style="flex:1;padding:10px;background:var(--sage,#3d7a5c);color:white;border:none;border-radius:var(--r-md);font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;opacity:${pf.loading?'0.7':'1'}">
+          ${pf.loading?'Salvataggio…':'Salva e continua'}
+        </button>
+        <button onclick="cancelConversionPreflight()" ${pf.loading?'disabled':''}
+          style="padding:10px 16px;background:transparent;color:var(--mid);border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:14px;cursor:pointer">
+          Annulla
+        </button>
+      </div>
+    </div>
+  </div>`;
 }
 
 function renderMandaInProduzioneModal(){
@@ -6160,7 +6396,7 @@ function render(){
   else if(S.view==='lab-globale'){mainContent=renderLabGlobale();}
 
   const main=document.getElementById('main');
-  if(main)main.innerHTML=mainContent+(S.showFamilyPicker?renderFamilyPicker():'')+(S.showMergePicker?renderMergePicker():'')+(S.showMergeConfirm?renderMergeConfirm():'')+(S.showSchedeFamiglie?renderSchedeFamigliePicker():'')+(S.showCondividiStaff?renderCondividiStaffModal():'')+(S.showOnboarding?renderOnboarding():'')+(S.toastAction?renderToastAction():S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:'')+renderUnitConversionModal()+renderMandaInProduzioneModal();
+  if(main)main.innerHTML=mainContent+(S.showFamilyPicker?renderFamilyPicker():'')+(S.showMergePicker?renderMergePicker():'')+(S.showMergeConfirm?renderMergeConfirm():'')+(S.showSchedeFamiglie?renderSchedeFamigliePicker():'')+(S.showCondividiStaff?renderCondividiStaffModal():'')+(S.showOnboarding?renderOnboarding():'')+(S.toastAction?renderToastAction():S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:'')+renderUnitConversionModal()+renderMandaInProduzioneModal()+renderConversionPreflightModal();
 
   // Bottom nav
   const bn=document.getElementById('bottom-nav');
