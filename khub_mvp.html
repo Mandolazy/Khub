@@ -1412,8 +1412,14 @@ async function loadFromSupabase(){
         ingredients:(data.ingredients||[]).filter(i=>i.variant_id===v.id).sort((a,b)=>a.sort_order-b.sort_order).map(i=>({
           id:i.id,name:i.name,qty:parseFloat(i.qty)||0,unit:i.unit||'g',
           isSubRecipe:i.is_sub_recipe||false,subRecipeId:i.sub_recipe_id||null,
-          estimatedYieldPct:i.estimated_yield_pct!==undefined&&i.estimated_yield_pct!==null?i.estimated_yield_pct:null, // Step 1: resa stimata
-          measuredYieldPct:i.measured_yield_pct!==undefined&&i.measured_yield_pct!==null?i.measured_yield_pct:null,   // Step 1: resa misurata
+          // Bugfix rese: estimated_yield_pct/measured_yield_pct sono numeric
+          // Postgres, restituite da PostgREST come stringa — normalizzate
+          // qui, alla frontiera di caricamento, esattamente come qty sopra
+          // (parseFloat), cosi' il client ha un solo tipo canonico
+          // (number|null) per tutto il resto dell'app. Nessuna reinterpretazione
+          // di valore: stesso identico numero, solo tipizzato correttamente.
+          estimatedYieldPct:i.estimated_yield_pct!=null?parseFloat(i.estimated_yield_pct):null, // Step 1: resa stimata
+          measuredYieldPct:i.measured_yield_pct!=null?parseFloat(i.measured_yield_pct):null,   // Step 1: resa misurata
         })),
         steps:parseSteps(v.steps),
         stepsV2:getStructuredSteps(parseSteps(v.steps),Array.isArray(v.steps_v2)?v.steps_v2:null),
@@ -1435,8 +1441,10 @@ async function loadFromSupabase(){
         portionUnit:v.portion_unit||'g',           // Step 1: unità porzione
         ingredients:(data.ingredients||[]).filter(i=>i.variant_id===v.id).sort((a,b)=>a.sort_order-b.sort_order).map(i=>({
           id:i.id,name:i.name,qty:parseFloat(i.qty)||0,unit:i.unit||'g',
-          estimatedYieldPct:i.estimated_yield_pct!==undefined&&i.estimated_yield_pct!==null?i.estimated_yield_pct:null, // Step 1: resa stimata
-          measuredYieldPct:i.measured_yield_pct!==undefined&&i.measured_yield_pct!==null?i.measured_yield_pct:null,   // Step 1: resa misurata
+          // Bugfix rese: stessa normalizzazione del mapping Bozze LAB sopra
+          // (parseFloat, mai una seconda logica) — vedi commento lì.
+          estimatedYieldPct:i.estimated_yield_pct!=null?parseFloat(i.estimated_yield_pct):null, // Step 1: resa stimata
+          measuredYieldPct:i.measured_yield_pct!=null?parseFloat(i.measured_yield_pct):null,   // Step 1: resa misurata
         })),
         steps:parseSteps(v.steps),
         stepsV2:getStructuredSteps(parseSteps(v.steps),Array.isArray(v.steps_v2)?v.steps_v2:null),
@@ -2770,7 +2778,11 @@ function computeSessionScaling(input){
     if(yieldPct===null){
       effectiveYield=1; // CASO 6: yield null -> effectiveYield 100%
     }else{
-      if(typeof yieldPct!=='number'||!isFinite(yieldPct)||yieldPct<=0){
+      // Bugfix rese: 0% e' un valore esplicito e storicamente valido
+      // (stesso contratto gia' documentato in effectiveYield: "resa zero
+      // esplicita, ingrediente evapora/non contribuisce") — solo un valore
+      // negativo, non numerico o non finito e' realmente invalido.
+      if(typeof yieldPct!=='number'||!isFinite(yieldPct)||yieldPct<0){
         throw new Error('computeSessionScaling: estimatedYieldPct non valida per ingrediente "'+label+'"');
       }
       effectiveYield=yieldPct/100;
