@@ -690,6 +690,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
 .pg-card-total{font-size:13px;font-weight:600;color:var(--dpop-inchiostro-testo);}
 .pg-badge{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;padding:4px 10px;border-radius:999px;white-space:nowrap;}
 .pg-badge-pending{background:var(--dpop-carta-toccata,#eee);color:var(--dpop-inchiostro-testo);}
+.pg-badge-in-progress{background:var(--sage-light);color:var(--sage-dark);}
 
 .prod-staff-riga{display:flex;align-items:center;gap:10px;padding:12px 4px;min-height:44px;border-bottom:1px solid var(--dpop-filetto-riga);cursor:pointer;font-family:'Archivo',sans-serif;font-size:15px;color:var(--dpop-inchiostro-testo);-webkit-tap-highlight-color:transparent;}
 .prod-staff-riga input[type=checkbox]{width:18px;height:18px;cursor:pointer;flex-shrink:0;}
@@ -818,7 +819,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
 // STATE
 // ══════════════════════════════════════════════════════════
 const S = {
-  view: 'app-home',  // app-home | home | lab-list | prod-list | recipe | load | preview | produzione-guidata
+  view: 'app-home',  // app-home | home | lab-list | prod-list | recipe | load | preview | produzione-guidata | sessione-operativa
   // 'home' mantiene per ora il significato attuale (elenco Schede) — non rinominato
   // in questo Micro-Step: la pulizia dei nomi interni è rimandata al refactor
   // successivo delle tre pile indipendenti.
@@ -963,6 +964,18 @@ const S = {
   // mai una vista sul modello Ricetta corrente.
   productionSessions: [],
   produzioneGuidataTab: 'pending', // 'pending' | 'in_progress' | 'completed'
+  // Sprint Produzione — Micro-Step 11: id della Sessione aperta nella
+  // schermata Sessione operativa (S.view='sessione-operativa'). Dedicato:
+  // MAI S.selectedId, che in tutto il resto di KHUB identifica sempre una
+  // Ricetta (R(id)) — riusarlo per una Sessione introdurrebbe un'ambiguita'
+  // pericolosa in ogni altra view che legge S.selectedId.
+  openSessionId: null,
+  // Guardia anti-doppio-click/doppio-avvio (A11.5): id della Sessione per
+  // cui e' in corso una richiesta di avvio, null altrimenti. Impedisce un
+  // secondo upsert concorrente sulla stessa Sessione durante l'attesa di
+  // rete, senza introdurre un flag per-sessione dentro ogni oggetto di
+  // S.productionSessions.
+  startingSessionId: null,
 };
 
 const UNITS = ['g','ml','kg','l','n','tbsp','tsp','cl'];
@@ -3517,6 +3530,10 @@ function renderPendingSessionCard(sess){
   var targetLabel=(portions!=null&&gpp!=null)?(portions+' porzioni × '+gpp+' g'):'';
   var totaleLabel=formatFinishedTotalLabel(sess.targetFinishedTotal);
   var dataCreazione=sess.createdAt?new Date(sess.createdAt).toLocaleString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+  // Micro-Step 11 (A11.5): bottone disabilitato anche lato UI mentre questa
+  // specifica Sessione ha una richiesta di avvio in corso — non solo il
+  // guard interno di avviaProduzione(), anche il click stesso resta bloccato.
+  var starting=S.startingSessionId===sess.id;
   return`
   <div class="pg-card">
     <div class="pg-card-top">
@@ -3530,7 +3547,92 @@ function renderPendingSessionCard(sess){
       ${targetLabel?`<div class="pg-card-target">${targetLabel}</div>`:''}
       <div class="pg-card-total">${totaleLabel}</div>
     </div>
-    <button class="btn btn-outline btn-sm" disabled title="Disponibile in un prossimo Micro-Step">Avvia produzione</button>
+    <button class="btn btn-outline btn-sm" ${starting?'disabled':''} onclick="avviaProduzione('${sess.id}')">${starting?'Avvio…':'Avvia produzione'}</button>
+  </div>`;
+}
+
+// Sprint Produzione — Micro-Step 11 (A11.1/A11.2/A11.3/A11.4/A11.5): avvia
+// una Sessione pending -> in_progress. L'upsert invia SEMPRE la riga
+// completa gia' disponibile in S.productionSessions, mai {id,status,
+// started_at} da soli: production_sessions ha colonne NOT NULL senza
+// default (status, snapshot_version, snapshot, target_finished_total) e
+// l'azione generica 'update' (Prefer: resolution=merge-duplicates) valida
+// il ramo INSERT anche quando l'esito reale e' un UPDATE per conflitto —
+// un payload parziale rischierebbe un errore reale, non un semplice no-op
+// (vedi audit MS11). snapshot viaggia identico al valore gia' caricato:
+// mai ricostruito, mai modificato (A11.3). started_at viene scritto una
+// sola volta qui: nessun altro punto del flusso MS11 lo tocca di nuovo
+// (A11.2).
+async function avviaProduzione(sessionId){
+  if(S.startingSessionId)return; // guard anti-doppio-click/doppio-avvio (A11.5)
+  var sess=S.productionSessions.find(function(s){return s.id===sessionId;});
+  if(!sess||sess.status!=='pending')return;
+
+  S.startingSessionId=sessionId;
+  render();
+
+  var startedAt=new Date().toISOString();
+  var row={
+    id:sess.id,
+    recipe_id:sess.recipeId,
+    source_variant_id:sess.sourceVariantId,
+    status:'in_progress',
+    snapshot_version:sess.snapshotVersion,
+    snapshot:sess.snapshot,
+    target_finished_total:sess.targetFinishedTotal,
+    created_at:sess.createdAt,
+    started_at:startedAt,
+    completed_at:sess.completedAt,
+  };
+
+  var res=await _supabaseUpsertRow('production_sessions',row);
+  S.startingSessionId=null;
+  if(res&&res.error){
+    console.error('avviaProduzione: upsert fallito',res.error);
+    render();
+    return;
+  }
+
+  sess.status='in_progress';
+  sess.startedAt=startedAt;
+  apriSessioneOperativa(sessionId);
+}
+
+// Apre la Sessione operativa read-only (A11.6/A11.7).
+function apriSessioneOperativa(sessionId){
+  S.openSessionId=sessionId;
+  S.view='sessione-operativa';
+  render();
+}
+
+// Sprint Produzione — Micro-Step 11 (A11.9): card per il tab "In corso",
+// stesso stile di renderPendingSessionCard ma senza alcuna azione di stato
+// (nessun "Avvia produzione": la Sessione e' gia' in_progress) — l'intera
+// card riapre la Sessione operativa.
+function renderInProgressSessionCard(sess){
+  var snap=sess.snapshot||{};
+  var recipeInfo=snap.recipe||{};
+  var target=snap.target||{};
+  var recipeName=recipeInfo.recipeName||'Ricetta';
+  var variantName=recipeInfo.variantName||'';
+  var portions=target.targetPortions!=null?target.targetPortions:null;
+  var gpp=target.targetGramsPerPortion!=null?target.targetGramsPerPortion:null;
+  var targetLabel=(portions!=null&&gpp!=null)?(portions+' porzioni × '+gpp+' g'):'';
+  var totaleLabel=formatFinishedTotalLabel(sess.targetFinishedTotal);
+  var dataAvvio=sess.startedAt?new Date(sess.startedAt).toLocaleString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+  return`
+  <div class="pg-card" onclick="apriSessioneOperativa('${sess.id}')" style="cursor:pointer">
+    <div class="pg-card-top">
+      <div>
+        <div class="pg-card-title">${recipeName}${variantName?` <span class="pg-card-variant">· ${variantName}</span>`:''}</div>
+        <div class="pg-card-meta">Avviata il ${dataAvvio}</div>
+      </div>
+      <span class="pg-badge pg-badge-in-progress">In corso</span>
+    </div>
+    <div class="pg-card-body">
+      ${targetLabel?`<div class="pg-card-target">${targetLabel}</div>`:''}
+      <div class="pg-card-total">${totaleLabel}</div>
+    </div>
   </div>`;
 }
 
@@ -3540,6 +3642,8 @@ function renderProduzioneGuidata(){
   // Difensivo: created_at ASC anche qui, indipendentemente da come e' gia'
   // ordinato S.productionSessions.
   pending=pending.slice().sort(function(a,b){return new Date(a.createdAt)-new Date(b.createdAt);});
+  var inProgress=(S.productionSessions||[]).filter(function(s){return s.status==='in_progress';});
+  inProgress=inProgress.slice().sort(function(a,b){return new Date(a.startedAt)-new Date(b.startedAt);});
 
   var contenuto;
   if(tab==='pending'){
@@ -3547,7 +3651,9 @@ function renderProduzioneGuidata(){
       ?'<div class="prod-empty">Nessuna produzione da iniziare.</div>'
       :'<div class="pg-list">'+pending.map(renderPendingSessionCard).join('')+'</div>';
   }else if(tab==='in_progress'){
-    contenuto='<div class="prod-empty">In arrivo in un prossimo Micro-Step.</div>';
+    contenuto=inProgress.length===0
+      ?'<div class="prod-empty">Nessuna produzione in corso.</div>'
+      :'<div class="pg-list">'+inProgress.map(renderInProgressSessionCard).join('')+'</div>';
   }else{
     contenuto='<div class="prod-empty">In arrivo in un prossimo Micro-Step.</div>';
   }
@@ -3563,6 +3669,70 @@ function renderProduzioneGuidata(){
       <button class="pg-tab ${tab==='completed'?'pg-tab-active':''}" onclick="setProduzioneGuidataTab('completed')">Completate</button>
     </div>
     ${contenuto}
+  </div>`;
+}
+
+// Sprint Produzione — Micro-Step 11 (A11.7/A11.8): schermata Sessione
+// operativa, READ-ONLY. Trova la Sessione tramite S.productionSessions +
+// S.openSessionId e legge i dati operativi ESCLUSIVAMENTE da
+// session.snapshot — ZERO accessi a S.recipes/R(...)/Ricetta sorgente
+// corrente in questa funzione: lo snapshot e' gia' autosufficiente
+// (Micro-Step 7/8) e deve restare l'unica fonte, anche se la Ricetta
+// sorgente cambia o viene cancellata dopo la creazione della Sessione.
+// Nessuna interazione: nessun check/timer/note/Completa produzione (fuori
+// scope MS11).
+function renderSessioneOperativa(){
+  var sess=(S.productionSessions||[]).find(function(s){return s.id===S.openSessionId;});
+  if(!sess){
+    return`<div class="prod-env">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div class="prod-title">Sessione operativa</div>
+        <button class="btn btn-ghost btn-sm" onclick="S.view='produzione-guidata';S.produzioneGuidataTab='in_progress';render()"><i class="ti ti-arrow-left"></i> Produzione Guidata</button>
+      </div>
+      <div class="prod-empty">Sessione non trovata.</div>
+    </div>`;
+  }
+  var snap=sess.snapshot||{};
+  var recipeInfo=snap.recipe||{};
+  var target=snap.target||{};
+  var ingredients=Array.isArray(snap.ingredients)?snap.ingredients:[];
+  var steps=(Array.isArray(snap.steps)?snap.steps.slice():[]).sort(function(a,b){return(a.order||0)-(b.order||0);});
+  var recipeName=recipeInfo.recipeName||'Ricetta';
+  var variantName=recipeInfo.variantName||'';
+  var portions=target.targetPortions!=null?target.targetPortions:null;
+  var gpp=target.targetGramsPerPortion!=null?target.targetGramsPerPortion:null;
+  var totaleLabel=formatFinishedTotalLabel(sess.targetFinishedTotal);
+
+  return`<div class="prod-env">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div class="prod-title">${recipeName}${variantName?` <span class="pg-card-variant">· ${variantName}</span>`:''}</div>
+      <button class="btn btn-ghost btn-sm" onclick="S.view='produzione-guidata';S.produzioneGuidataTab='in_progress';render()"><i class="ti ti-arrow-left"></i> Produzione Guidata</button>
+    </div>
+    <div style="padding:0 22px 6px">
+      <span class="pg-badge pg-badge-in-progress">In corso</span>
+    </div>
+    <div style="padding:0 22px 18px;display:flex;flex-direction:column;gap:2px">
+      ${portions!=null&&gpp!=null?`<div class="pg-card-target">${portions} porzioni × ${gpp} g</div>`:''}
+      <div class="pg-card-total">${totaleLabel}</div>
+    </div>
+    <div style="padding:0 22px 8px;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--dpop-grigio-dato)">Ingredienti</div>
+    <div class="pg-list" style="padding:0 22px 22px">
+      ${ingredients.map(function(ing){
+        var qty=ing.operativeQty!=null?Math.round(ing.operativeQty*100)/100:null;
+        return`<div class="pg-card" style="flex-direction:row;align-items:center;justify-content:space-between">
+          <span>${ing.name||''}</span>
+          <span style="font-family:'IBM Plex Mono',monospace">${qty!=null?qty:'–'} ${ing.unit||''}</span>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="padding:0 22px 8px;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--dpop-grigio-dato)">Procedimento</div>
+    <div class="pg-list" style="padding:0 22px 22px">
+      ${steps.map(function(st,idx){
+        return`<div class="pg-card">
+          <div class="pg-card-title">${idx+1}. ${st.text||''}</div>
+        </div>`;
+      }).join('')}
+    </div>
   </div>`;
 }
 
@@ -4984,7 +5154,7 @@ function renderSidebar(){
   // Schede, LAB. MichelinAI e Profilo scollegate dalla navigazione primaria
   // (architettura approvata) — codice delle due schermate non toccato.
   const isRicette=S.view==='home'||S.view==='recipes-all'||S.view==='ricetta-madre'||S.view==='ricetta-madre-v2'||S.view==='recipe'||S.view==='confronto'||S.view==='load'||S.view==='preview';
-  const isProduzione=S.view==='attive'||S.view==='produzione-guidata';
+  const isProduzione=S.view==='attive'||S.view==='produzione-guidata'||S.view==='sessione-operativa';
   const isLab=S.view==='lab-globale';
   return `<button class="new-btn" id="btn-new-recipe"><i class="ti ti-plus"></i> Nuova Scheda</button>
   <button class="load-btn ${S.view==='load'?'active':''}" id="btn-load-view"><i class="ti ti-upload"></i> Carica Scheda</button>
@@ -6496,7 +6666,7 @@ function renderBottomNav(){
   // (architettura approvata): il codice delle due schermate resta intatto,
   // solo scollegato da qui. Impostazioni si raggiunge dalla Home.
   const isRicette=S.view==='home'||S.view==='recipes-all'||S.view==='ricetta-madre'||S.view==='ricetta-madre-v2'||S.view==='recipe'||S.view==='confronto'||S.view==='load'||S.view==='preview';
-  const isProduzione=S.view==='attive'||S.view==='produzione-guidata';
+  const isProduzione=S.view==='attive'||S.view==='produzione-guidata'||S.view==='sessione-operativa';
   const isLab=S.view==='lab-globale';
   return `
     <button class="bnav-btn ${isProduzione?'active':''}" id="bnav-produzione"><i class="ti ti-tools-kitchen-2"></i>Produzione</button>
@@ -6602,6 +6772,7 @@ function render(){
   // Fase 1 — placeholder nuove view
   else if(S.view==='attive'){mainContent=renderAttive();}
   else if(S.view==='produzione-guidata'){mainContent=renderProduzioneGuidata();}
+  else if(S.view==='sessione-operativa'){mainContent=renderSessioneOperativa();}
   else if(S.view==='profilo'){mainContent=renderProfiloPlaceholder();}
   else if(S.view==='michelinai-globale'){mainContent=renderMichelinAIGlobalePlaceholder();}
   else if(S.view==='lab-globale'){mainContent=renderLabGlobale();}
