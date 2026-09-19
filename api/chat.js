@@ -315,6 +315,24 @@ export default async function handler(req, res) {
       return res.status(200).json(r);
     }
 
+    // Sprint Produzione — Micro-Step 10: lettura delle production_sessions
+    // persistenti per la Produzione Guidata. Sola lettura, nessuna azione
+    // generica di lettura esisteva per una tabella nuova (a differenza di
+    // 'update'/'delete', gia' generiche in scrittura) — stesso stile di
+    // loadConversions/loadFamilies. Colonne esplicite (mai select=*): non
+    // servono actual_yield_qty/actual_yield_unit per questa lista, ed
+    // evitare di doverle aggiungere qui in futuro se cambiano non e' un
+    // requisito di questo Micro-Step. Ordinata created_at ASC (coda
+    // operativa naturale); il client rifiltra comunque per sicurezza.
+    if (body.supabaseAction === 'loadProductionSessions') {
+      const r = await fetch(
+        SB + '/rest/v1/production_sessions?select=id,recipe_id,source_variant_id,status,snapshot_version,snapshot,target_finished_total,created_at,started_at,completed_at&order=created_at.asc',
+        { headers: SH_READ }
+      );
+      const sessions = await r.json();
+      return res.status(200).json({ sessions });
+    }
+
     if (body.supabaseAction === 'load') {
       const [r1, r2, r3, r4, r5] = await Promise.all([
         fetch(SB + '/rest/v1/recipes?select=*&order=created_at.asc', { headers: SH_READ }),

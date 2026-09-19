@@ -675,6 +675,22 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
 
 .prod-empty{padding:48px 22px;text-align:center;font-family:'Archivo',sans-serif;color:var(--dpop-grigio-dato);font-size:14px;}
 
+/* Sprint Produzione — Micro-Step 10: PRODUZIONE GUIDATA */
+.pg-tabs{display:flex;gap:6px;padding:0 22px 14px;flex-wrap:wrap;}
+.pg-tab{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--dpop-grigio-dato);background:none;border:1.5px solid var(--dpop-inchiostro-struttura);border-radius:999px;padding:7px 14px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+.pg-tab-active{background:var(--dpop-inchiostro-testo);color:var(--dpop-carta-1-scrivania);border-color:var(--dpop-inchiostro-testo);}
+.pg-list{display:flex;flex-direction:column;gap:12px;padding:0 22px 22px;}
+.pg-card{background:var(--white,#fff);border:1px solid var(--dpop-filetto-riga);border-radius:var(--r-md,10px);padding:16px;display:flex;flex-direction:column;gap:10px;}
+.pg-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+.pg-card-title{font-family:'Archivo',sans-serif;font-weight:600;font-size:15px;color:var(--dpop-inchiostro-testo);}
+.pg-card-variant{font-weight:400;color:var(--dpop-grigio-dato);}
+.pg-card-meta{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--dpop-grigio-dato);margin-top:2px;}
+.pg-card-body{display:flex;flex-direction:column;gap:2px;}
+.pg-card-target{font-size:13px;color:var(--dpop-inchiostro-testo);}
+.pg-card-total{font-size:13px;font-weight:600;color:var(--dpop-inchiostro-testo);}
+.pg-badge{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;padding:4px 10px;border-radius:999px;white-space:nowrap;}
+.pg-badge-pending{background:var(--dpop-carta-toccata,#eee);color:var(--dpop-inchiostro-testo);}
+
 .prod-staff-riga{display:flex;align-items:center;gap:10px;padding:12px 4px;min-height:44px;border-bottom:1px solid var(--dpop-filetto-riga);cursor:pointer;font-family:'Archivo',sans-serif;font-size:15px;color:var(--dpop-inchiostro-testo);-webkit-tap-highlight-color:transparent;}
 .prod-staff-riga input[type=checkbox]{width:18px;height:18px;cursor:pointer;flex-shrink:0;}
 
@@ -802,7 +818,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
 // STATE
 // ══════════════════════════════════════════════════════════
 const S = {
-  view: 'app-home',  // app-home | home | lab-list | prod-list | recipe | load | preview
+  view: 'app-home',  // app-home | home | lab-list | prod-list | recipe | load | preview | produzione-guidata
   // 'home' mantiene per ora il significato attuale (elenco Schede) — non rinominato
   // in questo Micro-Step: la pulizia dei nomi interni è rimandata al refactor
   // successivo delle tre pile indipendenti.
@@ -939,6 +955,14 @@ const S = {
   // conversioni di "Manda in Produzione".
   productionConversionFacts: {},
   pendingConversionPreflight: null, // {recipeId,variantId,portions,gpp,missing,value,error,loading,finalError}
+  // Sprint Produzione — Micro-Step 10: PRODUZIONE GUIDATA. Source of truth
+  // = production_sessions (+ relativo snapshot), caricata separatamente da
+  // loadFromSupabase(). Resta indipendente da S.recipes/validatedVariants/
+  // productionVariantId e dalla Produzione semplice (renderAttive/
+  // renderProdRecipe, invariate): una Sessione e' una fotografia congelata,
+  // mai una vista sul modello Ricetta corrente.
+  productionSessions: [],
+  produzioneGuidataTab: 'pending', // 'pending' | 'in_progress' | 'completed'
 };
 
 const UNITS = ['g','ml','kg','l','n','tbsp','tsp','cl'];
@@ -3362,6 +3386,129 @@ function renderMandaInProduzioneModal(){
   </div>`;
 }
 
+// ══════════════════════════════════════════════════════════
+// SPRINT PRODUZIONE — Micro-Step 10: PRODUZIONE GUIDATA (DA INIZIARE).
+// Rende visibili le production_sessions persistenti. Nessuna scrittura in
+// questo Micro-Step: solo lettura e presentazione. La Produzione semplice
+// (renderAttive/renderProdRecipe, subito sotto questo blocco) resta
+// completamente invariata e separata — vedi report per la scelta di
+// integrazione.
+// ══════════════════════════════════════════════════════════
+
+// Carica le production_sessions persistenti (tutti gli status: DA INIZIARE
+// e' l'unico tab operativo in questo Micro-Step, ma caricare anche gli
+// altri stati evita di dover ritoccare questa funzione quando IN
+// CORSO/COMPLETATE diventeranno operativi). Nessun child state caricato
+// qui (non necessario per questa lista). Mappa in camelCase, coerente con
+// il resto dell'app; ordina comunque created_at ASC lato client anche se
+// il server gia' ordina cosi', per non dipendere dall'ordine di risposta.
+async function loadProductionSessions(){
+  try{
+    const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'loadProductionSessions'})});
+    const data=await r.json();
+    if(!Array.isArray(data.sessions))return;
+    S.productionSessions=data.sessions.map(function(s){
+      return{
+        id:s.id,
+        recipeId:s.recipe_id!=null?s.recipe_id:null,
+        sourceVariantId:s.source_variant_id!=null?s.source_variant_id:null,
+        status:s.status,
+        snapshotVersion:s.snapshot_version,
+        snapshot:s.snapshot,
+        targetFinishedTotal:s.target_finished_total!=null?parseFloat(s.target_finished_total):null,
+        createdAt:s.created_at||null,
+        startedAt:s.started_at||null,
+        completedAt:s.completed_at||null,
+      };
+    }).sort(function(a,b){return new Date(a.createdAt)-new Date(b.createdAt);});
+    render();
+  }catch(e){console.error('Load production sessions error',e);}
+}
+
+// Punto di ingresso alla nuova schermata: naviga subito (stato eventualmente
+// vuoto/precedente) e ricarica le Sessioni in background — cosi' una
+// Sessione appena creata (flusso Manda in Produzione -> preflight ->
+// createProductionSession) compare senza hard reload, semplicemente
+// rientrando in questa schermata (soluzione minima scelta, vedi report).
+function goToProduzioneGuidata(){
+  S.view='produzione-guidata';
+  render();
+  loadProductionSessions();
+}
+function setProduzioneGuidataTab(tab){
+  S.produzioneGuidataTab=tab;
+  render();
+}
+
+// Helper puro: "3000" -> "3 kg finiti", "800" -> "800 g finiti".
+function formatFinishedTotalLabel(grams){
+  if(grams==null||isNaN(grams))return'';
+  if(grams>=1000){
+    return(Math.round(grams/10)/100)+' kg finiti';
+  }
+  return(Math.round(grams*100)/100)+' g finiti';
+}
+
+function renderPendingSessionCard(sess){
+  var snap=sess.snapshot||{};
+  var recipeInfo=snap.recipe||{};
+  var target=snap.target||{};
+  var recipeName=recipeInfo.recipeName||'Ricetta';
+  var variantName=recipeInfo.variantName||'';
+  var portions=target.targetPortions!=null?target.targetPortions:null;
+  var gpp=target.targetGramsPerPortion!=null?target.targetGramsPerPortion:null;
+  var targetLabel=(portions!=null&&gpp!=null)?(portions+' porzioni × '+gpp+' g'):'';
+  var totaleLabel=formatFinishedTotalLabel(sess.targetFinishedTotal);
+  var dataCreazione=sess.createdAt?new Date(sess.createdAt).toLocaleString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';
+  return`
+  <div class="pg-card">
+    <div class="pg-card-top">
+      <div>
+        <div class="pg-card-title">${recipeName}${variantName?` <span class="pg-card-variant">· ${variantName}</span>`:''}</div>
+        <div class="pg-card-meta">Creata il ${dataCreazione}</div>
+      </div>
+      <span class="pg-badge pg-badge-pending">Da iniziare</span>
+    </div>
+    <div class="pg-card-body">
+      ${targetLabel?`<div class="pg-card-target">${targetLabel}</div>`:''}
+      <div class="pg-card-total">${totaleLabel}</div>
+    </div>
+    <button class="btn btn-outline btn-sm" disabled title="Disponibile in un prossimo Micro-Step">Avvia produzione</button>
+  </div>`;
+}
+
+function renderProduzioneGuidata(){
+  var tab=S.produzioneGuidataTab||'pending';
+  var pending=(S.productionSessions||[]).filter(function(s){return s.status==='pending';});
+  // Difensivo: created_at ASC anche qui, indipendentemente da come e' gia'
+  // ordinato S.productionSessions.
+  pending=pending.slice().sort(function(a,b){return new Date(a.createdAt)-new Date(b.createdAt);});
+
+  var contenuto;
+  if(tab==='pending'){
+    contenuto=pending.length===0
+      ?'<div class="prod-empty">Nessuna produzione da iniziare.</div>'
+      :'<div class="pg-list">'+pending.map(renderPendingSessionCard).join('')+'</div>';
+  }else if(tab==='in_progress'){
+    contenuto='<div class="prod-empty">In arrivo in un prossimo Micro-Step.</div>';
+  }else{
+    contenuto='<div class="prod-empty">In arrivo in un prossimo Micro-Step.</div>';
+  }
+
+  return`<div class="prod-env">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div class="prod-title">Produzione Guidata</div>
+      <button class="btn btn-ghost btn-sm" onclick="S.view='attive';render()"><i class="ti ti-arrow-left"></i> Ricette attive</button>
+    </div>
+    <div class="pg-tabs">
+      <button class="pg-tab ${tab==='pending'?'pg-tab-active':''}" onclick="setProduzioneGuidataTab('pending')">Da iniziare</button>
+      <button class="pg-tab ${tab==='in_progress'?'pg-tab-active':''}" onclick="setProduzioneGuidataTab('in_progress')">In corso</button>
+      <button class="pg-tab ${tab==='completed'?'pg-tab-active':''}" onclick="setProduzioneGuidataTab('completed')">Completate</button>
+    </div>
+    ${contenuto}
+  </div>`;
+}
+
 function onVarPortions(recipeId,varId,val){
   upRec(recipeId,r=>{
     const vv=r.validatedVariants.find(v=>v.id===varId);if(!vv)return r;
@@ -4780,7 +4927,7 @@ function renderSidebar(){
   // Schede, LAB. MichelinAI e Profilo scollegate dalla navigazione primaria
   // (architettura approvata) — codice delle due schermate non toccato.
   const isRicette=S.view==='home'||S.view==='recipes-all'||S.view==='ricetta-madre'||S.view==='ricetta-madre-v2'||S.view==='recipe'||S.view==='confronto'||S.view==='load'||S.view==='preview';
-  const isProduzione=S.view==='attive';
+  const isProduzione=S.view==='attive'||S.view==='produzione-guidata';
   const isLab=S.view==='lab-globale';
   return `<button class="new-btn" id="btn-new-recipe"><i class="ti ti-plus"></i> Nuova Scheda</button>
   <button class="load-btn ${S.view==='load'?'active':''}" id="btn-load-view"><i class="ti ti-upload"></i> Carica Scheda</button>
@@ -6059,7 +6206,10 @@ function renderAttive(){
 
   if(totale===0){
     return `<div class="prod-env">
-      <div class="prod-title">Produzione</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div class="prod-title">Produzione</div>
+        <button class="btn btn-outline btn-sm" onclick="goToProduzioneGuidata()"><i class="ti ti-clipboard-list"></i> Produzione Guidata</button>
+      </div>
       <div class="prod-empty"><i class="ti ti-circle-check" style="font-size:28px;display:block;margin-bottom:10px"></i>Nessuna Ricetta attiva al momento.</div>
     </div>`;
   }
@@ -6075,7 +6225,10 @@ function renderAttive(){
   const categorie=Object.keys(perCategoria).sort((a,b)=>a.localeCompare(b));
 
   return `<div class="prod-env">
-    <div class="prod-title">Produzione</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div class="prod-title">Produzione</div>
+      <button class="btn btn-outline btn-sm" onclick="goToProduzioneGuidata()"><i class="ti ti-clipboard-list"></i> Produzione Guidata</button>
+    </div>
     <div class="prod-count">${totale} RICETT${totale===1?'A ATTIVA':'E ATTIVE'}</div>
     ${categorie.map(cat=>{
       const righe=perCategoria[cat];
@@ -6286,7 +6439,7 @@ function renderBottomNav(){
   // (architettura approvata): il codice delle due schermate resta intatto,
   // solo scollegato da qui. Impostazioni si raggiunge dalla Home.
   const isRicette=S.view==='home'||S.view==='recipes-all'||S.view==='ricetta-madre'||S.view==='ricetta-madre-v2'||S.view==='recipe'||S.view==='confronto'||S.view==='load'||S.view==='preview';
-  const isProduzione=S.view==='attive';
+  const isProduzione=S.view==='attive'||S.view==='produzione-guidata';
   const isLab=S.view==='lab-globale';
   return `
     <button class="bnav-btn ${isProduzione?'active':''}" id="bnav-produzione"><i class="ti ti-tools-kitchen-2"></i>Produzione</button>
@@ -6391,6 +6544,7 @@ function render(){
   }
   // Fase 1 — placeholder nuove view
   else if(S.view==='attive'){mainContent=renderAttive();}
+  else if(S.view==='produzione-guidata'){mainContent=renderProduzioneGuidata();}
   else if(S.view==='profilo'){mainContent=renderProfiloPlaceholder();}
   else if(S.view==='michelinai-globale'){mainContent=renderMichelinAIGlobalePlaceholder();}
   else if(S.view==='lab-globale'){mainContent=renderLabGlobale();}
