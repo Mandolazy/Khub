@@ -221,8 +221,9 @@ export default async function handler(req, res) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-5',
-          max_tokens: 3000,
+          model: 'claude-sonnet-5-5',
+          max_tokens: 16000,
+          output_config: { effort: 'medium' },
           system: M1_SYSTEM_PROMPT,
           messages: [{ role: 'user', content: userMessage }],
         }),
