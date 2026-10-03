@@ -955,6 +955,15 @@ const S = {
   // resolveKnownProductionConversionFact) — nessuna voce 'n' viene scritta
   // qui, per non mantenere due copie della stessa conoscenza.
   productionConversionFacts: {},
+  // Canonical Ingredient Identity (MS-CI2): catalogo canonico caricato da
+  // loadFromSupabase {id:{id,name,nameKey}} e conoscenza di conversione per
+  // identita' canonica {"canonicalId|fromUnit|toUnit":{id,factor,sourceType,
+  // sourceDetail,confirmedAt}} — UNIONE di fact con canonical_ingredient_id
+  // e fact storiche (canonical null) con ingredient_name === nameKey esatto.
+  // Copre anche 'n' (n->g). Letta SOLO per righe collegate a un canonico;
+  // le righe non collegate usano le cache per nome qui sopra, invariate.
+  canonicalIngredientsById: {},
+  canonicalConversionFacts: {},
   pendingConversionPreflight: null, // {recipeId,variantId,portions,gpp,missing,value,error,loading,finalError}
   // Sprint Produzione — Micro-Step 10: PRODUZIONE GUIDATA. Source of truth
   // = production_sessions (+ relativo snapshot), caricata separatamente da
@@ -1311,6 +1320,146 @@ function isBetterConversionFact(candidate,current){
   return new Date(candidate.confirmedAt)>new Date(current.confirmedAt);
 }
 
+// ══════════════════════════════════════════════════════════
+// CANONICAL INGREDIENT IDENTITY (MS-CI2) — dati e lookup, nessuna UI.
+// Riga di ricetta (ingredients.name = descrizione mostrata) ≠ identita'
+// canonica (canonical_ingredients). Una riga con canonicalIngredientId usa
+// la conoscenza del canonico; una riga senza usa il lookup per nome di
+// sempre (resolveKnownProductionConversionFact, invariato). Mai fuzzy,
+// mai alias, mai prima parola, mai AI: solo id o nome canonico ESATTO.
+// ══════════════════════════════════════════════════════════
+
+// Righe canonical_ingredients -> {id:{id,name,nameKey}}. nameKey arriva
+// dalla colonna generata lower(btrim(name)); normalizzata anche qui per
+// allinearla a normalizeIngredientName (stessa forma delle chiavi per nome).
+function buildCanonicalIngredientIndex(rows){
+  var byId={};
+  (Array.isArray(rows)?rows:[]).forEach(function(r){
+    if(!r||!r.id)return;
+    byId[r.id]={id:r.id,name:r.name!=null?r.name:'',nameKey:normalizeIngredientName(r.name_key!=null?r.name_key:r.name)};
+  });
+  return byId;
+}
+
+// Conoscenza di conversione per identita' canonica, dalle STESSE righe
+// ingredient_conversions gia' caricate. Per il canonico C conta l'UNIONE di:
+//  1. righe con canonical_ingredient_id === C.id;
+//  2. righe storiche con canonical_ingredient_id nullo e ingredient_name
+//     normalizzato === C.nameKey (nome canonico esatto, mai il nome della
+//     riga di ricetta).
+// Fact vincente per "C|fromUnit|toUnit" con la regola di sempre
+// (isBetterConversionFact: chef_confirmed > reference_data, poi la piu'
+// recente). Include anche 'n' (n->g). Nessuna riga copiata o modificata.
+function buildCanonicalConversionFacts(conversions,canonicalById){
+  var idByNameKey={};
+  Object.keys(canonicalById||{}).forEach(function(id){idByNameKey[canonicalById[id].nameKey]=id;});
+  var best={};
+  (Array.isArray(conversions)?conversions:[]).forEach(function(c){
+    if(!c)return;
+    var cid=c.canonical_ingredient_id?c.canonical_ingredient_id:idByNameKey[normalizeIngredientName(c.ingredient_name)];
+    if(!cid)return;
+    var key=cid+'|'+c.from_unit+'|'+c.to_unit;
+    var candidate={factor:c.factor,confirmedAt:c.confirmed_at,id:c.id,sourceType:c.source_type,sourceDetail:c.source_detail!=null?c.source_detail:null};
+    if(isBetterConversionFact(candidate,best[key]))best[key]=candidate;
+  });
+  var out={};
+  Object.keys(best).forEach(function(key){
+    var w=best[key];
+    out[key]={id:w.id!=null?w.id:null,factor:parseFloat(w.factor),sourceType:w.sourceType!=null?w.sourceType:null,sourceDetail:w.sourceDetail,confirmedAt:w.confirmedAt};
+  });
+  return out;
+}
+
+// Fact gia' nota per riportare a grammi una riga COLLEGATA al canonico C:
+// conoscenza persistita del canonico (chef_confirmed > reference_data, poi
+// la piu' recente); per 'n', in mancanza di fact persistite, il peso medio
+// di riferimento scritto nel codice per il nome canonico esatto vale come
+// reference_data (come gia' fa resolveKnownProductionConversionFact per
+// nome). null -> si chiedera' allo chef. Stessa forma di ritorno della
+// funzione per nome. Nessuna g=ml.
+function resolveKnownCanonicalConversionFact(canonicalId,unit){
+  if(sessionScalingUnitFamily(unit)==='mass')return null;
+  var askUnit=chooseConversionAskUnit(unit);
+  var known=S.canonicalConversionFacts[canonicalId+'|'+askUnit+'|g'];
+  if(known){
+    return{id:known.id,fromUnit:askUnit,toUnit:'g',factor:known.factor,sourceType:known.sourceType,sourceDetail:known.sourceDetail!=null?known.sourceDetail:null};
+  }
+  // Solo 'n': il peso medio di riferimento (seed) vive in S.unitWeights,
+  // l'unica tabella di reference data n->g; si legge SOLO per il nome
+  // canonico esatto (C.nameKey), mai per il nome della riga. Ogni fact
+  // persistita o confermata per quel nome e' gia' nell'unione canonica
+  // sopra (load + rememberCanonicalConversionFact), quindi qui resta solo
+  // il seed. Canonico non caricato (dangling, A6) -> null: si chiede.
+  if(askUnit==='n'){
+    var c=S.canonicalIngredientsById[canonicalId];
+    if(c)return resolveKnownProductionConversionFact(c.nameKey,'n');
+  }
+  return null;
+}
+
+// Unico punto di dispatch del lookup: riga collegata -> canonico; riga non
+// collegata -> lookup per nome di sempre.
+function resolveKnownConversionFactForIngredient(ing){
+  if(ing&&ing.canonicalIngredientId)return resolveKnownCanonicalConversionFact(ing.canonicalIngredientId,ing.unit);
+  return resolveKnownProductionConversionFact(normalizeIngredientName(ing&&ing.name),ing&&ing.unit);
+}
+
+// Peso medio (g per 1 pezzo) gia' noto per una riga, per i cambi unita'
+// n->g di LAB/Ricetta attiva: stessa gerarchia del preflight Produzione.
+function knownUnitWeightForIngredient(ing){
+  if(ing&&ing.canonicalIngredientId){
+    var f=resolveKnownCanonicalConversionFact(ing.canonicalIngredientId,'n');
+    return f?f.factor:null;
+  }
+  var w=S.unitWeights[normalizeIngredientName(ing&&ing.name)];
+  return w!=null?w:null;
+}
+
+// Identita' con cui SCRIVERE una nuova conversione confermata dallo chef:
+// riga collegata a un canonico caricato -> {canonicalIngredientId, nome
+// canonico esatto}; riga non collegata -> il nome della riga, come oggi.
+// Riga collegata a un canonico NON caricato/risolvibile (A6) -> null: il
+// chiamante blocca la scrittura. Mai fallback silenzioso al nome della riga.
+function conversionWriteIdentity(ingredientName,canonicalIngredientId){
+  if(canonicalIngredientId){
+    var c=S.canonicalIngredientsById[canonicalIngredientId];
+    return c?{ingredientName:c.nameKey,canonicalIngredientId:c.id}:null;
+  }
+  return{ingredientName:normalizeIngredientName(ingredientName),canonicalIngredientId:null};
+}
+var CANONICAL_UNRESOLVED_MSG='Ingrediente collegato non trovato nel catalogo. Ricarica la pagina e riprova.';
+
+// Dopo una conferma chef salvata: aggiorna le cache runtime esattamente come
+// le ricostruirebbe un reload (per nome sempre; per canonico se collegata).
+function rememberConfirmedConversion(conv,canonicalIngredientId){
+  var fact={id:conv.id,factor:conv.factor,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null,confirmedAt:conv.confirmed_at};
+  if(conv.from_unit==='n'&&conv.to_unit==='g'){
+    S.unitWeights[conv.ingredient_name]=conv.factor;
+    S.unitWeightFacts[conv.ingredient_name]={id:fact.id,sourceType:fact.sourceType,sourceDetail:fact.sourceDetail};
+  }else{
+    S.productionConversionFacts[conv.ingredient_name+'|'+conv.from_unit+'|'+conv.to_unit]=fact;
+  }
+  rememberCanonicalConversionFact(conv,canonicalIngredientId);
+}
+
+// Stessa regola di buildCanonicalConversionFacts applicata a una fact appena
+// confermata: appartiene al canonico indicato, oppure (canonical null) al
+// canonico con name_key === ingredient_name esatto. Cosi' la cache runtime
+// coincide con quella che ricostruirebbe un reload.
+function rememberCanonicalConversionFact(conv,canonicalIngredientId){
+  var cid=canonicalIngredientId||null;
+  if(!cid){
+    Object.keys(S.canonicalIngredientsById).some(function(id){
+      if(S.canonicalIngredientsById[id].nameKey===conv.ingredient_name){cid=id;return true;}
+      return false;
+    });
+  }
+  if(!cid)return;
+  var fact={id:conv.id,factor:conv.factor,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null,confirmedAt:conv.confirmed_at};
+  var key=cid+'|'+conv.from_unit+'|'+conv.to_unit;
+  if(isBetterConversionFact(fact,S.canonicalConversionFacts[key]))S.canonicalConversionFacts[key]=fact;
+}
+
 let _saveTimer={};
 let _saveIndicatorTimer=null;
 function checkOnboarding(){
@@ -1451,6 +1600,8 @@ async function loadFromSupabase(){
     const data=await res.json();
     if(!data.recipes||!Array.isArray(data.recipes))return;
     _knownIngredientIdsByVariant=buildKnownIngredientIds(data.ingredients);
+    // MS-CI2: catalogo canonico, arrivato nella stessa load tutto-o-niente.
+    S.canonicalIngredientsById=buildCanonicalIngredientIndex(data.canonical_ingredients);
     // PSL: mapping L2 (Ricetta-scoped) — riusato sia per le Bozze in LAB sia
     // per le Ricette validate/attive, perche' L2 segue la stessa variant.id
     // lungo tutto il lifecycle (D3).
@@ -1474,6 +1625,7 @@ async function loadFromSupabase(){
         ingredients:(data.ingredients||[]).filter(i=>i.variant_id===v.id).sort((a,b)=>a.sort_order-b.sort_order).map(i=>({
           id:i.id,name:i.name,qty:parseFloat(i.qty)||0,unit:i.unit||'g',
           isSubRecipe:i.is_sub_recipe||false,subRecipeId:i.sub_recipe_id||null,
+          canonicalIngredientId:i.canonical_ingredient_id||null, // MS-CI2: identita' canonica (nullable)
           // Bugfix rese: estimated_yield_pct/measured_yield_pct sono numeric
           // Postgres, restituite da PostgREST come stringa — normalizzate
           // qui, alla frontiera di caricamento, esattamente come qty sopra
@@ -1503,6 +1655,7 @@ async function loadFromSupabase(){
         portionUnit:v.portion_unit||'g',           // Step 1: unità porzione
         ingredients:(data.ingredients||[]).filter(i=>i.variant_id===v.id).sort((a,b)=>a.sort_order-b.sort_order).map(i=>({
           id:i.id,name:i.name,qty:parseFloat(i.qty)||0,unit:i.unit||'g',
+          canonicalIngredientId:i.canonical_ingredient_id||null, // MS-CI2: identita' canonica (nullable)
           // Bugfix rese: stessa normalizzazione del mapping Bozze LAB sopra
           // (parseFloat, mai una seconda logica) — vedi commento lì.
           estimatedYieldPct:i.estimated_yield_pct!=null?parseFloat(i.estimated_yield_pct):null, // Step 1: resa stimata
@@ -1604,6 +1757,9 @@ async function loadFromSupabase(){
           var w=latestByKey[key];
           S.productionConversionFacts[key]={id:w.id!=null?w.id:null,factor:parseFloat(w.factor),sourceType:w.sourceType!=null?w.sourceType:null,sourceDetail:w.sourceDetail!=null?w.sourceDetail:null,confirmedAt:w.confirmedAt};
         });
+        // MS-CI2: stesse righe, indicizzate per identita' canonica (cache per
+        // nome sopra invariate: le righe non collegate le usano come prima).
+        S.canonicalConversionFacts=buildCanonicalConversionFacts(cd.conversions,S.canonicalIngredientsById);
       }
     }catch(e){console.error('Load conversions error',e);}
   }catch(e){console.error('Load error',e);}
@@ -1721,6 +1877,7 @@ async function saveToSupabase(recipe){
           id:ing.id&&ing.id.length>4?ing.id:('li'+Date.now()+Math.random().toString(36).slice(2,7)),variant_id:v.id,
           name:ing.name,qty:parseFloat(ing.qty)||0,unit:ing.unit||'g',
           is_sub_recipe:ing.isSubRecipe||false,sub_recipe_id:ing.subRecipeId||null,
+          canonical_ingredient_id:ing.canonicalIngredientId||null, // MS-CI2
           sort_order:idx,
           estimated_yield_pct:ing.estimatedYieldPct!==undefined&&ing.estimatedYieldPct!==null?ing.estimatedYieldPct:null,
           measured_yield_pct:ing.measuredYieldPct!==undefined&&ing.measuredYieldPct!==null?ing.measuredYieldPct:null,
@@ -1752,6 +1909,7 @@ async function saveToSupabase(recipe){
           variant_id:vv.id,
           name:ing.name,qty:parseFloat(ing.qty)||0,unit:ing.unit||'g',
           is_sub_recipe:false,sub_recipe_id:null,
+          canonical_ingredient_id:ing.canonicalIngredientId||null, // MS-CI2
           sort_order:idx,
           estimated_yield_pct:ing.estimatedYieldPct!==undefined&&ing.estimatedYieldPct!==null?ing.estimatedYieldPct:null,
           measured_yield_pct:ing.measuredYieldPct!==undefined&&ing.measuredYieldPct!==null?ing.measuredYieldPct:null,
@@ -1970,12 +2128,12 @@ async function extractRecipe(){
       toast('Errore nel parsing della ricetta','ti-alert-circle');return;
     }
     parsed.ingredients=(parsed.ingredients||[]).map((i,idx)=>({
-      ...i,id:uid(),isSubRecipe:false,subRecipeId:null,
+      ...i,id:uid(),isSubRecipe:false,subRecipeId:null,canonicalIngredientId:null,
       qty:parseFloat(i.qty)||0,unit:UNITS.includes(i.unit)?i.unit:'g'
     }));
     parsed.steps=parsed.steps||[];
     parsed.subRecipes=(parsed.subRecipes||[]).map(sr=>({
-      ...sr,ingredients:(sr.ingredients||[]).map(i=>({...i,id:uid(),qty:parseFloat(i.qty)||0,unit:UNITS.includes(i.unit)?i.unit:'g'}))
+      ...sr,ingredients:(sr.ingredients||[]).map(i=>({...i,id:uid(),canonicalIngredientId:null,qty:parseFloat(i.qty)||0,unit:UNITS.includes(i.unit)?i.unit:'g'}))
     }));
     S.loadPreview=parsed;
     S.view='preview';
@@ -2498,8 +2656,7 @@ function onIngUnit(recipeId,ingId,val){
   var recipe=R(recipeId);var v=curLab(recipe);
   var ing=v&&v.ingredients.find(function(i){return i.id===ingId;});
   if(ing&&ing.unit==='n'&&val==='g'){
-    var name=normalizeIngredientName(ing.name);
-    var pesoNoto=S.unitWeights[name];
+    var pesoNoto=knownUnitWeightForIngredient(ing); // MS-CI2: canonico se collegata, nome altrimenti
     if(pesoNoto){
       // Peso noto: converti subito
       upLab(recipeId,function(v){
@@ -2510,7 +2667,7 @@ function onIngUnit(recipeId,ingId,val){
       });
     } else {
       // Peso non noto: mostra modale per chiedere il peso medio
-      S.pendingUnitConversion={recipeId:recipeId,ingId:ingId,ingName:ing.name,qty:ing.qty,newUnit:'g'};
+      S.pendingUnitConversion={recipeId:recipeId,ingId:ingId,ingName:ing.name,canonicalIngredientId:ing.canonicalIngredientId||null,qty:ing.qty,newUnit:'g'};
       render();
     }
     return;
@@ -2532,13 +2689,27 @@ function confirmUnitConversion(pesoMedio){
   if(!p)return;
   var peso=parseFloat(pesoMedio);
   if(!peso||isNaN(peso)){S.pendingUnitConversion=null;render();return;}
-  var normName=normalizeIngredientName(p.ingName);
   // Cache/runtime immediata (invariato) + persistenza come nuova fact
   // storicizzata in ingredient_conversions (Micro-Step 2): il chef ha
   // appena confermato questo dato esplicitamente, quindi source_type e'
-  // sempre 'chef_confirmed' in questo flusso.
-  S.unitWeights[normName]=peso;
-  saveIngredientConversion(normName,'n','g',peso,'chef_confirmed');
+  // sempre 'chef_confirmed' in questo flusso. MS-CI2: riga collegata a un
+  // canonico -> la fact appartiene al canonico (nome canonico + id).
+  var ident=conversionWriteIdentity(p.ingName,p.canonicalIngredientId);
+  if(!ident){
+    // A6: canonico non risolvibile -> nessuna conversione salvata, riga invariata.
+    S.pendingUnitConversion=null;
+    toast(CANONICAL_UNRESOLVED_MSG,'ti-alert-circle');
+    render();return;
+  }
+  var normName=ident.ingredientName;
+  var runtimeConv={id:null,ingredient_name:normName,from_unit:'n',to_unit:'g',factor:peso,source_type:'chef_confirmed',source_detail:null,confirmed_at:new Date().toISOString()};
+  if(ident.canonicalIngredientId){
+    rememberConfirmedConversion(runtimeConv,ident.canonicalIngredientId);
+  }else{
+    S.unitWeights[normName]=peso;
+    rememberCanonicalConversionFact(runtimeConv,null);
+  }
+  saveIngredientConversion(normName,'n','g',peso,'chef_confirmed',null,ident.canonicalIngredientId);
   if(p.varId){
     // Produzione: aggiorna variante validata
     upRec(p.recipeId,r=>({...r,validatedVariants:r.validatedVariants.map(v=>{
@@ -2580,7 +2751,7 @@ function cancelUnitConversion(){
 // es. confirmUnitConversion), necessario per il nuovo preflight conversioni
 // che deve sapere se il salvataggio e' riuscito prima di procedere e deve
 // conoscere l'id/sourceType reali per congelarli nello snapshot.
-async function saveIngredientConversion(ingredientName,fromUnit,toUnit,factor,sourceType,sourceDetail){
+async function saveIngredientConversion(ingredientName,fromUnit,toUnit,factor,sourceType,sourceDetail,canonicalIngredientId){
   var conversion={
     id:'ic'+uid(),
     ingredient_name:ingredientName,
@@ -2591,6 +2762,10 @@ async function saveIngredientConversion(ingredientName,fromUnit,toUnit,factor,so
     source_detail:sourceDetail||null,
     confirmed_at:new Date().toISOString(),
   };
+  // MS-CI2: fact di un canonico -> ingredient_name e' gia' il nome canonico
+  // esatto (vedi conversionWriteIdentity). Riga non collegata: payload
+  // identico a prima (nessuna colonna in piu').
+  if(canonicalIngredientId)conversion.canonical_ingredient_id=canonicalIngredientId;
   try{
     const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'saveConversion',conversion:conversion})});
     const data=await r.json().catch(function(){return null;});
@@ -2898,6 +3073,8 @@ function computeSessionScaling(input){
       estimatedYieldPct:yieldPct,
       isSubRecipe:ing.isSubRecipe===true,
       subRecipeId:ing.subRecipeId!=null?ing.subRecipeId:null,
+      canonicalIngredientId:ing.canonicalIngredientId!=null?ing.canonicalIngredientId:null, // MS-CI2
+      canonicalIngredientName:ing.canonicalIngredientName!=null?ing.canonicalIngredientName:null,
       conversionFactorToBase:conv.conversionFactorToBase,
       conversionOrigin:conv.conversionOrigin,
       conversionSourceType:conv.conversionSourceType,
@@ -2924,6 +3101,8 @@ function computeSessionScaling(input){
       estimatedYieldPct:x.estimatedYieldPct,
       isSubRecipe:x.isSubRecipe,
       subRecipeId:x.subRecipeId,
+      canonicalIngredientId:x.canonicalIngredientId,
+      canonicalIngredientName:x.canonicalIngredientName,
       conversionFactorToBase:x.conversionFactorToBase,
       conversionOrigin:x.conversionOrigin,
       conversionSourceType:x.conversionSourceType,
@@ -2990,6 +3169,11 @@ function buildSessionSnapshotV1(meta,computed){
         estimatedYieldPct:ing.estimatedYieldPct,
         isSubRecipe:ing.isSubRecipe,
         subRecipeId:ing.subRecipeId,
+        // MS-CI2 (additivo, snapshotVersion resta 1): identita' canonica e nome
+        // canonico CONGELATI al momento della Sessione; null se non collegata.
+        // Snapshot V1 precedenti senza questi campi restano validi.
+        canonicalIngredientId:ing.canonicalIngredientId!=null?ing.canonicalIngredientId:null,
+        canonicalIngredientName:ing.canonicalIngredientName!=null?ing.canonicalIngredientName:null,
         conversionFactorToBase:ing.conversionFactorToBase,
         conversionOrigin:ing.conversionOrigin,
         conversionSourceType:ing.conversionSourceType,
@@ -3246,8 +3430,11 @@ function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsP
         estimatedYieldPct:ing.estimatedYieldPct!=null?ing.estimatedYieldPct:null,
         isSubRecipe:ing.isSubRecipe===true,
         subRecipeId:ing.subRecipeId!=null?ing.subRecipeId:null,
+        // MS-CI2: identita' canonica della riga (null se non collegata).
+        canonicalIngredientId:ing.canonicalIngredientId||null,
+        canonicalIngredientName:(ing.canonicalIngredientId&&S.canonicalIngredientsById[ing.canonicalIngredientId])?S.canonicalIngredientsById[ing.canonicalIngredientId].name:null,
       };
-      var fact=resolveKnownProductionConversionFact(normalizeIngredientName(ing.name),ing.unit);
+      var fact=resolveKnownConversionFactForIngredient(ing);
       if(fact)mapped.conversionFact=fact;
       return mapped;
     }),
@@ -3278,6 +3465,7 @@ function findMissingProductionConversions(preparedInput){
       missing.push({
         itemKey:ing.itemKey!=null?ing.itemKey:null,
         ingredientName:ing.name||'',
+        canonicalIngredientId:ing.canonicalIngredientId||null, // MS-CI2: la conferma appartiene al canonico
         currentUnit:ing.unit,
         requiredTargetUnit:'g',
       });
@@ -3390,11 +3578,21 @@ async function confirmConversionPreflightStep(rawValue){
   }
   pf.value=valStr;
 
+  // MS-CI2: riga collegata a un canonico -> la fact appartiene al canonico
+  // (ingredient_name = nome canonico esatto + canonical_ingredient_id);
+  // riga non collegata -> nome della riga, come prima. Canonico non
+  // risolvibile (A6) -> nessun salvataggio, passaggio bloccato con errore.
+  var ident=conversionWriteIdentity(current.ingredientName,current.canonicalIngredientId);
+  if(!ident){
+    pf.error=CANONICAL_UNRESOLVED_MSG;
+    render();return;
+  }
+
   pf.loading=true;pf.error=null;render();
 
-  var normName=normalizeIngredientName(current.ingredientName);
+  var normName=ident.ingredientName;
   var askUnit=chooseConversionAskUnit(current.currentUnit);
-  var conv=await saveIngredientConversion(normName,askUnit,'g',factor,'chef_confirmed');
+  var conv=await saveIngredientConversion(normName,askUnit,'g',factor,'chef_confirmed',null,ident.canonicalIngredientId);
   if(!conv){
     // Errore di persistenza: non si procede alla conversione successiva,
     // nessuna Sessione viene creata, il passaggio corrente resta attivo.
@@ -3413,14 +3611,9 @@ async function confirmConversionPreflightStep(rawValue){
   // Micro-Step 2/9: la rendiamo visibile anche lì, così il vecchio modal
   // non la richiede più nella stessa sessione applicativa). Per qualunque
   // altra unità (oggi solo volume->g) l'unica fonte resta
-  // S.productionConversionFacts.
-  if(askUnit==='n'){
-    S.unitWeights[normName]=conv.factor;
-    S.unitWeightFacts[normName]={id:conv.id,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null};
-  }else{
-    var key=normName+'|'+askUnit+'|g';
-    S.productionConversionFacts[key]={id:conv.id,factor:conv.factor,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null,confirmedAt:conv.confirmed_at};
-  }
+  // S.productionConversionFacts. MS-CI2: per una riga collegata anche
+  // S.canonicalConversionFacts (stesse cache che ricostruirebbe un reload).
+  rememberConfirmedConversion(conv,ident.canonicalIngredientId);
 
   var recipe=R(pf.recipeId);
   var vv=recipe&&recipe.validatedVariants.find(function(v){return v.id===pf.variantId;});
@@ -3937,8 +4130,7 @@ function onVarIngUnit(recipeId,varId,ingId,val){
   if(!ing)return;
   // Caso speciale: n → g con peso medio
   if(ing.unit==='n'&&val==='g'){
-    const name=normalizeIngredientName(ing.name);
-    const pesoNoto=S.unitWeights[name];
+    const pesoNoto=knownUnitWeightForIngredient(ing); // MS-CI2: canonico se collegata, nome altrimenti
     if(pesoNoto){
       upRec(recipeId,r=>({...r,validatedVariants:r.validatedVariants.map(v=>{
         if(v.id!==varId)return v;
@@ -3948,7 +4140,7 @@ function onVarIngUnit(recipeId,varId,ingId,val){
       })}));
       saveToSupabase(R(recipeId));render();
     } else {
-      S.pendingUnitConversion={recipeId,ingId,ingName:ing.name,qty:ing.qty,newUnit:'g',varId};
+      S.pendingUnitConversion={recipeId,ingId,ingName:ing.name,canonicalIngredientId:ing.canonicalIngredientId||null,qty:ing.qty,newUnit:'g',varId};
       render();
     }
     return;

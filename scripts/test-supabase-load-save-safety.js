@@ -151,6 +151,7 @@ function extractFunction(startMarker) {
 const CLIENT_SRC = [
   'function uid()', 'function normalizeIngredientName(name)', 'function conversionFactSourcePriority(sourceType)',
   'function isBetterConversionFact(candidate,current)', 'function buildKnownIngredientIds(ingredientRows)',
+  'function buildCanonicalIngredientIndex(rows)', 'function buildCanonicalConversionFacts(conversions,canonicalById)',
   'function computeIngredientDeletions(knownByVariant,currentByVariant)',
   'function updateKnownIngredientIds(knownByVariant,currentByVariant,deleted)', 'function firmaContenutoBozza(v)',
   'async function loadFromSupabase()', 'function parseSteps(raw)', 'function getStructuredSteps(legacySteps,stepsV2)',

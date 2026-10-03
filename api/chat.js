@@ -361,14 +361,20 @@ export default async function handler(req, res) {
       // Tutte paginate (sbSelectAll): se anche una sola pagina fallisce la
       // load fallisce per intero — il client non riceve mai uno stato
       // parziale che un save successivo potrebbe trattare come completo.
-      const [recipes, variants, ingredients, l2_items, l3_items] = await Promise.all([
+      // canonical_ingredients sta nella stessa load (stesso tutto-o-niente):
+      // una riga con canonical_ingredient_id non arriva mai al client senza
+      // il catalogo canonico che serve a risolverla.
+      const [recipes, variants, ingredients, l2_items, l3_items, canonical_ingredients] = await Promise.all([
         sbSelectAll('recipes?select=*&order=created_at.asc,id.asc'),
         sbSelectAll('variants?select=*&order=created_at.asc,id.asc'),
         sbSelectAll('ingredients?select=*&order=sort_order.asc,id.asc'),
         sbSelectAll('l2_items?select=*&order=created_at.asc,id.asc'),
-        sbSelectAll('l3_items?select=*&order=created_at.asc,id.asc')
+        sbSelectAll('l3_items?select=*&order=created_at.asc,id.asc'),
+        sbSelectAll('canonical_ingredients?select=id,name,name_key&order=created_at.asc,id.asc')
       ]);
-      return res.status(200).json({ recipes, variants, ingredients, l2_items, l3_items });
+      const payload = { recipes, variants, ingredients, l2_items, l3_items };
+      payload.canonical_ingredients = canonical_ingredients;
+      return res.status(200).json(payload);
     }
 
     if (body.supabaseAction === 'save') {
