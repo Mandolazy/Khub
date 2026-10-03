@@ -1916,7 +1916,7 @@ async function extractRecipe(){
       toast('Inserisci contenuto da importare','ti-alert-circle');return;
     }
 
-    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:2000,messages})});
+    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-5-5',max_tokens:8000,output_config:{effort:'low'},messages})});
     const data=await res.json();
     const text=(data.content||[]).map(c=>c.text||'').join('');
     const clean=text.replace(/```json|```/g,'').trim();
@@ -3945,7 +3945,7 @@ async function analyzeYields(recipeId){
 
   try{
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({model:'claude-sonnet-4-5',max_tokens:1200,
+      body:JSON.stringify({model:'claude-sonnet-5-5',max_tokens:8000,output_config:{effort:'low'},
         messages:[{role:'user',content:prompt}]})});
     if(!res.ok)throw new Error('http_'+res.status);
     const data=await res.json();
@@ -5061,7 +5061,7 @@ async function riprovaSalvataggioM2(recipeId){
 function voiceToIngredients(recipeId){
   var text=S.pendingVoiceText[recipeId];if(!text)return;
   fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:400,
+    body:JSON.stringify({model:"claude-sonnet-5-5",max_tokens:4000,output_config:{effort:"low"},
       messages:[{role:"user",content:"Dal seguente testo estrai gli ingredienti. Rispondi SOLO con JSON array: [{\"name\":\"nome\",\"qty\":100,\"unit\":\"g\"}]. Testo: "+text}]})}
   ).then(function(r){return r.json();}).then(function(data){
     var t=(data.content||[]).map(function(c){return c.text||"";}).join("").replace(/```json|```/g,"").trim();
@@ -5078,7 +5078,7 @@ function voiceToIngredients(recipeId){
 function voiceToSteps(recipeId){
   var text=S.pendingVoiceText[recipeId];if(!text)return;
   fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({model:"claude-sonnet-4-5",max_tokens:400,
+    body:JSON.stringify({model:"claude-sonnet-5-5",max_tokens:4000,output_config:{effort:"low"},
       messages:[{role:"user",content:"Dal seguente testo estrai i passi del procedimento. Rispondi SOLO con JSON array di stringhe: [\"passo 1\",\"passo 2\"]. Testo: "+text}]})}
   ).then(function(r){return r.json();}).then(function(data){
     var t=(data.content||[]).map(function(c){return c.text||"";}).join("").replace(/```json|```/g,"").trim();

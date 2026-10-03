@@ -317,7 +317,7 @@ console.log('F. non regressione M1 (controllo leggero e ridondante — la suite 
 test('M1_SYSTEM_PROMPT e branch mode==="m1" restano presenti e invariati nella forma', () => {
   assert.match(chat, /const M1_SYSTEM_PROMPT = `/);
   assert.match(chat, /if \(body\.mode === 'm1'\)/);
-  assert.match(chat, /model: 'claude-sonnet-4-5',\s*\n\s*max_tokens: 3000,\s*\n\s*system: M1_SYSTEM_PROMPT/);
+  assert.match(chat, /model: 'claude-sonnet-5-5',\s*\n\s*max_tokens: 16000,\s*\n\s*output_config: \{ effort: 'medium' \},\s*\n\s*system: M1_SYSTEM_PROMPT/);
 });
 
 test('buildM1UserMessage resta invariata (stessa firma, stesso corpo minimo atteso)', () => {
