@@ -258,6 +258,31 @@ export default async function handler(req, res) {
       return { ok: true };
     }
 
+    // Lettura globale paginata. Supabase/PostgREST restituisce al massimo
+    // "Max rows" righe per richiesta (default 1000) e tronca in silenzio:
+    // una lettura senza paginazione puo' perdere righe senza alcun errore.
+    // Legge a pagine fino a una pagina vuota (unico segnale di fine valido
+    // anche se Max rows fosse < SB_PAGE_SIZE) e fallisce esplicitamente se
+    // una pagina non arriva: mai un risultato parziale. `path` e'
+    // 'tabella?query' e deve avere un ordinamento stabile (id come ultimo
+    // criterio) per non saltare o duplicare righe tra una pagina e l'altra.
+    const SB_PAGE_SIZE = 1000;
+    async function sbSelectAll(path) {
+      const table = path.split('?')[0];
+      const rows = [];
+      for (;;) {
+        const r = await fetch(SB + '/rest/v1/' + path + '&limit=' + SB_PAGE_SIZE + '&offset=' + rows.length, { headers: SH_READ });
+        if (!r.ok) {
+          const detail = await r.text().catch(() => '');
+          throw new Error('Supabase read failed on ' + table + ' (' + r.status + '): ' + detail);
+        }
+        const page = await r.json();
+        if (!Array.isArray(page)) throw new Error('Supabase read failed on ' + table + ': risposta non valida');
+        if (page.length === 0) return rows;
+        for (const row of page) rows.push(row);
+      }
+    }
+
     if (body.fetchUrl) {
       const pageRes = await fetch(body.fetchUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html', 'Accept-Language': 'it-IT,it;q=0.9' }
@@ -268,11 +293,13 @@ export default async function handler(req, res) {
 
 
     if (body.supabaseAction === 'loadFamilies') {
-      const [r1, r2] = await Promise.all([
-        fetch(SB + '/rest/v1/families?select=*&order=name.asc', { headers: SH_READ }),
-        fetch(SB + '/rest/v1/variant_families?select=*', { headers: SH_READ })
+      // Paginata: variant_families cresce con le varianti e il client la
+      // riusa per riscrivere le famiglie di una variante (saveVariantFamilies
+      // cancella e reinserisce): una lettura troncata le perderebbe.
+      const [families, variantFamilies] = await Promise.all([
+        sbSelectAll('families?select=*&order=name.asc,id.asc'),
+        sbSelectAll('variant_families?select=*&order=variant_id.asc,family_id.asc')
       ]);
-      const [families, variantFamilies] = await Promise.all([r1.json(), r2.json()]);
       return res.status(200).json({ families, variantFamilies });
     }
 
@@ -300,8 +327,7 @@ export default async function handler(req, res) {
     // nessuna logica di "fact piu' recente" qui: la selezione della fact
     // corrente resta lato client (stesso stile di loadFamilies/saveFamily).
     if (body.supabaseAction === 'loadConversions') {
-      const r = await fetch(SB + '/rest/v1/ingredient_conversions?select=*&order=confirmed_at.asc', { headers: SH_READ });
-      const conversions = await r.json();
+      const conversions = await sbSelectAll('ingredient_conversions?select=*&order=confirmed_at.asc,id.asc');
       return res.status(200).json({ conversions });
     }
 
@@ -325,23 +351,23 @@ export default async function handler(req, res) {
     // requisito di questo Micro-Step. Ordinata created_at ASC (coda
     // operativa naturale); il client rifiltra comunque per sicurezza.
     if (body.supabaseAction === 'loadProductionSessions') {
-      const r = await fetch(
-        SB + '/rest/v1/production_sessions?select=id,recipe_id,source_variant_id,status,snapshot_version,snapshot,target_finished_total,created_at,started_at,completed_at&order=created_at.asc',
-        { headers: SH_READ }
+      const sessions = await sbSelectAll(
+        'production_sessions?select=id,recipe_id,source_variant_id,status,snapshot_version,snapshot,target_finished_total,created_at,started_at,completed_at&order=created_at.asc,id.asc'
       );
-      const sessions = await r.json();
       return res.status(200).json({ sessions });
     }
 
     if (body.supabaseAction === 'load') {
-      const [r1, r2, r3, r4, r5] = await Promise.all([
-        fetch(SB + '/rest/v1/recipes?select=*&order=created_at.asc', { headers: SH_READ }),
-        fetch(SB + '/rest/v1/variants?select=*&order=created_at.asc', { headers: SH_READ }),
-        fetch(SB + '/rest/v1/ingredients?select=*&order=sort_order.asc', { headers: SH_READ }),
-        fetch(SB + '/rest/v1/l2_items?select=*&order=created_at.asc', { headers: SH_READ }),
-        fetch(SB + '/rest/v1/l3_items?select=*&order=created_at.asc', { headers: SH_READ })
+      // Tutte paginate (sbSelectAll): se anche una sola pagina fallisce la
+      // load fallisce per intero — il client non riceve mai uno stato
+      // parziale che un save successivo potrebbe trattare come completo.
+      const [recipes, variants, ingredients, l2_items, l3_items] = await Promise.all([
+        sbSelectAll('recipes?select=*&order=created_at.asc,id.asc'),
+        sbSelectAll('variants?select=*&order=created_at.asc,id.asc'),
+        sbSelectAll('ingredients?select=*&order=sort_order.asc,id.asc'),
+        sbSelectAll('l2_items?select=*&order=created_at.asc,id.asc'),
+        sbSelectAll('l3_items?select=*&order=created_at.asc,id.asc')
       ]);
-      const [recipes, variants, ingredients, l2_items, l3_items] = await Promise.all([r1.json(), r2.json(), r3.json(), r4.json(), r5.json()]);
       return res.status(200).json({ recipes, variants, ingredients, l2_items, l3_items });
     }
 
@@ -368,27 +394,33 @@ export default async function handler(req, res) {
           }
         }
 
-        // 3. Ingredienti: strategia avanzata preservata — upsert tutti, poi
-        //    elimina gli orfani per variante. Questo pattern resta valido
-        //    SOLO per ingredients (liste senza identita' stabile richiesta):
-        //    MAI applicarlo a l2_items/l3_items.
+        // 3. Ingredienti: upsert di tutti quelli presenti nel payload.
         if (ingredients && ingredients.length) {
           await mustSave('ingredients', ingredients, 'ingredients upsert');
+        }
 
-          const byVariant = {};
-          ingredients.forEach(i => {
-            if (!byVariant[i.variant_id]) byVariant[i.variant_id] = [];
-            byVariant[i.variant_id].push(i.id);
+        // 3b. Cancellazioni SOLO esplicite: il client elenca in
+        //     deletedIngredients gli id che conosceva (ricevuti dalla load o
+        //     gia' salvati) e che ora ha rimosso. Un id semplicemente assente
+        //     dal payload NON viene mai cancellato: una load incompleta non
+        //     deve poter diventare una cancellazione. Ogni DELETE e' vincolata
+        //     anche alla variante dichiarata. Pattern SOLO per ingredients:
+        //     MAI applicarlo a l2_items/l3_items.
+        const deletedIngredients = Array.isArray(body.data.deletedIngredients) ? body.data.deletedIngredients : [];
+        const toDeleteByVariant = {};
+        deletedIngredients.forEach(d => {
+          if (!d || typeof d.id !== 'string' || !d.id || typeof d.variant_id !== 'string' || !d.variant_id) return;
+          if (!toDeleteByVariant[d.variant_id]) toDeleteByVariant[d.variant_id] = [];
+          toDeleteByVariant[d.variant_id].push(d.id);
+        });
+        for (const [vid, ids] of Object.entries(toDeleteByVariant)) {
+          const idList = '(' + ids.map(id => '"' + id.replace(/"/g, '') + '"').join(',') + ')';
+          const dr = await fetch(SB + '/rest/v1/ingredients?variant_id=eq.' + encodeURIComponent(vid) + '&id=in.' + encodeURIComponent(idList), {
+            method: 'DELETE', headers: SH_DEL
           });
-          for (const [vid, ids] of Object.entries(byVariant)) {
-            const notInIds = ids.map(id => 'id.neq.' + id).join(',');
-            const dr = await fetch(SB + '/rest/v1/ingredients?variant_id=eq.' + vid + '&and=(' + notInIds + ')', {
-              method: 'DELETE', headers: SH_DEL
-            });
-            if (!dr.ok) {
-              const detail = await dr.text().catch(() => '');
-              throw new Error('ingredients orphan-delete (variant ' + vid + '): ' + detail);
-            }
+          if (!dr.ok) {
+            const detail = await dr.text().catch(() => '');
+            throw new Error('ingredients delete (variant ' + vid + '): ' + detail);
           }
         }
 

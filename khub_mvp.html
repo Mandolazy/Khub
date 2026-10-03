@@ -1327,6 +1327,39 @@ function showSaveIndicator(){
   _saveIndicatorTimer=setTimeout(function(){el.classList.remove("visible");},2000);
 }
 let _saveLocked=false;
+// Id ingrediente che KHUB sa essere persistiti, per variante: ricevuti dalla
+// load o scritti da un save riuscito. Solo un id qui presente e assente dal
+// payload corrente puo' essere cancellato (rimozione intenzionale): un id mai
+// ricevuto — es. una load incompleta — non viene mai cancellato.
+let _knownIngredientIdsByVariant={};
+function buildKnownIngredientIds(ingredientRows){
+  const known={};
+  (ingredientRows||[]).forEach(i=>{
+    if(!i||!i.id||!i.variant_id)return;
+    (known[i.variant_id]=known[i.variant_id]||new Set()).add(i.id);
+  });
+  return known;
+}
+// currentByVariant: {variantId:[ids nel payload]} — anche [] per una variante
+// rimasta senza ingredienti. Restituisce [{id,variant_id}] da cancellare.
+function computeIngredientDeletions(knownByVariant,currentByVariant){
+  const deleted=[];
+  Object.keys(currentByVariant).forEach(vid=>{
+    const current=new Set(currentByVariant[vid]);
+    (knownByVariant[vid]||[]).forEach(id=>{if(!current.has(id))deleted.push({id,variant_id:vid});});
+  });
+  return deleted;
+}
+// Dopo un save: conosciuto = (conosciuto ∪ inviati) − cancellati confermati.
+// L'unione (mai una sostituzione) evita di "dimenticare" id scritti da un
+// save concorrente completato prima di questo.
+function updateKnownIngredientIds(knownByVariant,currentByVariant,deleted){
+  Object.keys(currentByVariant).forEach(vid=>{
+    const set=knownByVariant[vid]=knownByVariant[vid]||new Set();
+    currentByVariant[vid].forEach(id=>set.add(id));
+  });
+  deleted.forEach(d=>{if(knownByVariant[d.variant_id])knownByVariant[d.variant_id].delete(d.id);});
+}
 function autosave(id){
   if(_saveLocked)return;
   if(_saveTimer[id])clearTimeout(_saveTimer[id]);
@@ -1417,6 +1450,7 @@ async function loadFromSupabase(){
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'load'})});
     const data=await res.json();
     if(!data.recipes||!Array.isArray(data.recipes))return;
+    _knownIngredientIdsByVariant=buildKnownIngredientIds(data.ingredients);
     // PSL: mapping L2 (Ricetta-scoped) — riusato sia per le Bozze in LAB sia
     // per le Ricette validate/attive, perche' L2 segue la stessa variant.id
     // lungo tutto il lifecycle (D3).
@@ -1731,10 +1765,20 @@ async function saveToSupabase(recipe){
       known_limits:l3.knownLimits||null,origin_l2_item_id:l3.originL2ItemId,
       supersedes_id:l3.supersedesId||null,
     }));
+    // Cancellazioni esplicite: solo id gia' noti come persistiti e ora rimossi
+    // dal client (mai un id semplicemente assente dal payload).
+    const currentIngredientIds={};
+    allVariants.forEach(v=>{currentIngredientIds[v.id]=[];});
+    allIngredients.forEach(i=>{currentIngredientIds[i.variant_id].push(i.id);});
+    const deletedIngredients=computeIngredientDeletions(_knownIngredientIdsByVariant,currentIngredientIds);
     const saveRes=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      supabaseAction:'save',data:{recipe:recipeData,variants:allVariants,ingredients:allIngredients,l2Items:allL2Items,l3Items:allL3Items}
+      supabaseAction:'save',data:{recipe:recipeData,variants:allVariants,ingredients:allIngredients,deletedIngredients,l2Items:allL2Items,l3Items:allL3Items}
     })});
     const saveResult=await saveRes.json();
+    // Gli id inviati restano sempre noti (cosi' una rimozione futura li
+    // cancella); le cancellazioni si danno per fatte solo a save confermato.
+    const salvataggioConfermato=saveRes.ok&&saveResult&&saveResult.ok===true;
+    updateKnownIngredientIds(_knownIngredientIdsByVariant,currentIngredientIds,salvataggioConfermato?deletedIngredients:[]);
     if(saveResult&&saveResult.ok===false){
       console.error('[Supabase] errori di salvataggio:',saveResult.errors);
       toast('Alcuni dati potrebbero non essere stati salvati. Controlla la connessione.','ti-alert-circle');
