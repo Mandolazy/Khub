@@ -937,7 +937,7 @@ const S = {
     'foglio di gelatina':2,'fogli di gelatina':2,'foglio gelatina':2,'fogli gelatina':2,
     'fetta di pane':30,'fette di pane':30,
   },
-  pendingUnitConversion: null, // {recipeId, ingId, ingName, newUnit} — conversione n→g in attesa del peso medio
+  pendingUnitConversion: null, // {recipeId, ingId, ingName, canonicalIngredientId, newUnit, varId?, identity, loading, error} — conversione n→g in attesa del peso medio
   // Sprint Produzione — Micro-Step 9: {nomeIngredienteNormalizzato:{id,sourceType}}
   // — provenance (id/sourceType) della fact n→g vincente per nome, popolata
   // in parallelo a unitWeights da loadFromSupabase (stessi dati gia'
@@ -964,7 +964,7 @@ const S = {
   // le righe non collegate usano le cache per nome qui sopra, invariate.
   canonicalIngredientsById: {},
   canonicalConversionFacts: {},
-  pendingConversionPreflight: null, // {recipeId,variantId,portions,gpp,missing,value,error,loading,finalError}
+  pendingConversionPreflight: null, // {recipeId,variantId,portions,gpp,missing,value,error,loading,finalError,identity,skipIdentity,autoLinkTried}
   // Sprint Produzione — Micro-Step 10: PRODUZIONE GUIDATA. Source of truth
   // = production_sessions (+ relativo snapshot), caricata separatamente da
   // loadFromSupabase(). Resta indipendente da S.recipes/validatedVariants/
@@ -1384,17 +1384,17 @@ function resolveKnownCanonicalConversionFact(canonicalId,unit){
   if(known){
     return{id:known.id,fromUnit:askUnit,toUnit:'g',factor:known.factor,sourceType:known.sourceType,sourceDetail:known.sourceDetail!=null?known.sourceDetail:null};
   }
-  // Solo 'n': il peso medio di riferimento (seed) vive in S.unitWeights,
-  // l'unica tabella di reference data n->g; si legge SOLO per il nome
-  // canonico esatto (C.nameKey), mai per il nome della riga. Ogni fact
-  // persistita o confermata per quel nome e' gia' nell'unione canonica
-  // sopra (load + rememberCanonicalConversionFact), quindi qui resta solo
-  // il seed. Canonico non caricato (dangling, A6) -> null: si chiede.
-  if(askUnit==='n'){
-    var c=S.canonicalIngredientsById[canonicalId];
-    if(c)return resolveKnownProductionConversionFact(c.nameKey,'n');
-  }
-  return null;
+  // Nessuna fact nell'indice canonico: conoscenza per il nome canonico
+  // ESATTO (C.nameKey), mai per il nome della riga — per 'n' include il
+  // peso medio di riferimento (seed) di S.unitWeights, l'unica tabella di
+  // reference data n->g. Per un canonico gia' presente al load ogni fact
+  // con quel nome e' gia' nell'unione sopra (load +
+  // rememberCanonicalConversionFact); per un canonico appena creato
+  // (MS-CI3) l'indice e' vuoto e le fact storiche con ingredient_name ===
+  // nameKey (caso A) arrivano da qui, senza ricostruire nulla. Canonico non
+  // caricato (dangling, A6) -> null: si chiede.
+  var c=S.canonicalIngredientsById[canonicalId];
+  return c?resolveKnownProductionConversionFact(c.nameKey,unit):null;
 }
 
 // Unico punto di dispatch del lookup: riga collegata -> canonico; riga non
@@ -1458,6 +1458,258 @@ function rememberCanonicalConversionFact(conv,canonicalIngredientId){
   var fact={id:conv.id,factor:conv.factor,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null,confirmedAt:conv.confirmed_at};
   var key=cid+'|'+conv.from_unit+'|'+conv.to_unit;
   if(isBetterConversionFact(fact,S.canonicalConversionFacts[key]))S.canonicalConversionFacts[key]=fact;
+}
+
+// ══════════════════════════════════════════════════════════
+// MS-CI3 — collegamento riga -> Ingrediente Canonico, SOLO quando serve una
+// conversione. Il nome della riga (ingredients.name) non cambia mai: cambia
+// solo canonical_ingredient_id. Nessun fuzzy/alias/AI: l'unico collegamento
+// automatico e' il nome normalizzato IDENTICO al name_key di un canonico.
+// ══════════════════════════════════════════════════════════
+var CANONICAL_LINK_SAVE_MSG='Errore nel salvataggio del collegamento. Riprova.';
+
+// Canonico con name_key === nome normalizzato della riga, altrimenti null.
+function findCanonicalByExactName(name){
+  var key=normalizeIngredientName(name);
+  if(!key)return null;
+  var ids=Object.keys(S.canonicalIngredientsById);
+  for(var i=0;i<ids.length;i++){
+    if(S.canonicalIngredientsById[ids[i]].nameKey===key)return S.canonicalIngredientsById[ids[i]];
+  }
+  return null;
+}
+
+// Ricerca testuale semplice nel catalogo caricato (sottostringa del nome
+// normalizzato). Solo per mostrare scelte: non collega mai nulla da sola.
+function searchCanonicalIngredients(query){
+  var q=normalizeIngredientName(query);
+  return Object.keys(S.canonicalIngredientsById).map(function(id){return S.canonicalIngredientsById[id];})
+    .filter(function(c){return !q||c.nameKey.indexOf(q)!==-1;})
+    .sort(function(a,b){return a.nameKey<b.nameKey?-1:a.nameKey>b.nameKey?1:0;})
+    .slice(0,30);
+}
+
+function escapeCanonicalText(v){
+  return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Stato del passo "identifica" (scegli / crea / continua senza collegare).
+function newCanonicalIdentityStep(itemKey,ingName){
+  return{itemKey:itemKey,query:'',createName:ingName||'',createId:null,createIdName:null};
+}
+
+// Crea (o riusa) un canonico. Prima il catalogo caricato (nessun duplicato
+// per un nome gia' noto), poi il server, che in caso di conflitto unique su
+// name_key rilegge e restituisce il canonico esistente. createId resta lo
+// stesso fra i retry dello stesso nome (idempotente anche se la risposta di
+// un tentativo precedente era andata persa).
+async function createOrReuseCanonicalIngredient(identity,rawName){
+  var name=(rawName||'').trim();
+  if(!name)return{error:'Inserisci il nome dell\'ingrediente.'};
+  var existing=findCanonicalByExactName(name);
+  if(existing)return{canonical:existing};
+  if(!identity.createId||identity.createIdName!==normalizeIngredientName(name)){
+    identity.createId='ci'+uid();
+    identity.createIdName=normalizeIngredientName(name);
+  }
+  try{
+    var r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'createCanonicalIngredient',canonical:{id:identity.createId,name:name}})});
+    var data=await r.json().catch(function(){return null;});
+    if(!r.ok||!data||data.error||!data.canonical){
+      console.error('Create canonical error',data&&data.error);
+      return{error:'Errore nella creazione dell\'ingrediente. Riprova.'};
+    }
+    var c=buildCanonicalIngredientIndex([data.canonical])[data.canonical.id];
+    if(!c)return{error:'Errore nella creazione dell\'ingrediente. Riprova.'};
+    S.canonicalIngredientsById[c.id]=c;
+    return{canonical:c};
+  }catch(e){
+    console.error('Create canonical error',e);
+    return{error:'Errore nella creazione dell\'ingrediente. Riprova.'};
+  }
+}
+
+// Collega UNA riga (LAB corrente se variantId e' null, altrimenti la
+// variante validata indicata). Persistenza ATOMICA e MIRATA: una PATCH
+// della sola colonna canonical_ingredient_id della riga identificata da
+// ingredients.id + variant_id (gli stessi id ricevuti dalla load e usati dal
+// save). Nessun salvataggio della ricetta, nessun'altra modifica in sospeso
+// scritta. Unico percorso per collegamento automatico, "collega a
+// esistente" e "crea e collega". Lo stato in memoria cambia SOLO dopo una
+// conferma esplicita del server (ok:true = esattamente una riga aggiornata).
+function findIngredientRow(recipeId,variantId,ingId){
+  var recipe=R(recipeId);
+  if(!recipe)return null;
+  var v=variantId?(recipe.validatedVariants||[]).find(function(x){return x.id===variantId;}):curLab(recipe);
+  var row=v&&v.ingredients.find(function(i){return i.id===ingId;});
+  return row?{variant:v,row:row}:null;
+}
+// Aggiorna solo la memoria (nessun autosave: il DB e' gia' allineato).
+// Il prossimo save della ricetta riscrive lo stesso valore dalla memoria.
+function setIngredientCanonicalLink(recipeId,variantId,ingId,canonicalId){
+  var apply=function(v){
+    return v.id!==variantId?v:Object.assign({},v,{ingredients:v.ingredients.map(function(i){
+      return i.id===ingId?Object.assign({},i,{canonicalIngredientId:canonicalId}):i;
+    })});
+  };
+  S.recipes=S.recipes.map(function(r){
+    if(r.id!==recipeId)return r;
+    return Object.assign({},r,{labVersions:(r.labVersions||[]).map(apply),validatedVariants:(r.validatedVariants||[]).map(apply)});
+  });
+  render();
+}
+// Registro minimo dei save della ricetta in volo. saveToSupabase fotografa
+// il payload (incluso canonical_ingredient_id di ogni riga) quando parte e
+// lo scrive con un upsert quando arriva: un save partito PRIMA del
+// collegamento puo' atterrare DOPO la PATCH e riportare il valore
+// precedente. Il collegamento osserva i save in volo/partiti durante la
+// PATCH, ne attende la fine e riafferma il link. Nessuna coda, nessun
+// cambiamento al comportamento dei save.
+var _recipeSaveTracking={inFlight:{},watchers:{}};
+function beginRecipeSave(recipeId){
+  var done;
+  var pending=new Promise(function(resolve){done=resolve;});
+  (_recipeSaveTracking.inFlight[recipeId]=_recipeSaveTracking.inFlight[recipeId]||new Set()).add(pending);
+  (_recipeSaveTracking.watchers[recipeId]||[]).forEach(function(w){w.add(pending);});
+  return function(){_recipeSaveTracking.inFlight[recipeId].delete(pending);done();};
+}
+function watchRecipeSaves(recipeId){
+  var saves=new Set(_recipeSaveTracking.inFlight[recipeId]||[]);
+  var list=_recipeSaveTracking.watchers[recipeId]=_recipeSaveTracking.watchers[recipeId]||[];
+  list.push(saves);
+  return{saves:saves,stop:function(){var i=list.indexOf(saves);if(i>=0)list.splice(i,1);}};
+}
+
+async function patchIngredientCanonicalLink(ingId,variantId,canonicalId){
+  try{
+    var r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      supabaseAction:'linkIngredientCanonical',ingredientId:ingId,variantId:variantId,canonicalIngredientId:canonicalId
+    })});
+    var data=await r.json().catch(function(){return null;});
+    if(!r.ok||!data||data.ok!==true){
+      console.error('Link canonical error',data&&data.error);
+      return false;
+    }
+    return true;
+  }catch(e){
+    console.error('Link canonical error',e);
+    return false;
+  }
+}
+
+async function persistIngredientCanonicalLink(recipeId,variantId,ingId,canonicalId){
+  var found=findIngredientRow(recipeId,variantId,ingId);
+  // Id corti non sono identita' stabili per il save (saveToSupabase li
+  // sostituisce): mai collegare una riga che il DB non conosce con quell'id.
+  if(!found||!found.variant.id||typeof ingId!=='string'||ingId.length<=4||!S.canonicalIngredientsById[canonicalId])return false;
+  var previous=found.row.canonicalIngredientId||null;
+  var vid=found.variant.id;
+  // Save gia' in volo + save partiti finche' la memoria non e' aggiornata:
+  // portano il valore precedente. Quelli partiti dopo portano il link.
+  var watch=watchRecipeSaves(recipeId);
+  try{
+    if(!await patchIngredientCanonicalLink(ingId,vid,canonicalId))return false;
+    setIngredientCanonicalLink(recipeId,vid,ingId,canonicalId);
+  }finally{
+    watch.stop();
+  }
+  if(watch.saves.size){
+    // Attende che quei save siano atterrati, poi riafferma il link: la
+    // seconda PATCH arriva dopo ogni loro upsert. Successo solo dopo di essa.
+    await Promise.all(Array.from(watch.saves));
+    if(!await patchIngredientCanonicalLink(ingId,vid,canonicalId)){
+      setIngredientCanonicalLink(recipeId,vid,ingId,previous);
+      return false;
+    }
+  }
+  return true;
+}
+
+// Pannello "identifica" condiviso dal preflight Produzione ('preflight') e
+// dal cambio unita' n->g ('unit'). Testi minimi, stessi stili dei modal.
+function canonicalIdentityOwner(ctx){
+  return ctx==='preflight'?S.pendingConversionPreflight:S.pendingUnitConversion;
+}
+function renderCanonicalSearchResults(ctx,query){
+  var owner=canonicalIdentityOwner(ctx);
+  var disabled=owner&&owner.loading?'disabled':'';
+  var list=searchCanonicalIngredients(query);
+  if(!list.length)return'<div style="font-size:13px;color:var(--light);padding:6px 2px">Nessun ingrediente trovato.</div>';
+  return list.map(function(c){
+    return'<button '+disabled+' onclick="selectCanonicalIdentity(\''+ctx+'\',\''+escapeCanonicalText(c.id)+'\')" style="display:block;width:100%;text-align:left;padding:8px 10px;margin-bottom:4px;background:var(--cream);border:1px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:14px;color:var(--dark);cursor:pointer">'+escapeCanonicalText(c.name)+'</button>';
+  }).join('');
+}
+function renderCanonicalIdentityStep(ctx,owner,ingName,cancelCall){
+  var id=owner.identity;
+  var disabled=owner.loading?'disabled':'';
+  var btn='padding:10px;border-radius:var(--r-md);font-family:inherit;font-size:14px;cursor:pointer';
+  var input='width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:15px;color:var(--dark);outline:none;box-sizing:border-box';
+  return`
+  <div style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200;display:flex;align-items:center;justify-content:center;padding:24px">
+    <div style="background:var(--white);border-radius:var(--r-lg);padding:24px;width:100%;max-width:380px;max-height:90vh;overflow:auto;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
+      <div style="font-size:14px;color:var(--mid);margin-bottom:4px">Serve una conversione per</div>
+      <div style="font-size:16px;font-weight:700;color:var(--dark);margin-bottom:6px">${escapeCanonicalText(ingName)}</div>
+      <div style="font-size:13px;color:var(--mid);margin-bottom:14px">Che ingrediente è? Se KHUB lo conosce già, non dovrai inserire di nuovo il peso.</div>
+      <label style="font-size:12px;font-weight:600;color:var(--mid);display:block;margin-bottom:4px">Collega a ingrediente esistente</label>
+      <input id="ci-search-input" type="text" placeholder="Cerca…" value="${escapeCanonicalText(id.query)}" ${disabled}
+        style="${input};margin-bottom:8px" oninput="onCanonicalIdentitySearch('${ctx}',this.value)">
+      <div id="ci-results" style="max-height:180px;overflow:auto;margin-bottom:14px">${renderCanonicalSearchResults(ctx,id.query)}</div>
+      <label style="font-size:12px;font-weight:600;color:var(--mid);display:block;margin-bottom:4px">Oppure crea nuovo ingrediente</label>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <input id="ci-create-input" type="text" value="${escapeCanonicalText(id.createName)}" ${disabled}
+          style="${input};flex:1" onchange="onCanonicalIdentityCreateName('${ctx}',this.value)">
+        <button onclick="createCanonicalIdentity('${ctx}',document.getElementById('ci-create-input').value)" ${disabled}
+          style="${btn};background:var(--sage,#3d7a5c);color:white;border:none;font-weight:600;white-space:nowrap">${owner.loading?'…':'Crea e collega'}</button>
+      </div>
+      ${owner.error?`<div style="font-size:13px;color:#c0392b;margin-bottom:14px">${escapeCanonicalText(owner.error)}</div>`:''}
+      <div style="display:flex;gap:8px">
+        <button onclick="skipCanonicalIdentity('${ctx}')" ${disabled}
+          style="${btn};flex:1;background:transparent;color:var(--dark);border:1.5px solid var(--border)">Continua senza collegare</button>
+        <button onclick="${cancelCall}" ${disabled}
+          style="${btn};padding:10px 16px;background:transparent;color:var(--mid);border:1.5px solid var(--border)">Annulla</button>
+      </div>
+    </div>
+  </div>`;
+}
+function onCanonicalIdentitySearch(ctx,val){
+  var owner=canonicalIdentityOwner(ctx);
+  if(!owner||!owner.identity)return;
+  owner.identity.query=val;
+  // Solo la lista: un render completo farebbe perdere il focus al campo.
+  var el=document.getElementById('ci-results');
+  if(el)el.innerHTML=renderCanonicalSearchResults(ctx,val);
+}
+function onCanonicalIdentityCreateName(ctx,val){
+  var owner=canonicalIdentityOwner(ctx);
+  if(owner&&owner.identity)owner.identity.createName=val;
+}
+async function selectCanonicalIdentity(ctx,canonicalId){
+  var owner=canonicalIdentityOwner(ctx);
+  if(!owner||!owner.identity||owner.loading)return;
+  if(!S.canonicalIngredientsById[canonicalId]){owner.error=CANONICAL_UNRESOLVED_MSG;render();return;}
+  owner.loading=true;owner.error=null;render();
+  if(ctx==='preflight')await linkPreflightIngredient(owner,canonicalId);
+  else await linkPendingUnitIngredient(owner,canonicalId);
+}
+async function createCanonicalIdentity(ctx,rawName){
+  var owner=canonicalIdentityOwner(ctx);
+  if(!owner||!owner.identity||owner.loading)return;
+  owner.identity.createName=rawName;
+  owner.loading=true;owner.error=null;render();
+  var res=await createOrReuseCanonicalIngredient(owner.identity,rawName);
+  if(canonicalIdentityOwner(ctx)!==owner)return; // annullato nel frattempo
+  if(res.error){owner.loading=false;owner.error=res.error;render();return;}
+  if(ctx==='preflight')await linkPreflightIngredient(owner,res.canonical.id);
+  else await linkPendingUnitIngredient(owner,res.canonical.id);
+}
+// Continua senza collegare: comportamento di sempre (domanda per il nome
+// della riga, fact senza canonical_ingredient_id).
+function skipCanonicalIdentity(ctx){
+  var owner=canonicalIdentityOwner(ctx);
+  if(!owner||!owner.identity||owner.loading)return;
+  if(ctx==='preflight')owner.skipIdentity[owner.identity.itemKey]=true;
+  owner.identity=null;owner.error=null;
+  render();
 }
 
 let _saveTimer={};
@@ -1830,7 +2082,9 @@ function makeDefaultLab(recipeId,name){
 }
 
 async function saveToSupabase(recipe){
+  let endSave=null; // MS-CI3: registro dei save in volo (vedi beginRecipeSave)
   try{
+    endSave=beginRecipeSave(recipe.id);
     const recipeData={
       id:recipe.id,name:recipe.name,category:recipe.category,department:recipe.department||'Cucina',
       media_url:recipe.mediaUrl||null,video_url:recipe.videoUrl||null,
@@ -1944,6 +2198,7 @@ async function saveToSupabase(recipe){
     }
     return true;
   }catch(e){console.error('Save error',e);toast('Errore salvataggio: '+e.message,'ti-alert-circle');return false;}
+  finally{if(endSave)endSave();}
 }
 
 async function deleteRecipe(id){
@@ -2667,8 +2922,7 @@ function onIngUnit(recipeId,ingId,val){
       });
     } else {
       // Peso non noto: mostra modale per chiedere il peso medio
-      S.pendingUnitConversion={recipeId:recipeId,ingId:ingId,ingName:ing.name,canonicalIngredientId:ing.canonicalIngredientId||null,qty:ing.qty,newUnit:'g'};
-      render();
+      openUnitConversionPending({recipeId:recipeId,ingId:ingId,ingName:ing.name,canonicalIngredientId:ing.canonicalIngredientId||null,qty:ing.qty,newUnit:'g'});
     }
     return;
   }
@@ -2686,7 +2940,7 @@ function onIngUnit(recipeId,ingId,val){
 // Conferma conversione n→g dopo che l'utente ha inserito il peso medio
 function confirmUnitConversion(pesoMedio){
   var p=S.pendingUnitConversion;
-  if(!p)return;
+  if(!p||p.loading||p.identity)return;
   var peso=parseFloat(pesoMedio);
   if(!peso||isNaN(peso)){S.pendingUnitConversion=null;render();return;}
   // Cache/runtime immediata (invariato) + persistenza come nuova fact
@@ -2710,6 +2964,14 @@ function confirmUnitConversion(pesoMedio){
     rememberCanonicalConversionFact(runtimeConv,null);
   }
   saveIngredientConversion(normName,'n','g',peso,'chef_confirmed',null,ident.canonicalIngredientId);
+  applyUnitConversionToRow(p,peso);
+  S.pendingUnitConversion=null;
+  render();
+}
+
+// Applica la conversione n->g alla riga (variante validata o bozza LAB),
+// identico al comportamento precedente di confirmUnitConversion.
+function applyUnitConversionToRow(p,peso){
   if(p.varId){
     // Produzione: aggiorna variante validata
     upRec(p.recipeId,r=>({...r,validatedVariants:r.validatedVariants.map(v=>{
@@ -2728,7 +2990,42 @@ function confirmUnitConversion(pesoMedio){
       })});
     });
   }
-  S.pendingUnitConversion=null;
+}
+
+// MS-CI3: peso medio n->g non noto. Riga gia' collegata -> si chiede il
+// valore (del canonico). Riga non collegata -> collegamento automatico se il
+// nome e' IDENTICO al name_key di un canonico, altrimenti passo "identifica"
+// (collega / crea / continua senza collegare) prima della domanda.
+function openUnitConversionPending(p){
+  p.loading=false;p.error=null;p.identity=null;
+  S.pendingUnitConversion=p;
+  if(!p.canonicalIngredientId){
+    var exact=findCanonicalByExactName(p.ingName);
+    if(exact){
+      p.identity=newCanonicalIdentityStep(p.ingId,p.ingName);
+      p.loading=true;render();
+      linkPendingUnitIngredient(p,exact.id);
+      return;
+    }
+    p.identity=newCanonicalIdentityStep(p.ingId,p.ingName);
+  }
+  render();
+}
+
+// Persiste il link della riga; poi rifa' il lookup del peso medio per il
+// canonico: se e' gia' noto converte subito senza chiedere, altrimenti
+// chiede il valore (che verra' salvato sul canonico).
+async function linkPendingUnitIngredient(p,canonicalId){
+  var ok=await persistIngredientCanonicalLink(p.recipeId,p.varId||null,p.ingId,canonicalId);
+  if(S.pendingUnitConversion!==p)return;
+  p.loading=false;
+  if(!ok){p.error=CANONICAL_LINK_SAVE_MSG;render();return;}
+  p.canonicalIngredientId=canonicalId;p.identity=null;p.error=null;
+  var peso=knownUnitWeightForIngredient({name:p.ingName,unit:'n',canonicalIngredientId:canonicalId});
+  if(peso){
+    applyUnitConversionToRow(p,peso);
+    S.pendingUnitConversion=null;
+  }
   render();
 }
 
@@ -3507,11 +3804,17 @@ async function confirmMandaInProduzione(){
   var missing=findMissingProductionConversions(preparedInput);
   if(missing.length>0){
     S.pendingMandaInProduzione=null;
-    S.pendingConversionPreflight={
+    var pf={
       recipeId:p.recipeId,variantId:p.variantId,portions:portions,gpp:gpp,
       missing:missing,value:'',error:null,loading:false,finalError:null,
+      // MS-CI3: passo "identifica" della riga corrente (null = chiedi il
+      // valore), righe per cui lo chef ha scelto di non collegare, righe
+      // per cui il collegamento automatico per nome identico e' gia' stato
+      // tentato (mai ripetuto in loop).
+      identity:null,skipIdentity:{},autoLinkTried:{},
     };
-    render();
+    S.pendingConversionPreflight=pf;
+    await advanceConversionPreflight(pf);
     return;
   }
 
@@ -3566,7 +3869,7 @@ function cancelConversionPreflight(){
 // questo submit.
 async function confirmConversionPreflightStep(rawValue){
   var pf=S.pendingConversionPreflight;
-  if(!pf||pf.loading||pf.finalError)return;
+  if(!pf||pf.loading||pf.finalError||pf.identity)return;
   var current=pf.missing[0];
   if(!current)return;
 
@@ -3615,41 +3918,94 @@ async function confirmConversionPreflightStep(rawValue){
   // S.canonicalConversionFacts (stesse cache che ricostruirebbe un reload).
   rememberConfirmedConversion(conv,ident.canonicalIngredientId);
 
-  var recipe=R(pf.recipeId);
-  var vv=recipe&&recipe.validatedVariants.find(function(v){return v.id===pf.variantId;});
-  if(!recipe||!vv){
-    pf.loading=false;
-    pf.error='Ricetta non trovata. Chiudi e riprova.';
-    render();return;
-  }
+  pf.value='';
+  await advanceConversionPreflight(pf);
+}
 
-  var preparedInput=buildPreparedInputDaRicettaAttiva(recipe,vv,pf.portions,pf.gpp);
-  var stillMissing=findMissingProductionConversions(preparedInput);
+// MS-CI3: un solo punto che, dallo stato attuale della Ricetta attiva,
+// decide il passo successivo del preflight: nessuna conversione mancante ->
+// crea la Sessione; prossima riga mancante gia' collegata (o per cui lo chef
+// ha scelto "continua senza collegare") -> chiede il valore; riga non
+// collegata -> prima il collegamento automatico per nome IDENTICO al
+// name_key, altrimenti il passo "identifica". Dopo ogni collegamento il
+// lookup viene rifatto da capo: se KHUB conosce gia' la conversione del
+// canonico non chiede nulla. Ordine: canonico -> link -> conversione ->
+// Sessione; se un passaggio fallisce la Sessione non viene creata.
+async function advanceConversionPreflight(pf){
+  pf.loading=true;
+  pf.skipIdentity=pf.skipIdentity||{};
+  pf.autoLinkTried=pf.autoLinkTried||{};
+  for(;;){
+    if(S.pendingConversionPreflight!==pf)return; // annullato
+    var recipe=R(pf.recipeId);
+    var vv=recipe&&recipe.validatedVariants.find(function(v){return v.id===pf.variantId;});
+    if(!recipe||!vv){
+      pf.loading=false;
+      pf.error='Ricetta non trovata. Chiudi e riprova.';
+      render();return;
+    }
 
-  if(stillMissing.length>0){
-    // Un'altra conversione manca ancora: si prosegue sequenzialmente,
-    // NESSUNA Sessione viene creata finché non sono risolte tutte.
-    pf.missing=stillMissing;
-    pf.value='';
-    pf.loading=false;
-    render();
+    var preparedInput=buildPreparedInputDaRicettaAttiva(recipe,vv,pf.portions,pf.gpp);
+    var stillMissing=findMissingProductionConversions(preparedInput);
+
+    if(stillMissing.length>0){
+      // Un'altra conversione manca ancora: si prosegue sequenzialmente,
+      // NESSUNA Sessione viene creata finché non sono risolte tutte.
+      pf.missing=stillMissing;
+      var current=stillMissing[0];
+      if(!current.canonicalIngredientId&&!pf.skipIdentity[current.itemKey]){
+        var exact=findCanonicalByExactName(current.ingredientName);
+        if(exact&&!pf.autoLinkTried[current.itemKey]){
+          pf.autoLinkTried[current.itemKey]=true;
+          if(await persistIngredientCanonicalLink(pf.recipeId,pf.variantId,current.itemKey,exact.id))continue;
+          pf.identity=newCanonicalIdentityStep(current.itemKey,current.ingredientName);
+          pf.error=CANONICAL_LINK_SAVE_MSG;
+          pf.loading=false;render();return;
+        }
+        if(!pf.identity||pf.identity.itemKey!==current.itemKey){
+          pf.identity=newCanonicalIdentityStep(current.itemKey,current.ingredientName);
+        }
+      }else{
+        pf.identity=null;
+      }
+      pf.loading=false;
+      render();
+      return;
+    }
+
+    // Tutte le conversioni sono risolte: crea la Sessione ora.
+    pf.identity=null;
+    try{
+      await createProductionSession(preparedInput);
+      S.pendingConversionPreflight=null;
+      toast('Produzione creata','ti-chef-hat');
+      render();
+    }catch(e){
+      // Le fact confermate in questo tentativo restano valide e salvate; solo
+      // la Sessione non viene creata. Messaggio chiaro, nessuna falsa conferma.
+      pf.loading=false;
+      pf.missing=[];
+      pf.finalError=(e&&e.message)?e.message:'Errore nella creazione della produzione. Riprova.';
+      render();
+    }
     return;
   }
+}
 
-  // Tutte le conversioni sono risolte: crea la Sessione ora.
-  try{
-    await createProductionSession(preparedInput);
-    S.pendingConversionPreflight=null;
-    toast('Produzione creata','ti-chef-hat');
-    render();
-  }catch(e){
-    // Le fact confermate in questo tentativo restano valide e salvate; solo
-    // la Sessione non viene creata. Messaggio chiaro, nessuna falsa conferma.
+// MS-CI3: lo chef ha scelto/creato il canonico per la riga corrente del
+// preflight. Persiste il link; se fallisce resta sul passo "identifica" con
+// errore (nessuna Sessione); se riesce rifa' il lookup da capo.
+async function linkPreflightIngredient(pf,canonicalId){
+  var itemKey=pf.identity&&pf.identity.itemKey;
+  var ok=itemKey?await persistIngredientCanonicalLink(pf.recipeId,pf.variantId,itemKey,canonicalId):false;
+  if(S.pendingConversionPreflight!==pf)return;
+  if(!ok){
     pf.loading=false;
-    pf.missing=[];
-    pf.finalError=(e&&e.message)?e.message:'Errore nella creazione della produzione. Riprova.';
-    render();
+    pf.error=CANONICAL_LINK_SAVE_MSG;
+    render();return;
   }
+  pf.identity=null;pf.error=null;pf.value='';
+  await advanceConversionPreflight(pf);
 }
 
 function renderConversionPreflightModal(){
@@ -3668,10 +4024,14 @@ function renderConversionPreflightModal(){
   }
   var current=pf.missing[0];
   if(!current)return'';
+  if(pf.identity)return renderCanonicalIdentityStep('preflight',pf,current.ingredientName,'cancelConversionPreflight()');
   var askUnit=chooseConversionAskUnit(current.currentUnit);
+  // MS-CI3: riga collegata -> il valore appartiene al canonico, lo si dice.
+  var canonicalCurrent=current.canonicalIngredientId?S.canonicalIngredientsById[current.canonicalIngredientId]:null;
+  var nomeDomanda=current.ingredientName+(canonicalCurrent?' ('+canonicalCurrent.name+')':'');
   var domanda=askUnit==='n'
-    ?('Quanto pesa 1 '+current.ingredientName+'?')
-    :('Quanto pesa 1 '+askUnit+' di '+current.ingredientName+'?');
+    ?('Quanto pesa 1 '+nomeDomanda+'?')
+    :('Quanto pesa 1 '+askUnit+' di '+nomeDomanda+'?');
   var progresso=pf.missing.length>1?(' ('+pf.missing.length+' conversioni da confermare)'):'';
   return`
   <div style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200;display:flex;align-items:center;justify-content:center;padding:24px">
@@ -4140,8 +4500,7 @@ function onVarIngUnit(recipeId,varId,ingId,val){
       })}));
       saveToSupabase(R(recipeId));render();
     } else {
-      S.pendingUnitConversion={recipeId,ingId,ingName:ing.name,canonicalIngredientId:ing.canonicalIngredientId||null,qty:ing.qty,newUnit:'g',varId};
-      render();
+      openUnitConversionPending({recipeId,ingId,ingName:ing.name,canonicalIngredientId:ing.canonicalIngredientId||null,qty:ing.qty,newUnit:'g',varId});
     }
     return;
   }
@@ -6663,11 +7022,13 @@ function renderOnboarding(){
 function renderUnitConversionModal(){
   var p=S.pendingUnitConversion;
   if(!p)return'';
+  if(p.identity)return renderCanonicalIdentityStep('unit',p,p.ingName,'cancelUnitConversion()');
+  var canonicalP=p.canonicalIngredientId?S.canonicalIngredientsById[p.canonicalIngredientId]:null;
   return`
   <div style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200;display:flex;align-items:center;justify-content:center;padding:24px">
     <div style="background:var(--white);border-radius:var(--r-lg);padding:24px;width:100%;max-width:340px;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
       <div style="font-size:16px;font-weight:700;color:var(--dark);margin-bottom:6px">Peso medio</div>
-      <div style="font-size:14px;color:var(--mid);margin-bottom:18px">Quanto pesa <strong>${p.ingName}</strong> in media?</div>
+      <div style="font-size:14px;color:var(--mid);margin-bottom:18px">Quanto pesa <strong>${p.ingName}${canonicalP?' ('+canonicalP.name+')':''}</strong> in media?</div>
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
         <input id="unit-conv-input" type="number" min="1" placeholder="es. 150"
           style="flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:16px;color:var(--dark);outline:none"

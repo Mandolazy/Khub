@@ -341,6 +341,63 @@ export default async function handler(req, res) {
       return res.status(200).json(r);
     }
 
+    // MS-CI3: crea un Ingrediente Canonico in modo idempotente. INSERT puro
+    // (mai merge: un canonico esistente non viene mai sovrascritto). Se il
+    // vincolo unique su name_key (o la PK, per un retry dello stesso id)
+    // rifiuta l'INSERT, rilegge il canonico esistente con lo stesso nome
+    // normalizzato e restituisce quello: nessun duplicato. name_key e' la
+    // colonna generata lower(btrim(name)) della migration 0009.
+    if (body.supabaseAction === 'createCanonicalIngredient') {
+      const c = body.canonical || {};
+      const id = typeof c.id === 'string' ? c.id.trim() : '';
+      const name = typeof c.name === 'string' ? c.name.trim() : '';
+      if (!id || !name) return res.status(200).json({ error: 'canonical_ingredients: id e nome obbligatori' });
+      const ins = await fetch(SB + '/rest/v1/canonical_ingredients?select=id,name,name_key', {
+        method: 'POST', headers: { ...SH_READ, 'Prefer': 'return=representation' }, body: JSON.stringify({ id, name })
+      });
+      if (ins.ok) {
+        const rows = await ins.json();
+        if (Array.isArray(rows) && rows[0]) return res.status(200).json({ canonical: rows[0], created: true });
+        return res.status(200).json({ error: 'canonical_ingredients: risposta non valida' });
+      }
+      const detail = await ins.text().catch(() => '');
+      if (ins.status !== 409) {
+        console.error('Supabase error [canonical_ingredients]:', ins.status, detail);
+        return res.status(200).json({ error: detail || ('HTTP ' + ins.status), status: ins.status });
+      }
+      const rr = await fetch(SB + '/rest/v1/canonical_ingredients?select=id,name,name_key&name_key=eq.' + encodeURIComponent(name.toLowerCase()) + '&limit=1', { headers: SH_READ });
+      const found = rr.ok ? await rr.json().catch(() => null) : null;
+      if (Array.isArray(found) && found[0]) return res.status(200).json({ canonical: found[0], created: false });
+      return res.status(200).json({ error: 'canonical_ingredients: conflitto senza canonico rileggibile', status: 409 });
+    }
+
+    // MS-CI3: collegamento di UNA riga ingrediente a un canonico. PATCH
+    // mirata sulla sola colonna canonical_ingredient_id, identificata da
+    // chiave primaria + variante (mai un upsert della ricetta: nessun altro
+    // campo e nessun'altra modifica in sospeso viene scritta). Successo solo
+    // se esattamente UNA riga e' stata aggiornata al valore richiesto; 0
+    // righe (riga non ancora salvata) o FK violata (canonico inesistente)
+    // sono errori.
+    if (body.supabaseAction === 'linkIngredientCanonical') {
+      const ingredientId = typeof body.ingredientId === 'string' ? body.ingredientId : '';
+      const variantId = typeof body.variantId === 'string' ? body.variantId : '';
+      const canonicalIngredientId = typeof body.canonicalIngredientId === 'string' ? body.canonicalIngredientId : '';
+      if (!ingredientId || !variantId || !canonicalIngredientId) return res.status(200).json({ error: 'linkIngredientCanonical: parametri mancanti' });
+      const pr = await fetch(SB + '/rest/v1/ingredients?id=eq.' + encodeURIComponent(ingredientId) + '&variant_id=eq.' + encodeURIComponent(variantId) + '&select=id,canonical_ingredient_id', {
+        method: 'PATCH', headers: { ...SH_READ, 'Prefer': 'return=representation' }, body: JSON.stringify({ canonical_ingredient_id: canonicalIngredientId })
+      });
+      if (!pr.ok) {
+        const detail = await pr.text().catch(() => '');
+        console.error('Supabase error [ingredients link]:', pr.status, detail);
+        return res.status(200).json({ error: detail || ('HTTP ' + pr.status), status: pr.status });
+      }
+      const rows = await pr.json().catch(() => null);
+      if (!Array.isArray(rows) || rows.length !== 1 || rows[0].canonical_ingredient_id !== canonicalIngredientId) {
+        return res.status(200).json({ error: 'linkIngredientCanonical: riga non trovata o non aggiornata', updated: Array.isArray(rows) ? rows.length : null });
+      }
+      return res.status(200).json({ ok: true });
+    }
+
     // Sprint Produzione — Micro-Step 10: lettura delle production_sessions
     // persistenti per la Produzione Guidata. Sola lettura, nessuna azione
     // generica di lettura esisteva per una tabella nuova (a differenza di

@@ -126,7 +126,7 @@ function extractFunction(startMarker) {
   }
   throw new Error('graffe non bilanciate a partire da: ' + startMarker);
 }
-const VARS = ['SESSION_SCALING_MASS_TO_GRAMS', 'SESSION_SCALING_VOLUME_TO_ML', 'CANONICAL_UNRESOLVED_MSG']
+const VARS = ['SESSION_SCALING_MASS_TO_GRAMS', 'SESSION_SCALING_VOLUME_TO_ML', 'CANONICAL_UNRESOLVED_MSG', 'CANONICAL_LINK_SAVE_MSG']
   .map(v => html.match(new RegExp('var ' + v + '=[^;]+;'))[0]).join('\n');
 const CLIENT_SRC = VARS + '\n' + [
   'function R(id)', 'function curLab(recipe)', 'function uid()', 'function cnum(n)', 'function normalizeIngredientName(name)',
@@ -145,10 +145,14 @@ const CLIENT_SRC = VARS + '\n' + [
   'function buildKnownIngredientIds(ingredientRows)', 'function computeIngredientDeletions(knownByVariant,currentByVariant)',
   'function updateKnownIngredientIds(knownByVariant,currentByVariant,deleted)', 'function firmaContenutoBozza(v)',
   'async function loadFromSupabase()', 'function parseSteps(raw)', 'function getStructuredSteps(legacySteps,stepsV2)',
-  'function stepsV2ToLegacyArray(stepsV2)', 'function makeDefaultLab(recipeId,name)', 'async function saveToSupabase(recipe)',
+  'function stepsV2ToLegacyArray(stepsV2)', 'function makeDefaultLab(recipeId,name)', 'function beginRecipeSave(recipeId)', 'async function saveToSupabase(recipe)',
   'function upRec(id,fn)', 'function rendiAttiva(recipeId)',
   'async function saveIngredientConversion(ingredientName,fromUnit,toUnit,factor,sourceType,sourceDetail,canonicalIngredientId)',
   'async function confirmConversionPreflightStep(rawValue)',
+  // MS-CI3: il passo successivo del preflight e' ora in advanceConversionPreflight
+  'async function advanceConversionPreflight(pf)', 'function findCanonicalByExactName(name)',
+  'function newCanonicalIdentityStep(itemKey,ingName)', 'function setIngredientCanonicalLink(recipeId,variantId,ingId,canonicalId)',
+  'function findIngredientRow(recipeId,variantId,ingId)', 'function watchRecipeSaves(recipeId)', 'async function patchIngredientCanonicalLink(ingId,variantId,canonicalId)', 'async function persistIngredientCanonicalLink(recipeId,variantId,ingId,canonicalId)',
 ].map(extractFunction).join('\n');
 
 // Seed n->g di prova: nel codice reale sono i valori scritti in S.unitWeights (unica tabella reference n->g).
@@ -169,6 +173,7 @@ function makeClient(handler) {
       productionConversionFacts:{},canonicalIngredientsById:{},canonicalConversionFacts:{},pendingConversionPreflight:null,
       productionSessions:[],openSessionId:null};
     var _knownIngredientIdsByVariant={};
+    var _recipeSaveTracking={inFlight:{},watchers:{}};
     ${CLIENT_SRC}
     return {S, loadFromSupabase, saveToSupabase, rendiAttiva, buildPreparedInputDaRicettaAttiva, findMissingProductionConversions,
       computeSessionScaling, buildSessionSnapshotV1, renderSessioneOperativa, resolveKnownConversionFactForIngredient,
