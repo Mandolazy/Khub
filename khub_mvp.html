@@ -874,13 +874,15 @@ const S = {
   // aiMsgs / aiSugg rimossi in Step 3A — pannello MichelinAI legacy dismesso
   // (chat persistente multi-turno + modifica automatica via applyAISugg).
   michelinAIQuestion: '', // contenuto corrente della textarea "Chiedi a MichelinAI" — sincronizzato per sopravvivere a render() intermedi
-  // R3F: stato UI effimero SOLO per mostrare l'ultimo turno M2 nella card —
-  // MAI PSL, MAI Supabase, MAI memoria cognitiva: sopravvive alla potatura
-  // di S.m2Result (che dopo un auto-apply può azzerarsi del tutto) ma non
-  // sopravvive a un refresh. La continuità cognitiva resta L2/L3/intention/
-  // criteria persistiti, non questa coppia domanda/risposta.
-  michelinAILastQuestion: null, // ultima domanda inviata con successo a M2
-  michelinAILastResponse: null, // ultima prosa M2 (S.m2Result[..].response al momento dell'invio)
+  // Cronologia MichelinAI M2 PER variant (tabella m2_turns): ciò che chef e
+  // MichelinAI si sono detti, turni completati con successo. Persistenza/
+  // visualizzazione, MAI PSL, MAI memoria cognitiva, MAI inviata ad
+  // Anthropic (costruisciPayloadM2 non la legge). Sostituisce la vecchia
+  // coppia globale "ultima domanda/risposta", che compariva anche aprendo
+  // un'altra Ricetta. La continuità cognitiva resta L2/L3/intention/criteria.
+  // { [variantId]: {status:'idle'|'loading'|'loaded'|'error',
+  //   turns:[{id,question,response,createdAt,saveState:'saving'|'saved'|'failed'}]} }
+  m2TurnsByVariant: {},
   yieldAnalysis: null,      // {recipeId, suggestions:[{ingId,ingName,currentYield,suggestedYield,reason}]}
   yieldAnalysisLoading: false, // true mentre MichelinAI sta analizzando
   yieldAnalysisError: null, // messaggio d'errore dell'ultima analisi rese, null se nessuno
@@ -910,6 +912,7 @@ const S = {
   addIngSearchQuery: '', // testo di ricerca quando si cerca un mattoncino
   addIngSelectedMattoncino: null, // {recipeId,recipeName,variantId,variantLabel,category} scelto, in attesa di conferma
   recording: false,
+  recordingTarget: null, // 'notes' | 'm2' — chi sta usando l'unico microfono attivo (vedi startDictation)
   mediaRecorder: null,
   voiceNotes: {},
   pendingVoiceText: {},
@@ -5019,6 +5022,103 @@ function renderYieldAnalysisPanel(recipe,v){
 }
 
 // ══════════════════════════════════════════════════════════
+// MichelinAI — CRONOLOGIA M2 (m2_turns, migration 0010)
+// Ciò che chef e MichelinAI si sono detti, per variant. Persistenza e
+// visualizzazione, MAI memoria cognitiva: costruisciPayloadM2 non la legge
+// e non viene mai inviata ad Anthropic. Una riga per turno completato
+// (domanda + risposta valida), id generato qui: il retry del salvataggio
+// dello stesso turno e' idempotente. Salvataggio e caricamento sono
+// separati da saveToSupabase/load principale: un loro errore non tocca
+// L2/L3 ne' il caricamento delle Ricette.
+// ══════════════════════════════════════════════════════════
+function m2TurnsEntry(variantId){
+  if(!S.m2TurnsByVariant[variantId])S.m2TurnsByVariant[variantId]={status:'idle',turns:[]};
+  return S.m2TurnsByVariant[variantId];
+}
+function sortM2Turns(turns){
+  return turns.slice().sort(function(a,b){
+    if(a.createdAt!==b.createdAt)return a.createdAt<b.createdAt?-1:1;
+    return a.id<b.id?-1:a.id>b.id?1:0;
+  });
+}
+// Turno completato: subito visibile, poi salvato (non atteso dal chiamante).
+function recordM2Turn(variantId,question,response){
+  var turn={id:'m2t'+uid(),question:question,response:response,createdAt:new Date().toISOString(),saveState:'saving'};
+  var entry=m2TurnsEntry(variantId);
+  entry.turns=entry.turns.concat([turn]);
+  persistM2Turn(variantId,turn.id);
+  return turn;
+}
+// Salva (o risalva, stesso id) un turno. Doppio click: un turno gia' in
+// salvataggio o gia' salvato non parte una seconda volta.
+async function persistM2Turn(variantId,turnId){
+  var entry=S.m2TurnsByVariant[variantId];
+  var turn=entry&&entry.turns.find(function(t){return t.id===turnId;});
+  if(!turn||turn.saveState==='saved'||turn.saving)return false;
+  turn.saving=true;turn.saveState='saving';
+  var ok=false;
+  try{
+    var r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      supabaseAction:'saveM2Turn',
+      turn:{id:turn.id,variant_id:variantId,question:turn.question,response:turn.response,created_at:turn.createdAt}
+    })});
+    var data=await r.json().catch(function(){return null;});
+    ok=!!(r.ok&&data&&data.ok===true);
+    if(!ok)console.error('[M2 chat] salvataggio turno non riuscito',data&&data.error);
+  }catch(e){console.error('[M2 chat] salvataggio turno non riuscito',e);}
+  turn.saving=false;
+  turn.saveState=ok?'saved':'failed';
+  render();
+  return ok;
+}
+function riprovaSalvataggioTurnoM2(variantId,turnId){return persistM2Turn(variantId,turnId);}
+// Carica la cronologia di una variant (una volta per sessione, o su retry
+// dopo un errore). I turni locali non ancora presenti sul DB (es. salvataggio
+// fallito o in corso) restano visibili: unione per id, ordine created_at+id.
+async function loadM2Turns(variantId,force){
+  if(!variantId)return;
+  var entry=m2TurnsEntry(variantId);
+  if(entry.status==='loading')return;
+  if(entry.status!=='idle'&&!force)return; // gia' caricata, o in errore: solo un retry esplicito riprova
+  entry.status='loading';
+  try{
+    var r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'loadM2Turns',variantId:variantId})});
+    var data=await r.json().catch(function(){return null;});
+    if(!r.ok||!data||!Array.isArray(data.turns))throw new Error((data&&data.error)||'risposta non valida');
+    var byId={};
+    data.turns.forEach(function(t){
+      byId[t.id]={id:t.id,question:t.question,response:t.response,createdAt:new Date(t.created_at).toISOString(),saveState:'saved'};
+    });
+    entry.turns.forEach(function(t){if(!byId[t.id])byId[t.id]=t;});
+    entry.turns=sortM2Turns(Object.keys(byId).map(function(id){return byId[id];}));
+    entry.status='loaded';
+  }catch(e){
+    console.error('[M2 chat] caricamento cronologia non riuscito',e);
+    entry.status='error';
+  }
+  render();
+}
+// Conversazione nella card MichelinAI: ordine cronologico, testo escapato,
+// stato "non salvato" con retry del SOLO salvataggio del turno.
+function renderM2Turns(variantId){
+  var entry=S.m2TurnsByVariant[variantId];
+  if(!entry)return'';
+  var avviso='';
+  if(entry.status==='loading'&&!entry.turns.length)avviso='<div style="font-size:13px;color:var(--mid)"><i class="ti ti-loader-2"></i> Carico la conversazione…</div>';
+  if(entry.status==='error')avviso='<div style="font-size:13px;color:var(--orange-accessible);display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span><i class="ti ti-alert-triangle"></i> Non riesco a caricare la conversazione precedente.</span><button class="btn btn-outline btn-sm" onclick="loadM2Turns(\''+variantId+'\',true)"><i class="ti ti-refresh"></i> Riprova</button></div>';
+  var righe=entry.turns.map(function(t){
+    var stato='';
+    if(t.saveState==='failed')stato='<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--orange-accessible)"><span><i class="ti ti-cloud-off"></i> Non salvato</span><button class="btn btn-outline btn-sm" onclick="riprovaSalvataggioTurnoM2(\''+variantId+'\',\''+t.id+'\')"><i class="ti ti-refresh"></i> Salva di nuovo</button></div>';
+    return'<div class="m2-turn" style="padding:12px 14px;background:var(--cream);border-radius:var(--r-md)">'
+      +'<div style="font-weight:600;font-size:13px;color:var(--dark);margin-bottom:8px;white-space:pre-wrap"><i class="ti ti-message"></i> '+escAttr(t.question)+'</div>'
+      +'<div style="font-size:14px;color:var(--dark);line-height:1.4;white-space:pre-wrap">'+escAttr(t.response)+'</div>'
+      +stato+'</div>';
+  }).join('');
+  if(!avviso&&!righe)return'';
+  return'<div id="m2-turns-list" style="margin-top:10px;display:flex;flex-direction:column;gap:8px;max-height:420px;overflow-y:auto">'+avviso+righe+'</div>';
+}
+
+// ══════════════════════════════════════════════════════════
 // MichelinAI — invio reale (R3F): unico entry point della card, sostituisce
 // "Chiedi a MichelinAI" legacy. Legge la domanda dalla textarea, esegue
 // runM2 (R3D: prepara, non persiste), poi — solo se un risultato è stato
@@ -5028,12 +5128,13 @@ function renderYieldAnalysisPanel(recipe,v){
 // richiedono un gesto chef restano in S.m2Result, potate progressivamente
 // da applyM2Persistence stessa: questa funzione non applica mai altro.
 //
-// michelinAILastQuestion/michelinAILastResponse sono stato UI effimero
-// (mai PSL, mai Supabase, mai memoria cognitiva): l'unico motivo per cui
-// esistono è che l'auto-apply può consumare interamente S.m2Result (nessuna
-// proposta pending residua) — senza questa coppia, la prosa di MichelinAI
-// sparirebbe dalla card nello stesso istante in cui viene salvata la parte
-// automatica, il che sarebbe assurdo dal punto di vista dello chef.
+// Cronologia (m2_turns): un turno COMPLETATO (domanda + risposta valida
+// per QUESTA bozza) entra in S.m2TurnsByVariant e viene salvato con
+// recordM2Turn — indipendente dal salvataggio automatico L2/L3 (nessuna
+// interferenza con m2SaveFailed) e senza alcuna chiamata Anthropic in piu'.
+// Un errore M2 o una risposta scartata non entrano mai nella cronologia.
+// La prosa resta cosi' visibile anche quando l'auto-apply consuma
+// interamente S.m2Result.
 //
 // Guardrail S.m2SaveFailed (R3F, edge case): se il salvataggio automatico
 // fallisce, m2Result resta INTATTO (rollback già garantito da R3E) — ma un
@@ -5058,18 +5159,20 @@ async function inviaMichelinAI(recipeId){
   if(S.m2SaveFailed[variantId])return; // salvataggio automatico precedente non risolto: nessun nuovo turno finché non si riprova
 
   S.michelinAIQuestion='';
+  const risultatoPrecedente=S.m2Result[variantId]; // eventuale coda pending di un turno precedente
   await runM2(recipeId,domanda);
 
   // runM2 scarta già da solo un risultato stale (bozza cambiata durante
   // l'attesa) o fallito (S.m2Error impostato, S.m2Result mai scritto):
   // qui verifichiamo solo che ci sia davvero qualcosa da mostrare/applicare.
+  // Deve essere un risultato NUOVO di questo turno: una coda pending rimasta
+  // da un turno precedente non e' la risposta a questa domanda.
   const recipeOra=R(recipeId);
   const vOra=recipeOra&&curLab(recipeOra);
   if(!recipeOra||!vOra||vOra.id!==variantId)return;
-  if(!S.m2Result[variantId])return;
+  if(!S.m2Result[variantId]||S.m2Result[variantId]===risultatoPrecedente)return;
 
-  S.michelinAILastQuestion=domanda;
-  S.michelinAILastResponse=S.m2Result[variantId].response;
+  recordM2Turn(variantId,domanda,S.m2Result[variantId].response); // turno completato -> cronologia (salvataggio separato, non atteso)
   render(); // la risposta è visibile SUBITO, prima ancora del salvataggio automatico
 
   const esitoAutoApply=await applyM2Persistence(recipeId,{}); // solo parte auto-applicabile; saveToSupabase toasta già da sé in caso di errore
@@ -5148,15 +5251,17 @@ function voiceToNotes(recipeId){
 
 function voiceClear(recipeId){delete S.pendingVoiceText[recipeId];render();}
 
-function toggleRecording(recipeId){
-  if(S.recording){
-    if(S._speechRecognition){S._speechRecognition.stop();}
-    S.recording=false;render();return;
-  }
+// Motore di dettatura condiviso (Web Speech API del browser, nessun audio
+// salvato, nessuna chiamata AI): un solo microfono attivo alla volta in
+// tutta l'app. target identifica chi lo usa ('notes' | 'm2'); previewId e'
+// l'elemento in cui mostrare il testo provvisorio; onFinal riceve il testo
+// finale (solo se non vuoto) quando la dettatura termina.
+function startDictation(opts){
+  if(S.recording||S._speechRecognition)return false; // un solo microfono attivo (anche mentre il precedente si sta chiudendo)
   var SpeechRec=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SpeechRec){
     toast("Registrazione vocale non supportata da questo browser","ti-microphone-off");
-    return;
+    return false;
   }
   var rec=new SpeechRec();
   rec.lang="it-IT";
@@ -5169,24 +5274,56 @@ function toggleRecording(recipeId){
       if(e.results[i].isFinal){finalText+=e.results[i][0].transcript+" ";}
       else{interim+=e.results[i][0].transcript;}
     }
-    var preview=document.getElementById("voice-preview");
+    var preview=document.getElementById(opts.previewId);
     if(preview)preview.textContent=(finalText+interim).trim();
   };
   rec.onerror=function(e){
-    S.recording=false;S._speechRecognition=null;
+    S.recording=false;S.recordingTarget=null;S._speechRecognition=null;
     toast("Errore microfono: "+e.error,"ti-microphone-off");
     render();
   };
   rec.onend=function(){
-    S.recording=false;S._speechRecognition=null;
+    S.recording=false;S.recordingTarget=null;S._speechRecognition=null;
     if(finalText.trim()){
-      S.pendingVoiceText[recipeId]=finalText.trim();
+      opts.onFinal(finalText.trim());
     }
     render();
   };
   S._speechRecognition=rec;
   rec.start();
-  S.recording=true;render();
+  S.recording=true;S.recordingTarget=opts.target;render();
+  return true;
+}
+function stopDictation(){
+  if(S._speechRecognition){S._speechRecognition.stop();}
+  S.recording=false;render();
+}
+
+// Note vocali (comportamento invariato): il testo finale va in attesa di
+// essere smistato in Ingredienti / Procedimento / Appunti.
+function toggleRecording(recipeId){
+  if(S.recording){
+    if(S.recordingTarget&&S.recordingTarget!=='notes'){toast("C'è già un microfono attivo","ti-microphone");return;}
+    stopDictation();return;
+  }
+  startDictation({target:'notes',previewId:'voice-preview',onFinal:function(text){S.pendingVoiceText[recipeId]=text;}});
+}
+
+// MichelinAI M2: il testo dettato viene AGGIUNTO a quanto gia' scritto
+// nell'input (mai sostituito) e resta modificabile. Nessun invio
+// automatico: si invia sempre con il normale gesto dello chef.
+function toggleDictationM2(){
+  if(S.recording){
+    if(S.recordingTarget!=='m2'){toast("C'è già un microfono attivo","ti-microphone");return;}
+    stopDictation();return;
+  }
+  var inp=document.getElementById('mai-q-input');
+  if(inp)S.michelinAIQuestion=inp.value; // allinea a cio' che e' scritto ora
+  startDictation({target:'m2',previewId:'mai-voice-preview',onFinal:function(text){
+    var attuale=document.getElementById('mai-q-input');
+    var base=attuale?attuale.value:(S.michelinAIQuestion||'');
+    S.michelinAIQuestion=base.trim()?(base.replace(/\s+$/,'')+' '+text):text;
+  }});
 }
 
 // ══════════════════════════════════════════════════════════
@@ -6065,11 +6202,11 @@ function renderLabRecipe(recipe){
     <div class="card">
     ${labSectionHeader(recipe.id,'voice','ti-microphone','Note vocali',sectionsOpen.voice)}
     ${sectionsOpen.voice?`<div class="voice-panel">
-      <button class="voice-btn ${S.recording?'recording':''}" id="btn-voice">
-        <i class="ti ti-${S.recording?'player-stop':'microphone'}"></i>
-        ${S.recording?'Stop':'Registra nota'}
+      <button class="voice-btn ${S.recording&&S.recordingTarget==='notes'?'recording':''}" id="btn-voice">
+        <i class="ti ti-${S.recording&&S.recordingTarget==='notes'?'player-stop':'microphone'}"></i>
+        ${S.recording&&S.recordingTarget==='notes'?'Stop':'Registra nota'}
       </button>
-      ${S.recording?`<div id="voice-preview" style="flex:1;font-size:12px;color:var(--mid);font-style:italic;padding:4px 8px">In ascolto...</div>`:''}
+      ${S.recording&&S.recordingTarget==='notes'?`<div id="voice-preview" style="flex:1;font-size:12px;color:var(--mid);font-style:italic;padding:4px 8px">In ascolto...</div>`:''}
       ${S.pendingVoiceText[recipe.id]?`<div style="width:100%"><div class="voice-note">${S.pendingVoiceText[recipe.id]}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-outline btn-sm" onclick="voiceToIngredients('${recipe.id}')"><i class="ti ti-list-details"></i> Ingredienti</button><button class="btn btn-outline btn-sm" onclick="voiceToSteps('${recipe.id}')"><i class="ti ti-list-numbers"></i> Procedimento</button><button class="btn btn-outline btn-sm" onclick="voiceToNotes('${recipe.id}')"><i class="ti ti-notebook"></i> Appunti</button><button class="btn btn-outline btn-sm" onclick="voiceClear('${recipe.id}')"><i class="ti ti-x"></i></button></div></div>`:''}
     </div>`:''}
   </div>
@@ -6088,22 +6225,24 @@ function renderLabRecipe(recipe){
       const erroreM2=!staRispondendo&&!salvataggioFallito&&S.m2Error[v.id];
       const azioniPending=staRispondendo?'':renderMichelinAIPendingActions(recipe.id,v);
       const inputBloccato=staRispondendo||salvataggioFallito;
+      const dettaturaM2=S.recording&&S.recordingTarget==='m2';
       return`<div class="ai-panel">
-      <div class="ai-input-row">
-        <textarea class="ai-input" id="mai-q-input" rows="2" placeholder="Chiedi qualcosa su questa Scheda... (Cmd/Ctrl+Invio per inviare)" ${inputBloccato?'disabled':''}>${S.michelinAIQuestion||''}</textarea>
-        <button class="btn btn-lab btn-icon" id="mai-q-send" ${inputBloccato?'disabled':''}><i class="ti ${staRispondendo?'ti-loader-2':'ti-send'}"></i></button>
-      </div>
-      ${staRispondendo?`<div style="margin-top:10px;font-size:13px;color:var(--mid)"><i class="ti ti-loader-2"></i> MichelinAI sta rispondendo…</div>`:''}
-      ${erroreM2?`<div style="margin-top:10px;font-size:13px;color:#c0392b"><i class="ti ti-alert-circle"></i> ${erroreM2}</div>`:''}
-      ${(!staRispondendo&&S.michelinAILastQuestion)?`<div style="margin-top:10px;padding:12px 14px;background:var(--cream);border-radius:var(--r-md)">
-        <div style="font-weight:600;font-size:13px;color:var(--dark);margin-bottom:8px"><i class="ti ti-message"></i> ${S.michelinAILastQuestion}</div>
-        <div style="font-size:14px;color:var(--dark);line-height:1.4;white-space:pre-wrap">${S.michelinAILastResponse||''}</div>
+      ${renderM2Turns(v.id)}
+      ${!staRispondendo?`<div>
         ${salvataggioFallito?`<div style="margin-top:10px;padding:10px 12px;background:var(--orange-light);border-radius:var(--r-md);display:flex;flex-direction:column;gap:8px;align-items:flex-start">
           <div style="font-size:13px;color:var(--orange-accessible)"><i class="ti ti-alert-triangle"></i> Il salvataggio non è riuscito.</div>
           <button class="btn btn-lab btn-sm" onclick="riprovaSalvataggioM2('${recipe.id}')"><i class="ti ti-refresh"></i> Riprova salvataggio</button>
         </div>`:''}
         ${azioniPending}
       </div>`:''}
+      <div class="ai-input-row" style="margin-top:10px">
+        <textarea class="ai-input" id="mai-q-input" rows="2" placeholder="Chiedi qualcosa su questa Scheda... (Cmd/Ctrl+Invio per inviare)" ${inputBloccato?'disabled':''}>${S.michelinAIQuestion||''}</textarea>
+        <button class="btn btn-outline btn-icon ${dettaturaM2?'recording':''}" id="mai-q-mic" title="${dettaturaM2?'Ferma la dettatura':'Detta la domanda'}" ${inputBloccato?'disabled':''}><i class="ti ti-${dettaturaM2?'player-stop':'microphone'}"></i></button>
+        <button class="btn btn-lab btn-icon" id="mai-q-send" ${inputBloccato?'disabled':''}><i class="ti ${staRispondendo?'ti-loader-2':'ti-send'}"></i></button>
+      </div>
+      ${dettaturaM2?`<div id="mai-voice-preview" style="margin-top:6px;font-size:12px;color:var(--mid);font-style:italic">In ascolto...</div>`:''}
+      ${staRispondendo?`<div style="margin-top:10px;font-size:13px;color:var(--mid)"><i class="ti ti-loader-2"></i> MichelinAI sta rispondendo…</div>`:''}
+      ${erroreM2?`<div style="margin-top:10px;font-size:13px;color:#c0392b"><i class="ti ti-alert-circle"></i> ${erroreM2}</div>`:''}
     </div>`;})():''}
   </div>
 
@@ -7030,6 +7169,21 @@ function bindEvents(){
   }
   const maiQSend=document.getElementById('mai-q-send');
   if(maiQSend&&recipe)maiQSend.addEventListener('click',()=>inviaMichelinAI(recipe.id));
+  const maiQMic=document.getElementById('mai-q-mic');
+  if(maiQMic&&recipe)maiQMic.addEventListener('click',()=>toggleDictationM2());
+  // Cronologia M2 della Ricetta aperta: caricata quando la card e' visibile
+  // (una volta per sessione); all'apertura e a ogni nuovo turno si arriva
+  // all'ultimo scambio, senza strappare lo scroll a ogni altro render.
+  if(maiQInput&&recipe){
+    const vChat=curLab(recipe);
+    if(vChat){
+      loadM2Turns(vChat.id);
+      const lista=document.getElementById('m2-turns-list');
+      const entryChat=S.m2TurnsByVariant[vChat.id];
+      const firmaScroll=vChat.id+'|'+(entryChat?entryChat.turns.length:0);
+      if(lista&&S._m2TurnsScrollFirma!==firmaScroll){lista.scrollTop=lista.scrollHeight;S._m2TurnsScrollFirma=firmaScroll;}
+    }
+  }
 
   // Voice
   const btnVoice=document.getElementById('btn-voice');

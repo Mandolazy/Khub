@@ -341,6 +341,41 @@ export default async function handler(req, res) {
       return res.status(200).json(r);
     }
 
+    // MichelinAI — cronologia M2 (tabella m2_turns, migration 0010).
+    // Persistenza/visualizzazione, MAI memoria cognitiva: il ramo mode:'m2'
+    // non la legge e non la invia mai ad Anthropic. Lettura per variant,
+    // paginata (sbSelectAll) con ordine stabile created_at,id; separata dalla
+    // load principale, cosi' un suo errore non impedisce di caricare le Ricette.
+    if (body.supabaseAction === 'loadM2Turns') {
+      const variantId = typeof body.variantId === 'string' ? body.variantId : '';
+      if (!variantId) return res.status(200).json({ error: 'loadM2Turns: variantId mancante' });
+      const turns = await sbSelectAll('m2_turns?select=id,variant_id,question,response,created_at&variant_id=eq.' + encodeURIComponent(variantId) + '&order=created_at.asc,id.asc');
+      return res.status(200).json({ turns });
+    }
+
+    // Un turno COMPLETATO (domanda + risposta valida). INSERT idempotente:
+    // l'id e' generato dal client, un retry dello stesso turno con lo stesso
+    // id non crea duplicati e non modifica la riga gia' salvata.
+    if (body.supabaseAction === 'saveM2Turn') {
+      const t = body.turn || {};
+      const ok = typeof t.id === 'string' && t.id && typeof t.variant_id === 'string' && t.variant_id
+        && typeof t.question === 'string' && t.question.trim() && typeof t.response === 'string' && t.response.trim();
+      if (!ok) return res.status(200).json({ error: 'saveM2Turn: turno non valido' });
+      const row = { id: t.id, variant_id: t.variant_id, question: t.question, response: t.response };
+      if (typeof t.created_at === 'string' && t.created_at) row.created_at = t.created_at;
+      const r = await fetch(SB + '/rest/v1/m2_turns', {
+        method: 'POST',
+        headers: { ...SH_READ, 'Prefer': 'resolution=ignore-duplicates,return=minimal' },
+        body: JSON.stringify(row)
+      });
+      if (!r.ok) {
+        const detail = await r.text().catch(() => '');
+        console.error('Supabase error [m2_turns]:', r.status, detail);
+        return res.status(200).json({ error: detail || ('HTTP ' + r.status), status: r.status });
+      }
+      return res.status(200).json({ ok: true });
+    }
+
     // Sprint Produzione — Micro-Step 10: lettura delle production_sessions
     // persistenti per la Produzione Guidata. Sola lettura, nessuna azione
     // generica di lettura esisteva per una tabella nuova (a differenza di

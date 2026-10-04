@@ -60,7 +60,7 @@ const srcAdottaCriteria = extractFunction('async function adottaCriteriaM2(recip
 const srcRiprova = extractFunction('async function riprovaSalvataggioM2(recipeId)');
 
 function makeS(recipes) {
-  return { recipes: recipes, m2Result: {}, m2Loading: false, m2LoadingKey: null, m2Error: {}, m2SaveFailed: {}, michelinAIQuestion: '', michelinAILastQuestion: null, michelinAILastResponse: null };
+  return { recipes: recipes, m2Result: {}, m2Loading: false, m2LoadingKey: null, m2Error: {}, m2SaveFailed: {}, michelinAIQuestion: '', m2TurnsByVariant: {} };
 }
 
 function makeRecipe(l2Items) {
@@ -82,27 +82,31 @@ function makeDocument(inputValue) {
   return { getElementById(id) { return id === 'mai-q-input' ? { value: inputValue } : null; } };
 }
 
-// Factory per inviaMichelinAI: runM2/applyM2Persistence/render sono le
-// uniche dipendenze mockate (il vero confine I/O + il seam sotto test);
+// Factory per inviaMichelinAI: runM2/applyM2Persistence/recordM2Turn/render
+// sono le uniche dipendenze mockate (il vero confine I/O + il seam sotto
+// test; recordM2Turn = cronologia m2_turns, testata a parte in
+// test-m2-chat-persistence.js);
 // R/curLab sono le funzioni REALI estratte da khub_mvp.html.
 function makeInvia(S, opts) {
   opts = opts || {};
   const renderLog = [];
   const runM2Calls = [];
   const applyCalls = [];
+  const recordCalls = [];
   const runM2Impl = opts.runM2 || (async () => {});
   const applyImpl = opts.apply || (async () => ({ ok: true }));
   const factory = new Function(
-    'S', 'document', 'runM2', 'applyM2Persistence', 'render',
+    'S', 'document', 'runM2', 'applyM2Persistence', 'render', 'recordM2Turn',
     srcR + '\n' + srcCurLab + '\n' + srcInvia + '\nreturn inviaMichelinAI;'
   );
   const inviaMichelinAI = factory(
     S, makeDocument(opts.inputValue),
     async (recipeId, message) => { runM2Calls.push({ recipeId, message }); return runM2Impl(recipeId, message); },
     async (recipeId, options) => { applyCalls.push({ recipeId, options }); return applyImpl(recipeId, options); },
-    () => renderLog.push(1)
+    () => renderLog.push(1),
+    (variantId, question, response) => { recordCalls.push({ variantId, question, response }); }
   );
-  return { inviaMichelinAI, runM2Calls, applyCalls, renderLog };
+  return { inviaMichelinAI, runM2Calls, applyCalls, recordCalls, renderLog };
 }
 
 function makeAzioneChef(srcFn, fnName, S, applyImpl) {
@@ -171,17 +175,17 @@ async function run() {
   console.log('');
   console.log('3-4. risposta visibile, mai JSON/PSL');
 
-  await test('3: response prose salvata come ultima domanda/risposta effimera dopo un turno riuscito', async () => {
+  await test('3: turno riuscito -> domanda e risposta registrate nella cronologia DI QUESTA variant (mai uno stato globale)', async () => {
     const recipe = makeRecipe([]);
     const S = makeS([recipe]);
-    const { inviaMichelinAI } = makeInvia(S, {
+    const { inviaMichelinAI, recordCalls } = makeInvia(S, {
       inputValue: 'Che ne pensi della cottura?',
       runM2: async () => { S.m2Result['v1'] = { response: 'La cottura mi sembra corretta.', l2Updates: { applied: [], rejected: [] }, l2New: [], intentionChange: null, criteriaChange: null, l3Candidates: [] }; },
       apply: async () => { delete S.m2Result['v1']; return { ok: true }; },
     });
     await inviaMichelinAI('r1');
-    assert.strictEqual(S.michelinAILastQuestion, 'Che ne pensi della cottura?');
-    assert.strictEqual(S.michelinAILastResponse, 'La cottura mi sembra corretta.');
+    assert.deepStrictEqual(recordCalls, [{ variantId: 'v1', question: 'Che ne pensi della cottura?', response: 'La cottura mi sembra corretta.' }]);
+    assert.ok(!('michelinAILastQuestion' in S) && !('michelinAILastResponse' in S), 'nessuna coppia globale');
   });
 
   await test('4: il template della card MichelinAI non renderizza mai JSON/PSL/marker interni', () => {
@@ -358,17 +362,18 @@ async function run() {
   console.log('');
   console.log('20. response sopravvive anche a m2Result completamente consumato');
 
-  await test('20: la risposta resta visibile (stato UI effimero) anche se l\'auto-apply consuma interamente m2Result', async () => {
+  await test('20: la risposta resta visibile (cronologia) anche se l\'auto-apply consuma interamente m2Result', async () => {
     const recipe = makeRecipe([]);
     const S = makeS([recipe]);
-    const { inviaMichelinAI } = makeInvia(S, {
+    const { inviaMichelinAI, recordCalls } = makeInvia(S, {
       inputValue: 'domanda che non lascia nulla pending',
       runM2: async () => { S.m2Result['v1'] = { response: 'Tutto a posto, nessuna azione richiesta.', l2Updates: { applied: ['l2_x'], rejected: [] }, l2New: [], intentionChange: null, criteriaChange: null, l3Candidates: [] }; },
       apply: async () => { delete S.m2Result['v1']; return { ok: true }; }, // simula il pruning reale quando nulla resta pending
     });
     await inviaMichelinAI('r1');
     assert.strictEqual(S.m2Result['v1'], undefined, 'm2Result davvero consumato dall\'auto-apply');
-    assert.strictEqual(S.michelinAILastResponse, 'Tutto a posto, nessuna azione richiesta.', 'la prosa resta leggibile nello stato UI effimero, non e\' sparita col result');
+    assert.strictEqual(recordCalls.length, 1);
+    assert.strictEqual(recordCalls[0].response, 'Tutto a posto, nessuna azione richiesta.', 'la prosa resta nella cronologia, non e\' sparita col result');
   });
 
   console.log('');
@@ -431,15 +436,14 @@ async function run() {
     assert.strictEqual(S.m2SaveFailed['v1'], undefined);
   });
 
-  await test('27: dopo un retry riuscito la risposta precedente resta visibile (stato UI effimero non toccato)', async () => {
+  await test('27: dopo un retry riuscito la risposta precedente resta visibile (cronologia non toccata)', async () => {
     const S = makeS([makeRecipe([])]);
     S.m2SaveFailed['v1'] = true;
-    S.michelinAILastQuestion = 'domanda precedente';
-    S.michelinAILastResponse = 'risposta precedente';
+    S.m2TurnsByVariant['v1'] = { status: 'loaded', turns: [{ id: 't1', question: 'domanda precedente', response: 'risposta precedente', createdAt: '2026-10-01T00:00:00.000Z', saveState: 'saved' }] };
+    const prima = JSON.stringify(S.m2TurnsByVariant);
     const { riprovaSalvataggioM2 } = makeRiprova(S, async () => ({ ok: true }));
     await riprovaSalvataggioM2('r1');
-    assert.strictEqual(S.michelinAILastQuestion, 'domanda precedente');
-    assert.strictEqual(S.michelinAILastResponse, 'risposta precedente');
+    assert.strictEqual(JSON.stringify(S.m2TurnsByVariant), prima);
   });
 
   await test('28: dopo un retry riuscito un nuovo invio e\' nuovamente consentito (runM2 tornato chiamabile)', async () => {
