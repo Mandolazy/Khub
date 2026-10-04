@@ -173,9 +173,9 @@ const CLIENT_SRC = VARS + '\n' + [
   'function setIngredientCanonicalLink(recipeId,variantId,ingId,canonicalId)', 'function findIngredientRow(recipeId,variantId,ingId)',
   'function watchRecipeSaves(recipeId)', 'async function patchIngredientCanonicalLink(ingId,variantId,canonicalId)', 'async function persistIngredientCanonicalLink(recipeId,variantId,ingId,canonicalId)',
   'function canonicalIdentityOwner(ctx)', 'function renderCanonicalSearchResults(ctx,query)',
-  'function renderCanonicalIdentityStep(ctx,owner,ingName,cancelCall)', 'function onCanonicalIdentitySearch(ctx,val)',
+  'function renderCanonicalIdentityStep(ctx,owner,ingName)', 'function onCanonicalIdentitySearch(ctx,val)',
   'function onCanonicalIdentityCreateName(ctx,val)', 'async function selectCanonicalIdentity(ctx,canonicalId)',
-  'async function createCanonicalIdentity(ctx,rawName)', 'function skipCanonicalIdentity(ctx)',
+  'async function createCanonicalIdentity(ctx,rawName)', 'function openCanonicalIdentity(ctx,rawValue)', 'function backFromCanonicalIdentity(ctx)',
   'function onIngUnit(recipeId,ingId,val)', 'function onVarIngUnit(recipeId,varId,ingId,val)',
   'function confirmUnitConversion(pesoMedio)', 'function applyUnitConversionToRow(p,peso)',
   'function openUnitConversionPending(p)', 'async function linkPendingUnitIngredient(p,canonicalId)',
@@ -212,7 +212,7 @@ function makeClient(handler) {
     ${CLIENT_SRC}
     return {S, loadFromSupabase, saveToSupabase, rendiAttiva, buildPreparedInputDaRicettaAttiva, findMissingProductionConversions,
       confirmMandaInProduzione, confirmConversionPreflightStep, renderConversionPreflightModal, cancelConversionPreflight,
-      selectCanonicalIdentity, createCanonicalIdentity, skipCanonicalIdentity, onCanonicalIdentitySearch, findCanonicalByExactName,
+      selectCanonicalIdentity, createCanonicalIdentity, openCanonicalIdentity, backFromCanonicalIdentity, onCanonicalIdentitySearch, findCanonicalByExactName,
       searchCanonicalIngredients, onIngUnit, onVarIngUnit, confirmUnitConversion, renderUnitConversionModal, resolveKnownConversionFactForIngredient};
   `);
   const fakeDocument = { getElementById: () => null };
@@ -251,17 +251,40 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
   const posts = (fake, table) => fake.calls.filter(x => x.method === 'POST' && x.table === table).length;
   const patches = (fake, table) => fake.calls.filter(x => x.method === 'PATCH' && x.table === table).length;
 
-  console.log('1-2. collegamento automatico solo per nome identico');
+  console.log('1-2. domanda di conversione PRIMA, collegamento solo su richiesta');
 
-  await test('1: " Acqua " + canonico ACQUA -> collegata automaticamente e persistita; poi si chiede solo il valore', async () => {
+  await test('1+2+11: Prezzemolo (n) non collegato e sconosciuto -> domanda diretta; valore -> fact legacy, nessun canonico, nessun link, Sessione', async () => {
+    const { api, fake, c } = await ready({ canonicals: [ACQUA], ingredients: [row('i1', 'Prezzemolo', 1, 'n')] });
+    const pf = await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
+    assert.strictEqual(pf.identity, null, 'nessun "Che ingrediente e\'?"');
+    const html = api.renderConversionPreflightModal();
+    assert.match(html, /Quanto pesa 1 Prezzemolo\?/);
+    assert.match(html, /Collega a ingrediente conosciuto/, 'azione secondaria disponibile');
+    assert.doesNotMatch(html, /Che ingrediente/);
+    await api.confirmConversionPreflightStep('30');
+    const saved = fake.tables.ingredient_conversions;
+    assert.strictEqual(saved.length, 1);
+    assert.deepStrictEqual(Object.keys(saved[0]).sort(), ['confirmed_at', 'factor', 'from_unit', 'id', 'ingredient_name', 'source_detail', 'source_type', 'to_unit']);
+    assert.deepStrictEqual([saved[0].ingredient_name, saved[0].from_unit, saved[0].factor], ['prezzemolo', 'n', 30]);
+    assert.strictEqual(fake.tables.canonical_ingredients.length, 1, 'nessun canonico creato');
+    assert.strictEqual(patches(fake, 'ingredients'), 0, 'nessun link');
+    assert.ok(!c.apiCalls.includes('createCanonicalIngredient') && !c.apiCalls.includes('linkIngredientCanonical'));
+    assert.strictEqual(c.created.length, 1, 'preflight continuato, Sessione creata una volta');
+  });
+
+  await test('11-exact: nome IDENTICO a un canonico (" Acqua " / ACQUA) -> nessun collegamento automatico, domanda per nome come prima', async () => {
     const { api, fake, c } = await ready({ canonicals: [ACQUA], ingredients: [row('i1', ' Acqua ', 500, 'ml')] });
     const pf = await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
-    assert.strictEqual(pf.identity, null, 'nessun passo "identifica"');
-    assert.strictEqual(pf.missing.length, 1);
-    assert.strictEqual(pf.missing[0].canonicalIngredientId, 'ciAcqua');
-    assert.strictEqual(dbRow(fake, ' Acqua ').canonical_ingredient_id, 'ciAcqua', 'link persistito');
-    assert.strictEqual(c.created.length, 0);
-    assert.match(api.renderConversionPreflightModal(), /Quanto pesa 1 ml di  Acqua  \(ACQUA\)\?/);
+    assert.strictEqual(pf.identity, null);
+    assert.strictEqual(pf.missing[0].canonicalIngredientId, null);
+    assert.strictEqual(patches(fake, 'ingredients'), 0, 'nessun link invisibile');
+    await api.confirmConversionPreflightStep('1');
+    const saved = fake.tables.ingredient_conversions[0];
+    assert.deepStrictEqual([saved.ingredient_name, saved.canonical_ingredient_id], ['acqua', undefined], 'legacy per nome');
+    assert.strictEqual(dbRow(fake, ' Acqua ').canonical_ingredient_id, null);
+    assert.strictEqual(c.created.length, 1);
+    // la conoscenza scritta per nome "acqua" e' gia' quella del canonico ACQUA (caso A): nessun link serviva
+    assert.strictEqual(api.resolveKnownConversionFactForIngredient({ name: 'acqua per brodo', unit: 'ml', canonicalIngredientId: 'ciAcqua' }).factor, 1);
   });
 
   await test('1b: nome identico + fact storica "acqua" -> collegata, nessuna domanda, Sessione creata', async () => {
@@ -273,27 +296,38 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
     assert.strictEqual(dbRow(fake, 'ACQUA').canonical_ingredient_id, null, 'mai mostrato/collegato quando non serve');
   });
 
-  await test('2: "acqua per brodo" + ACQUA -> nessun collegamento automatico, passo "identifica"', async () => {
+  await test('3+4: "Collega a ingrediente conosciuto" apre la ricerca; Indietro torna alla stessa domanda senza toccare nulla', async () => {
     const { api, fake, c } = await ready({ canonicals: [ACQUA], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] });
-    const before = posts(fake, 'ingredients');
     const pf = await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
-    assert.ok(pf.identity, 'passo "identifica" attivo');
+    assert.strictEqual(pf.identity, null);
+    const dbBefore = JSON.stringify(fake.tables);
+    const callsBefore = c.apiCalls.length;
+    api.openCanonicalIdentity('preflight', '12'); // valore gia' digitato
+    assert.ok(pf.identity);
     assert.strictEqual(pf.identity.createName, 'acqua per brodo', 'nome nuovo precompilato col nome della riga');
-    assert.strictEqual(posts(fake, 'ingredients'), before, 'nessun salvataggio');
-    assert.strictEqual(dbRow(fake, 'acqua per brodo').canonical_ingredient_id, null);
-    assert.strictEqual(c.created.length, 0);
     const html = api.renderConversionPreflightModal();
-    assert.match(html, /Collega a ingrediente esistente/);
+    assert.match(html, /Collega a ingrediente conosciuto/);
+    assert.match(html, /Cerca ingrediente/);
     assert.match(html, /Crea e collega/);
-    assert.match(html, /Continua senza collegare/);
+    assert.match(html, /Indietro/);
+    assert.doesNotMatch(html, /Continua senza collegare/);
     assert.match(html, /value="acqua per brodo"/);
+    api.backFromCanonicalIdentity('preflight');
+    assert.strictEqual(pf.identity, null);
+    const back = api.renderConversionPreflightModal();
+    assert.match(back, /Quanto pesa 1 ml di acqua per brodo\?/, 'stessa domanda');
+    assert.match(back, /value="12"/, 'valore digitato conservato');
+    assert.strictEqual(JSON.stringify(fake.tables), dbBefore, 'nessun dato modificato');
+    assert.strictEqual(c.apiCalls.length, callsBefore, 'nessuna richiesta');
+    assert.strictEqual(api.S.recipes[0].validatedVariants[0].ingredients[0].canonicalIngredientId, null);
+    assert.strictEqual(c.created.length, 0);
     for (const n of ['acqua naturale', 'acqua per marinatura']) assert.strictEqual(api.findCanonicalByExactName(n), null);
-    for (const n of ['Acqua', ' acqua ', 'ACQUA']) assert.strictEqual(api.findCanonicalByExactName(n).id, 'ciAcqua');
   });
 
   await test('2b: ricerca testuale mostra i canonici ma non collega nulla', async () => {
     const { api, fake } = await ready({ canonicals: [ACQUA, canon('ciAZ', 'acqua frizzante'), UOVO], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] });
     const pf = await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
+    api.openCanonicalIdentity('preflight');
     api.onCanonicalIdentitySearch('preflight', 'ACQ');
     assert.deepStrictEqual(api.searchCanonicalIngredients('ACQ').map(c => c.id), ['ciAcqua', 'ciAZ']);
     assert.strictEqual(pf.identity.query, 'ACQ');
@@ -302,14 +336,14 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
   });
 
   console.log('');
-  console.log('3-6. collega a esistente / continua senza collegare');
+  console.log('3-6. collega a esistente / senza collegare');
 
   await test('3+4+12: collega "acqua per brodo" ad ACQUA -> link persistito, fact storica "acqua" riusata, nessuna domanda, nome invariato', async () => {
     const { api, fake, c } = await ready({ canonicals: [ACQUA], conversions: [H_ACQUA], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] });
     const convBefore = JSON.stringify(fake.tables.ingredient_conversions);
     const pf = await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
-    assert.ok(pf.identity);
-    await api.selectCanonicalIdentity('preflight', 'ciAcqua');
+    assert.strictEqual(pf.identity, null, 'prima la domanda di conversione');
+    api.openCanonicalIdentity('preflight'); await api.selectCanonicalIdentity('preflight', 'ciAcqua');
     const db = fake.tables.ingredients.find(i => i.variant_id === 'vLab');
     assert.deepStrictEqual([db.name, db.canonical_ingredient_id], ['acqua per brodo', 'ciAcqua'], 'nome invariato, link persistito');
     assert.strictEqual(api.S.pendingConversionPreflight, null, 'nessuna domanda di conversione');
@@ -323,7 +357,7 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
   await test('5+13: link riuscito ma conversione assente -> si chiede il valore, fact su canonico; dopo reload link e fact riusati', async () => {
     const { api, fake, c } = await ready({ canonicals: [ACQUA], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] });
     const pf = await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
-    await api.selectCanonicalIdentity('preflight', 'ciAcqua');
+    api.openCanonicalIdentity('preflight'); await api.selectCanonicalIdentity('preflight', 'ciAcqua');
     assert.strictEqual(api.S.pendingConversionPreflight, pf);
     assert.strictEqual(pf.identity, null, 'ora si chiede il valore');
     assert.strictEqual(c.created.length, 0);
@@ -339,10 +373,9 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
     assert.strictEqual(c2.created.length, 1);
   });
 
-  await test('6: continua senza collegare -> comportamento legacy (domanda per nome riga, fact senza canonical)', async () => {
+  await test('6: senza usare il collegamento -> comportamento legacy (domanda per nome riga, fact senza canonical)', async () => {
     const { api, fake, c } = await ready({ canonicals: [ACQUA], conversions: [H_ACQUA], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] });
     const pf = await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
-    api.skipCanonicalIdentity('preflight');
     assert.strictEqual(pf.identity, null);
     assert.match(api.renderConversionPreflightModal(), /Quanto pesa 1 ml di acqua per brodo\?/);
     await api.confirmConversionPreflightStep('1.02');
@@ -359,8 +392,9 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
   await test('7: crea "ACQUA" (prefill modificato) -> canonico creato, riga collegata, fact storica "acqua" riusata', async () => {
     const { api, fake, c } = await ready({ canonicals: [], conversions: [H_ACQUA], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] });
     const pf = await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
+    api.openCanonicalIdentity('preflight');
     assert.strictEqual(pf.identity.createName, 'acqua per brodo');
-    await api.createCanonicalIdentity('preflight', '  ACQUA ');
+    api.openCanonicalIdentity('preflight'); await api.createCanonicalIdentity('preflight', '  ACQUA ');
     assert.strictEqual(fake.tables.canonical_ingredients.length, 1);
     const ci = fake.tables.canonical_ingredients[0];
     assert.deepStrictEqual([ci.name, ci.name_key], ['ACQUA', 'acqua'], 'nome pulito dagli spazi, name_key generata');
@@ -374,7 +408,7 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
   await test('7b: crea con nome vuoto -> errore, nulla creato', async () => {
     const { api, fake } = await ready({ canonicals: [], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] });
     const pf = await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
-    await api.createCanonicalIdentity('preflight', '   ');
+    api.openCanonicalIdentity('preflight'); await api.createCanonicalIdentity('preflight', '   ');
     assert.match(pf.error, /nome/);
     assert.strictEqual(posts(fake, 'canonical_ingredients'), 0);
     assert.ok(pf.identity);
@@ -383,7 +417,7 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
   await test('8: " ACQUA " quando ACQUA e\' nel catalogo -> nessun duplicato, nessun INSERT, usa quello esistente', async () => {
     const { api, fake } = await ready({ canonicals: [ACQUA], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] });
     await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
-    await api.createCanonicalIdentity('preflight', ' ACQUA ');
+    api.openCanonicalIdentity('preflight'); await api.createCanonicalIdentity('preflight', ' ACQUA ');
     assert.strictEqual(posts(fake, 'canonical_ingredients'), 0);
     assert.strictEqual(fake.tables.canonical_ingredients.length, 1);
     assert.strictEqual(dbRow(fake, 'acqua per brodo').canonical_ingredient_id, 'ciAcqua');
@@ -393,7 +427,7 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
     const { api, fake } = await ready({ canonicals: [], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] });
     await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
     fake.tables.canonical_ingredients.push(canon('ciAltro', 'Acqua'));
-    await api.createCanonicalIdentity('preflight', ' ACQUA ');
+    api.openCanonicalIdentity('preflight'); await api.createCanonicalIdentity('preflight', ' ACQUA ');
     assert.strictEqual(posts(fake, 'canonical_ingredients'), 1, 'un INSERT, rifiutato');
     assert.deepStrictEqual(fake.tables.canonical_ingredients.map(r => r.id), ['ciAltro'], 'nessun duplicato');
     assert.strictEqual(dbRow(fake, 'acqua per brodo').canonical_ingredient_id, 'ciAltro');
@@ -404,13 +438,13 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
     const { api, fake, c } = await ready({ canonicals: [], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] });
     const pf = await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
     fake.failPost('canonical_ingredients');
-    await api.createCanonicalIdentity('preflight', 'ACQUA');
+    api.openCanonicalIdentity('preflight'); await api.createCanonicalIdentity('preflight', 'ACQUA');
     assert.match(pf.error, /creazione dell'ingrediente/);
     assert.strictEqual(pf.loading, false);
     assert.strictEqual(dbRow(fake, 'acqua per brodo').canonical_ingredient_id, null);
     const firstId = pf.identity.createId;
     fake.healPost('canonical_ingredients');
-    await api.createCanonicalIdentity('preflight', 'ACQUA');
+    api.openCanonicalIdentity('preflight'); await api.createCanonicalIdentity('preflight', 'ACQUA');
     assert.deepStrictEqual(fake.tables.canonical_ingredients.map(r => r.id), [firstId], 'stesso id riusato');
     assert.strictEqual(dbRow(fake, 'acqua per brodo').canonical_ingredient_id, firstId);
     assert.strictEqual(c.created.length, 0, 'conversione ancora da chiedere');
@@ -424,7 +458,7 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
     const { api, fake, c } = await ready({ canonicals: [ACQUA], conversions: [H_ACQUA], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] });
     const pf = await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
     fake.failPost('ingredients:PATCH');
-    await api.selectCanonicalIdentity('preflight', 'ciAcqua');
+    api.openCanonicalIdentity('preflight'); await api.selectCanonicalIdentity('preflight', 'ciAcqua');
     assert.strictEqual(pf.error, LINK_ERR);
     assert.ok(pf.identity, 'resta sul passo "identifica"');
     assert.strictEqual(pf.loading, false);
@@ -433,24 +467,25 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
     assert.strictEqual(fake.tables.ingredient_conversions.length, 1);
   });
 
-  await test('9b: auto-link (nome identico) fallito -> passo "identifica" con errore, nessuna Sessione', async () => {
-    const { api, fake, c } = await ready({ canonicals: [ACQUA], ingredients: [row('i1', 'acqua', 500, 'ml')] });
-    fake.failPost('ingredients:PATCH');
+  await test('9b: link fallito -> Indietro -> valore legacy: nessun link, una Sessione', async () => {
+    const { api, fake, c } = await ready({ canonicals: [ACQUA], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] });
     const pf = await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
+    fake.failPost('ingredients:PATCH');
+    api.openCanonicalIdentity('preflight'); await api.selectCanonicalIdentity('preflight', 'ciAcqua');
     assert.strictEqual(pf.error, LINK_ERR);
-    assert.ok(pf.identity);
-    assert.strictEqual(api.S.recipes[0].validatedVariants[0].ingredients[0].canonicalIngredientId, null);
-    assert.strictEqual(c.created.length, 0);
-    fake.healPost('ingredients:PATCH');
-    await api.selectCanonicalIdentity('preflight', 'ciAcqua');
-    assert.strictEqual(pf.identity, null, 'retry manuale riuscito');
-    assert.strictEqual(dbRow(fake, 'acqua').canonical_ingredient_id, 'ciAcqua');
+    api.backFromCanonicalIdentity('preflight');
+    assert.strictEqual(pf.identity, null);
+    assert.strictEqual(pf.error, null);
+    await api.confirmConversionPreflightStep('1');
+    assert.strictEqual(fake.tables.ingredient_conversions[0].ingredient_name, 'acqua per brodo');
+    assert.strictEqual(dbRow(fake, 'acqua per brodo').canonical_ingredient_id, null);
+    assert.strictEqual(c.created.length, 1);
   });
 
   await test('9c: canonico non risolvibile scelto -> errore, nessun link', async () => {
     const { api, fake } = await ready({ canonicals: [ACQUA], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] });
     const pf = await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
-    await api.selectCanonicalIdentity('preflight', 'ciGhost');
+    api.openCanonicalIdentity('preflight'); await api.selectCanonicalIdentity('preflight', 'ciGhost');
     assert.strictEqual(pf.error, 'Ingrediente collegato non trovato nel catalogo. Ricarica la pagina e riprova.');
     assert.strictEqual(dbRow(fake, 'acqua per brodo').canonical_ingredient_id, null);
   });
@@ -458,12 +493,14 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
   await test('10: doppio click su collega / crea / conferma -> un solo link, un solo canonico, una sola fact, una sola Sessione', async () => {
     let { api, fake, c } = await ready({ canonicals: [ACQUA], conversions: [H_ACQUA], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] });
     await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
+    api.openCanonicalIdentity('preflight');
     await Promise.all([api.selectCanonicalIdentity('preflight', 'ciAcqua'), api.selectCanonicalIdentity('preflight', 'ciAcqua')]);
     assert.strictEqual(patches(fake, 'ingredients'), 1, 'un solo salvataggio del link');
     assert.strictEqual(c.created.length, 1, 'una sola Sessione');
 
     ({ api, fake, c } = await ready({ canonicals: [], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] }));
     await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
+    api.openCanonicalIdentity('preflight');
     await Promise.all([api.createCanonicalIdentity('preflight', 'ACQUA'), api.createCanonicalIdentity('preflight', 'ACQUA')]);
     assert.strictEqual(fake.tables.canonical_ingredients.length, 1, 'un solo canonico');
     assert.strictEqual(posts(fake, 'canonical_ingredients'), 1);
@@ -475,7 +512,8 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
     const vv = api.S.recipes[0].validatedVariants[0];
     api.S.pendingMandaInProduzione = { recipeId: 'r1', variantId: vv.id, portions: '4', gpp: '300', error: null, loading: false };
     await Promise.all([api.confirmMandaInProduzione(), api.confirmMandaInProduzione()]);
-    assert.ok(api.S.pendingConversionPreflight.identity, 'un solo preflight aperto');
+    assert.ok(api.S.pendingConversionPreflight && api.S.pendingConversionPreflight.missing.length === 1, 'un solo preflight aperto');
+    assert.strictEqual(patches(fake, 'ingredients'), 0);
   });
 
   console.log('');
@@ -484,8 +522,8 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
   await test('11a: preflight "uova per impasto" (n) -> collega a UOVO -> peso di riferimento del canonico, nessuna domanda', async () => {
     const { api, fake, c } = await ready({ canonicals: [UOVO], ingredients: [row('i1', 'uova per impasto', 3, 'n')] });
     const pf = await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
-    assert.ok(pf.identity, 'il nome riga non e\' identico: si chiede l\'identita\'');
-    await api.selectCanonicalIdentity('preflight', 'ciUovo');
+    assert.strictEqual(pf.identity, null, 'domanda di conversione diretta');
+    api.openCanonicalIdentity('preflight'); await api.selectCanonicalIdentity('preflight', 'ciUovo');
     assert.strictEqual(c.created.length, 1);
     const ing = c.created[0].ingredients[0];
     assert.deepStrictEqual([ing.conversionFact.factor, ing.conversionFact.sourceType], [55, 'reference_data']);
@@ -495,7 +533,7 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
   await test('11b: preflight n senza peso noto per il canonico -> valore chiesto e salvato sul canonico', async () => {
     const { api, fake, c } = await ready({ canonicals: [canon('ciPesca', 'pesca')], ingredients: [row('i1', 'pesche per decorazione', 4, 'n')] });
     const pf = await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]);
-    await api.selectCanonicalIdentity('preflight', 'ciPesca');
+    api.openCanonicalIdentity('preflight'); await api.selectCanonicalIdentity('preflight', 'ciPesca');
     assert.strictEqual(pf.identity, null);
     assert.match(api.renderConversionPreflightModal(), /Quanto pesa 1 pesche per decorazione \(pesca\)\?/);
     await api.confirmConversionPreflightStep('150');
@@ -504,15 +542,16 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
     assert.strictEqual(c.created.length, 1);
   });
 
-  await test('11c: LAB cambio unita\' n->g -> identifica -> UOVO: peso noto, convertita subito, link persistito, nome invariato', async () => {
+  await test('11c: LAB cambio unita\' n->g -> Collega a ingrediente conosciuto -> UOVO: peso noto, convertita subito, link persistito, nome invariato', async () => {
     const fake = makeFakeSupabase(); seed(fake, { canonicals: [UOVO], ingredients: [row('ingUova01', 'uova per impasto', 3, 'n')] }); globalThis.fetch = fake.fetch;
     const c = makeClient(handler); await c.api.loadFromSupabase();
     const api = c.api;
     api.onIngUnit('r1', 'ingUova01', 'g');
     const p = api.S.pendingUnitConversion;
-    assert.ok(p && p.identity, 'passo "identifica" nel modal peso medio');
-    assert.match(api.renderUnitConversionModal(), /Continua senza collegare/);
-    await api.selectCanonicalIdentity('unit', 'ciUovo');
+    assert.ok(p && !p.identity, 'domanda del peso immediata');
+    assert.match(api.renderUnitConversionModal(), /Quanto pesa <strong>uova per impasto<\/strong> in media\?/);
+    assert.match(api.renderUnitConversionModal(), /Collega a ingrediente conosciuto/);
+    api.openCanonicalIdentity('unit'); await api.selectCanonicalIdentity('unit', 'ciUovo');
     assert.strictEqual(api.S.pendingUnitConversion, null);
     const lab = api.S.recipes[0].labVersions[0].ingredients[0];
     assert.deepStrictEqual([lab.name, lab.unit, lab.qty, lab.canonicalIngredientId], ['uova per impasto', 'g', 165, 'ciUovo']);
@@ -524,7 +563,7 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
     const { api, fake, vv } = await ready({ canonicals: [], ingredients: [row('i1', 'pepe rosa in grani', 10, 'n')] });
     const ingId = vv.ingredients[0].id;
     api.onVarIngUnit('r1', vv.id, ingId, 'g');
-    await api.createCanonicalIdentity('unit', 'PEPE ROSA');
+    api.openCanonicalIdentity('unit'); await api.createCanonicalIdentity('unit', 'PEPE ROSA');
     const p = api.S.pendingUnitConversion;
     assert.ok(p && !p.identity, 'ora si chiede il peso');
     assert.match(api.renderUnitConversionModal(), /pepe rosa in grani \(PEPE ROSA\)/);
@@ -537,28 +576,51 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
     assert.deepStrictEqual([db.name, db.canonical_ingredient_id], ['pepe rosa in grani', ci.id]);
   });
 
-  await test('11e: cambio unita\' n->g, nome identico al canonico -> collegamento automatico, poi domanda del peso', async () => {
+  await test('11e: LAB n->g, nome identico al canonico -> nessun collegamento automatico; peso inserito -> legacy', async () => {
     const fake = makeFakeSupabase(); seed(fake, { canonicals: [canon('ciPepe', 'Pepe')], ingredients: [row('ingPepe01', 'pepe', 10, 'n')] }); globalThis.fetch = fake.fetch;
     const c = makeClient(handler); await c.api.loadFromSupabase();
     c.api.onIngUnit('r1', 'ingPepe01', 'g');
-    await flush(); await flush(); await flush();
+    await flush(); await flush();
     const p = c.api.S.pendingUnitConversion;
     assert.ok(p && !p.identity && !p.loading);
-    assert.strictEqual(p.canonicalIngredientId, 'ciPepe');
-    assert.strictEqual(dbRow(fake, 'pepe').canonical_ingredient_id, 'ciPepe');
+    assert.strictEqual(p.canonicalIngredientId, null);
+    assert.strictEqual(patches(fake, 'ingredients'), 0);
+    c.api.confirmUnitConversion('0.05');
+    await flush(); await flush();
+    assert.deepStrictEqual([fake.tables.ingredient_conversions[0].ingredient_name, fake.tables.ingredient_conversions[0].canonical_ingredient_id], ['pepe', undefined]);
   });
 
-  await test('11f: cambio unita\' n->g, continua senza collegare -> legacy invariato', async () => {
-    const fake = makeFakeSupabase(); seed(fake, { canonicals: [UOVO], ingredients: [row('i1', 'uova per impasto', 3, 'n')] }); globalThis.fetch = fake.fetch;
+  await test('n->g LAB: "uova per impasto" -> domanda peso immediata, inserisci -> legacy, riga convertita', async () => {
+    const fake = makeFakeSupabase(); seed(fake, { canonicals: [UOVO], ingredients: [row('ingUova02', 'uova per impasto', 3, 'n')] }); globalThis.fetch = fake.fetch;
     const c = makeClient(handler); await c.api.loadFromSupabase();
-    c.api.onIngUnit('r1', 'i1', 'g');
-    c.api.skipCanonicalIdentity('unit');
+    c.api.onIngUnit('r1', 'ingUova02', 'g');
+    assert.ok(c.api.S.pendingUnitConversion && !c.api.S.pendingUnitConversion.identity);
     c.api.confirmUnitConversion('60');
     await flush(); await flush();
     const saved = fake.tables.ingredient_conversions[0];
     assert.deepStrictEqual([saved.ingredient_name, saved.canonical_ingredient_id], ['uova per impasto', undefined]);
     assert.strictEqual(c.api.S.unitWeights['uova per impasto'], 60);
-    assert.strictEqual(c.api.S.recipes[0].labVersions[0].ingredients[0].canonicalIngredientId, null);
+    const lab = c.api.S.recipes[0].labVersions[0].ingredients[0];
+    assert.deepStrictEqual([lab.unit, lab.qty, lab.canonicalIngredientId], ['g', 180, null]);
+    assert.strictEqual(patches(fake, 'ingredients'), 0);
+  });
+
+  await test('n->g Ricetta attiva: -> domanda peso immediata; Indietro dal collegamento conserva il valore; inserisci -> legacy', async () => {
+    const { api, fake, vv } = await ready({ canonicals: [UOVO], ingredients: [row('i1', 'uova per impasto', 3, 'n')] });
+    const ingId = vv.ingredients[0].id;
+    api.onVarIngUnit('r1', vv.id, ingId, 'g');
+    const p = api.S.pendingUnitConversion;
+    assert.ok(p && !p.identity, 'domanda peso immediata');
+    api.openCanonicalIdentity('unit', '61');
+    assert.ok(p.identity);
+    assert.match(api.renderUnitConversionModal(), /Indietro/);
+    api.backFromCanonicalIdentity('unit');
+    assert.match(api.renderUnitConversionModal(), /value="61"/);
+    api.confirmUnitConversion('61');
+    await flush(); await flush();
+    assert.deepStrictEqual([fake.tables.ingredient_conversions[0].ingredient_name, fake.tables.ingredient_conversions[0].canonical_ingredient_id], ['uova per impasto', undefined]);
+    assert.strictEqual(fake.tables.ingredients.find(i => i.id === ingId).canonical_ingredient_id, null);
+    assert.strictEqual(patches(fake, 'ingredients'), 0);
   });
 
   console.log('');
@@ -587,7 +649,7 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
 
   await test('A+B+H+F: collega a esistente -> nel DB cambia SOLO canonical_ingredient_id di quella riga; nessun save della ricetta', async () => {
     const r = await linkScenario({ canonicals: [ACQUA], conversions: [H_ACQUA], ingredients: twoRows },
-      async ({ api }) => { await api.selectCanonicalIdentity('preflight', 'ciAcqua'); });
+      async ({ api }) => { api.openCanonicalIdentity('preflight'); await api.selectCanonicalIdentity('preflight', 'ciAcqua'); });
     const after = r.fake.tables.ingredients.find(i => i.id === r.vv.ingredients[0].id);
     assert.deepStrictEqual({ ...after, canonical_ingredient_id: null }, { ...r.linkRowBefore, canonical_ingredient_id: null }, 'nome/qty/unit/sort/rese invariati');
     assert.strictEqual(after.canonical_ingredient_id, 'ciAcqua');
@@ -600,20 +662,18 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
     assert.strictEqual(r.c.created.length, 1, 'poi Sessione (fact storica riusata)');
   });
 
-  await test('E: collegamento automatico per nome identico -> stesso percorso atomico', async () => {
+  await test('E: nessun collegamento automatico: riga con nome identico non genera richieste di link', async () => {
     const r = await linkScenario({ canonicals: [ACQUA], ingredients: [row('i1', 'Acqua', 500, 'ml'), row('i2', 'farina', 200, 'g', null, 1)] },
       async () => {});
-    // l'auto-link e' gia' avvenuto dentro mandaInProduzione: si rilegge l'intera sequenza delle azioni
-    assert.strictEqual(r.c.apiCalls.filter(a => a === 'save').length, 1, 'solo il save di preparazione del test, nessuno durante l\'auto-link');
-    assert.strictEqual(r.c.apiCalls.filter(a => a === 'linkIngredientCanonical').length, 1);
-    assert.strictEqual(patches(r.fake, 'ingredients'), 1);
-    assert.strictEqual(r.fake.tables.ingredients.find(i => i.id === r.vv.ingredients[0].id).canonical_ingredient_id, 'ciAcqua');
+    assert.strictEqual(r.c.apiCalls.filter(a => a === 'linkIngredientCanonical').length, 0);
+    assert.strictEqual(patches(r.fake, 'ingredients'), 0);
+    assert.strictEqual(r.fake.tables.ingredients.find(i => i.id === r.vv.ingredients[0].id).canonical_ingredient_id, null);
     assert.strictEqual(r.pf.identity, null);
   });
 
   await test('G: crea e collega -> canonico creato, poi stesso percorso atomico (nessun save della ricetta)', async () => {
     const r = await linkScenario({ canonicals: [], conversions: [H_ACQUA], ingredients: twoRows },
-      async ({ api }) => { await api.createCanonicalIdentity('preflight', 'ACQUA'); });
+      async ({ api }) => { api.openCanonicalIdentity('preflight'); await api.createCanonicalIdentity('preflight', 'ACQUA'); });
     assert.deepStrictEqual(r.actionsDuringLink.filter(a => a !== 'saveConversion'), ['createCanonicalIngredient', 'linkIngredientCanonical']);
     assert.strictEqual(r.dbBefore, dbExceptLink(r.fake));
     assert.strictEqual(r.fake.tables.recipes[0].name, 'Ramen');
@@ -621,7 +681,7 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
 
   await test('C+D: errore HTTP 500 (senza ok:false) sul link -> riconosciuto come errore; niente fact, niente Sessione, memoria coerente', async () => {
     const r = await linkScenario({ canonicals: [ACQUA], conversions: [H_ACQUA], ingredients: twoRows },
-      async ({ api, c }) => { c.httpFail.add('linkIngredientCanonical'); await api.selectCanonicalIdentity('preflight', 'ciAcqua'); });
+      async ({ api, c }) => { c.httpFail.add('linkIngredientCanonical'); api.openCanonicalIdentity('preflight'); await api.selectCanonicalIdentity('preflight', 'ciAcqua'); });
     assert.strictEqual(r.pf.error, LINK_ERR);
     assert.ok(r.pf.identity);
     assert.strictEqual(r.api.S.recipes[0].validatedVariants[0].ingredients[0].canonicalIngredientId, null);
@@ -632,14 +692,14 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
 
   await test('C2: errore Supabase sul PATCH, riga non salvata (0 righe) e FK violata -> tutti errori, nessun falso successo', async () => {
     let r = await linkScenario({ canonicals: [ACQUA], ingredients: twoRows },
-      async ({ api, fake }) => { fake.failPost('ingredients:PATCH'); await api.selectCanonicalIdentity('preflight', 'ciAcqua'); });
+      async ({ api, fake }) => { fake.failPost('ingredients:PATCH'); api.openCanonicalIdentity('preflight'); await api.selectCanonicalIdentity('preflight', 'ciAcqua'); });
     assert.strictEqual(r.pf.error, LINK_ERR);
     r = await linkScenario({ canonicals: [ACQUA], ingredients: twoRows },
-      async ({ api, fake }) => { fake.tables.ingredients = fake.tables.ingredients.filter(i => i.name !== 'acqua per brodo'); await api.selectCanonicalIdentity('preflight', 'ciAcqua'); });
+      async ({ api, fake }) => { fake.tables.ingredients = fake.tables.ingredients.filter(i => i.name !== 'acqua per brodo'); api.openCanonicalIdentity('preflight'); await api.selectCanonicalIdentity('preflight', 'ciAcqua'); });
     assert.strictEqual(r.pf.error, LINK_ERR, 'riga non (ancora) presente nel DB');
     assert.strictEqual(r.api.S.recipes[0].validatedVariants[0].ingredients[0].canonicalIngredientId, null);
     r = await linkScenario({ canonicals: [ACQUA], ingredients: twoRows },
-      async ({ api, fake }) => { fake.tables.canonical_ingredients = []; await api.selectCanonicalIdentity('preflight', 'ciAcqua'); });
+      async ({ api, fake }) => { fake.tables.canonical_ingredients = []; api.openCanonicalIdentity('preflight'); await api.selectCanonicalIdentity('preflight', 'ciAcqua'); });
     assert.strictEqual(r.pf.error, LINK_ERR, 'FK: canonico non presente nel DB');
     assert.strictEqual(r.c.created.length, 0);
   });
@@ -648,7 +708,7 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
     const fake = makeFakeSupabase(); seed(fake, { canonicals: [UOVO], ingredients: [row('i1', 'uova per impasto', 3, 'n')] }); globalThis.fetch = fake.fetch;
     const c = makeClient(handler); await c.api.loadFromSupabase();
     c.api.onIngUnit('r1', 'i1', 'g');
-    await c.api.selectCanonicalIdentity('unit', 'ciUovo');
+    c.api.openCanonicalIdentity('unit'); await c.api.selectCanonicalIdentity('unit', 'ciUovo');
     assert.strictEqual(c.api.S.pendingUnitConversion.error, LINK_ERR);
     assert.strictEqual(patches(fake, 'ingredients'), 0);
   });
@@ -660,12 +720,13 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
     const { api, fake, c } = await ready({ canonicals: [ACQUA], conversions: [H_ACQUA], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] });
     const vv = api.S.recipes[0].validatedVariants[0];
     const pf = await mandaInProduzione(api, vv);
-    assert.ok(pf.identity);
+    assert.strictEqual(pf.identity, null);
     // 1. parte un save (payload costruito ora: canonical null), trattenuto prima del DB
     let release; c.holdNextSave.push(new Promise(r => { release = r; }));
     const oldSave = api.saveToSupabase(api.S.recipes[0]);
     await flush();
     // 2-3. collegamento: la PATCH riesce mentre il vecchio save e' ancora in volo
+    api.openCanonicalIdentity('preflight');
     const linking = api.selectCanonicalIdentity('preflight', 'ciAcqua');
     for (let i = 0; i < 20 && patches(fake, 'ingredients') < 1; i++) await flush();
     assert.strictEqual(patches(fake, 'ingredients'), 1, 'prima PATCH eseguita');
@@ -692,6 +753,7 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
     const vv = api.S.recipes[0].validatedVariants[0];
     await mandaInProduzione(api, vv);
     let release; c.holdNextSave.push(new Promise(r => { release = r; }));
+    api.openCanonicalIdentity('preflight');
     const linking = api.selectCanonicalIdentity('preflight', 'ciAcqua');
     const midSave = api.saveToSupabase(api.S.recipes[0]); // parte mentre la PATCH e' in volo: memoria ancora null
     await flush(); await flush();
@@ -706,7 +768,7 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
     const { api, fake } = await ready({ canonicals: [ACQUA], ingredients: [row('i1', 'acqua per brodo', 500, 'ml')] });
     const vv = api.S.recipes[0].validatedVariants[0];
     await mandaInProduzione(api, vv);
-    await api.selectCanonicalIdentity('preflight', 'ciAcqua');
+    api.openCanonicalIdentity('preflight'); await api.selectCanonicalIdentity('preflight', 'ciAcqua');
     assert.strictEqual(patches(fake, 'ingredients'), 1, 'nessun save in volo: una sola PATCH');
     assert.strictEqual(await api.saveToSupabase(api.S.recipes[0]), true);
     assert.strictEqual(fake.tables.ingredients.find(i => i.id === vv.ingredients[0].id).canonical_ingredient_id, 'ciAcqua');
@@ -719,6 +781,7 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
     let release; c.holdNextSave.push(new Promise(r => { release = r; }));
     const oldSave = api.saveToSupabase(api.S.recipes[0]);
     await flush();
+    api.openCanonicalIdentity('preflight');
     const linking = api.selectCanonicalIdentity('preflight', 'ciAcqua');
     for (let i = 0; i < 20 && patches(fake, 'ingredients') < 1; i++) await flush();
     fake.failPost('ingredients:PATCH');
@@ -732,7 +795,7 @@ const LINK_ERR = 'Errore nel salvataggio del collegamento. Riprova.';
   console.log('');
   console.log('L. nessun cambiamento per chi non ne ha bisogno');
 
-  await test('L1: righe con conversione gia\' nota o in grammi -> nessun passo "identifica", come prima', async () => {
+  await test('L1: righe con conversione gia\' nota o in grammi -> nessun modal aggiuntivo, come prima', async () => {
     const { api, c, fake } = await ready({ canonicals: [ACQUA, UOVO], ingredients: [row('i1', 'farina', 200, 'g'), row('i2', 'uova', 2, 'n', null, 1)],
       conversions: [conv('cU', 'uova', 'n', 50, 'chef_confirmed', '2026-09-01T00:00:00Z')] });
     assert.strictEqual(await mandaInProduzione(api, api.S.recipes[0].validatedVariants[0]), null);
