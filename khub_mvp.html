@@ -6600,7 +6600,7 @@ function renderOnboarding(){
         <div class="onboarding-icon" style="background:#f5ede8"><i class="ti ti-settings-2" style="color:#8B4513"></i></div>
         <div><div style="font-size:13px;font-weight:600;color:var(--dark);margin-bottom:2px">Produzione</div><div style="font-size:12px;color:var(--mid)">Usa la Ricetta attiva in cucina, scala le porzioni</div></div>
       </div>
-      <button class="btn btn-primary" style="width:100%;justify-content:center;padding:12px" onclick="S.showOnboarding=false;localStorage.setItem('khub_onboarded','1');S.view='load';render()">
+      <button class="btn btn-primary" style="width:100%;justify-content:center;padding:12px" onclick="S.showOnboarding=false;localStorage.setItem('khub_onboarded','1');S.view='app-home';render()">
         Inizia <i class="ti ti-arrow-right"></i>
       </button>
     </div>
@@ -7291,10 +7291,9 @@ function handleLoadImage(file){
 (async()=>{
   render();
   await loadFromSupabase();
-  if(S.recipes.length===0){S.view='load';}
-  else{
-    // Fase 5: all'avvio non impostiamo più automaticamente la variante di produzione
-  }
+  // START-01: la Home (app-home) e' l'entry point canonico anche senza
+  // Ricette; Nuova/Carica Ricetta si scelgono esplicitamente dalla Home.
+  // Fase 5: all'avvio non impostiamo più automaticamente la variante di produzione
   checkOnboarding();
   render();
   _initDone=true;
