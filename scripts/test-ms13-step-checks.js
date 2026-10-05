@@ -91,6 +91,9 @@ const CLIENT_SRC = [
   'function renderSessioneOperativa()',
   // MS13: la Sessione operativa carica e mostra anche lo stato degli step
   'async function loadSessionStepState(sessionId)', 'async function toggleSessionStep(sessionId,itemKey)', 'function formatStepDurationLabel(seconds)',
+  // MS14: la Sessione operativa mostra anche i timer degli step
+  'function ms14Now()', 'function stepTimerDurationSeconds(value)', 'function stepTimerRemainingSeconds(startedAtIso,durationSeconds,nowMs)',
+  'function stepTimerState(startedAtIso,durationSeconds,nowMs)', 'function formatTimerCountdown(seconds)',
 ].map(extractFunction).join('\n');
 
 function makeSession(id, status, stepIds, durations) {
@@ -174,7 +177,7 @@ function makeClient(handler, sessions, recipes) {
     assert.strictEqual(r.checked, true);
     assert.ok(r.checked_at && Date.parse(r.checked_at) >= prima - 1000);
     assert.deepStrictEqual([r.timer_started_at, r.timer_actual_seconds], [TIMER_AT, 280], 'timer invariato');
-    assert.deepStrictEqual(c.S.sessionStepState.ps1.byItemKey.st1, { checked: true, checkedAt: r.checked_at });
+    assert.deepStrictEqual(c.S.sessionStepState.ps1.byItemKey.st1, { checked: true, checkedAt: r.checked_at, timerStartedAt: TIMER_AT }); // MS14: lo stato runtime include anche il timer, invariato
     await c.api.toggleSessionStep('ps1', 'st1');
     r = dbRow(fake, 'ps1', 'st1');
     assert.deepStrictEqual([r.checked, r.checked_at, r.timer_started_at, r.timer_actual_seconds], [false, null, TIMER_AT, 280]);
@@ -201,7 +204,7 @@ function makeClient(handler, sessions, recipes) {
     await open(c, 'ps1');
     fake.tables.session_step_state = fake.tables.session_step_state.filter(r => !(r.session_id === 'ps1' && r.item_key === 'st3'));
     await c.api.toggleSessionStep('ps1', 'st3');
-    assert.deepStrictEqual(c.S.sessionStepState.ps1.byItemKey.st3, { checked: false, checkedAt: null });
+    assert.deepStrictEqual(c.S.sessionStepState.ps1.byItemKey.st3, { checked: false, checkedAt: null, timerStartedAt: null });
     assert.deepStrictEqual(c.toasts, ['Passaggio non salvato. Riprova.']);
     fake.fail('session_step_state:PATCH');
     await c.api.toggleSessionStep('ps1', 'st2');

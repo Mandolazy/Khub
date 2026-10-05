@@ -91,6 +91,9 @@ const CLIENT_SRC = [
   'function renderSessioneOperativa()',
   // MS13: la Sessione operativa carica e mostra anche lo stato degli step
   'async function loadSessionStepState(sessionId)', 'async function toggleSessionStep(sessionId,itemKey)', 'function formatStepDurationLabel(seconds)',
+  // MS14: la Sessione operativa mostra anche i timer degli step
+  'function ms14Now()', 'function stepTimerDurationSeconds(value)', 'function stepTimerRemainingSeconds(startedAtIso,durationSeconds,nowMs)',
+  'function stepTimerState(startedAtIso,durationSeconds,nowMs)', 'function formatTimerCountdown(seconds)',
 ].map(extractFunction).join('\n');
 
 function makeSession(id, status, itemKeys) {

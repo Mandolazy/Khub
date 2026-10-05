@@ -975,7 +975,8 @@ const S = {
   // Sprint Produzione — MS13: stato "Fatto" degli step per Sessione, letto da
   // session_step_state. Stessa forma di sessionIngredientState, indipendente
   // da esso e dallo snapshot (mai un campo checked dentro snapshot.steps).
-  // { [sessionId]: {status, byItemKey:{[itemKey]:{checked,checkedAt}}, pending} }
+  // { [sessionId]: {status, byItemKey:{[itemKey]:{checked,checkedAt,timerStartedAt}},
+  //   pending (Fatto), timerPending (timer, MS14)} }
   sessionStepState: {},
   produzioneGuidataTab: 'pending', // 'pending' | 'in_progress' | 'completed'
   // Sprint Produzione — Micro-Step 11: id della Sessione aperta nella
@@ -3750,7 +3751,7 @@ async function loadSessionStepState(sessionId){
   if(!sessionId)return;
   var prev=S.sessionStepState[sessionId];
   if(prev&&prev.status==='loading')return;
-  var entry={status:'loading',byItemKey:prev?prev.byItemKey:{},pending:{}};
+  var entry={status:'loading',byItemKey:prev?prev.byItemKey:{},pending:{},timerPending:{}};
   S.sessionStepState[sessionId]=entry;
   render();
   try{
@@ -3759,7 +3760,7 @@ async function loadSessionStepState(sessionId){
     if(!r.ok||!data||!Array.isArray(data.rows))throw new Error((data&&data.error)||'risposta non valida');
     var byItemKey={};
     data.rows.forEach(function(row){
-      if(row&&row.session_id===sessionId&&row.item_key)byItemKey[row.item_key]={checked:row.checked===true,checkedAt:row.checked_at||null};
+      if(row&&row.session_id===sessionId&&row.item_key)byItemKey[row.item_key]={checked:row.checked===true,checkedAt:row.checked_at||null,timerStartedAt:row.timer_started_at||null};
     });
     entry.byItemKey=byItemKey;
     entry.status='loaded';
@@ -3793,11 +3794,193 @@ async function toggleSessionStep(sessionId,itemKey){
   }catch(e){console.error('[MS13] stato step non salvato',e);}
   delete entry.pending[itemKey];
   if(ok){
-    entry.byItemKey[itemKey]={checked:row.checked===true,checkedAt:row.checked_at||null};
+    // MS14: "Fatto" aggiorna SOLO i propri campi, il timer in memoria resta com'e'.
+    entry.byItemKey[itemKey]=Object.assign({},entry.byItemKey[itemKey],{checked:row.checked===true,checkedAt:row.checked_at||null});
   }else{
     toast('Passaggio non salvato. Riprova.','ti-alert-circle');
   }
   render();
+}
+
+// ══════════════════════════════════════════════════════════
+// MS14 — TIMER PERSISTENTI DEGLI STEP
+// Il countdown NON e' mai salvato: si deriva da expectedDurationSeconds
+// (snapshot, immutabile) e da timer_started_at (ora del server all'avvio)
+// usando l'ora corrente. Stati: null -> non avviato; rimanente > 0 -> in
+// corso; rimanente <= 0 -> scaduto ("Tempo terminato"). Annulla/Azzera ->
+// timer_started_at = null. Nessuna scrittura periodica, nessuna pausa.
+// timer_actual_seconds non viene mai letto ne' scritto qui. Il timer e'
+// indipendente da "Fatto" (MS13).
+// ══════════════════════════════════════════════════════════
+function ms14Now(){return Date.now();} // unica sorgente del tempo corrente (sostituibile nei test)
+
+// Durata valida in secondi interi (> 0), altrimenti null: niente timer.
+function stepTimerDurationSeconds(value){
+  var n=typeof value==='number'?value:(typeof value==='string'&&value.trim()!==''?Number(value):NaN);
+  if(!isFinite(n))return null;
+  n=Math.round(n);
+  return n>0?n:null;
+}
+// Secondi rimanenti (mai negativi) dato l'avvio e la durata, all'istante nowMs.
+function stepTimerRemainingSeconds(startedAtIso,durationSeconds,nowMs){
+  var startMs=Date.parse(startedAtIso);
+  if(!isFinite(startMs)||!durationSeconds)return 0;
+  return Math.max(0,Math.ceil((startMs+durationSeconds*1000-nowMs)/1000));
+}
+// 'idle' | 'running' | 'expired'
+function stepTimerState(startedAtIso,durationSeconds,nowMs){
+  if(!startedAtIso)return'idle';
+  return stepTimerRemainingSeconds(startedAtIso,durationSeconds,nowMs)>0?'running':'expired';
+}
+// 514 -> "08:34", 3725 -> "1:02:05"
+function formatTimerCountdown(seconds){
+  seconds=Math.max(0,Math.floor(seconds||0));
+  var h=Math.floor(seconds/3600),m=Math.floor((seconds%3600)/60),sec=seconds%60;
+  var pad=function(x){return(x<10?'0':'')+x;};
+  return h?(h+':'+pad(m)+':'+pad(sec)):(pad(m)+':'+pad(sec));
+}
+function findSnapshotStep(sess,itemKey){
+  var steps=sess&&sess.snapshot&&Array.isArray(sess.snapshot.steps)?sess.snapshot.steps:[];
+  return steps.find(function(st){return st&&st.stepId===itemKey;})||null;
+}
+
+// Avvia il timer di uno step: solo Sessione in corso, riga presente, durata
+// valida, timer non gia' avviato. Stato runtime aggiornato SOLO dopo la
+// conferma del server; conserva checked/checkedAt in memoria.
+async function startSessionStepTimer(sessionId,itemKey){
+  var sess=(S.productionSessions||[]).find(function(s){return s.id===sessionId;});
+  var entry=S.sessionStepState[sessionId];
+  if(!sess||sess.status!=='in_progress'||!entry||entry.status!=='loaded')return;
+  entry.timerPending=entry.timerPending||{};
+  if(entry.timerPending[itemKey])return; // operazione timer gia' in corso su questo step
+  var current=entry.byItemKey[itemKey];
+  if(!current){toast('Stato non disponibile per questo passaggio.','ti-alert-circle');return;}
+  var step=findSnapshotStep(sess,itemKey);
+  if(!step||!stepTimerDurationSeconds(step.expectedDurationSeconds))return; // nessuna durata valida: nessun timer
+  if(current.timerStartedAt)return; // gia' avviato: mai un riavvio silenzioso
+  primeStepTimerSound(); // gesto dell'utente: abilita il suono best-effort alla scadenza
+  entry.timerPending[itemKey]=true;
+  render();
+  var ok=false,row=null;
+  try{
+    var r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'startSessionStepTimer',sessionId:sessionId,itemKey:itemKey})});
+    var data=await r.json().catch(function(){return null;});
+    ok=!!(r.ok&&data&&data.ok===true&&data.row&&data.row.item_key===itemKey&&data.row.timer_started_at);
+    if(ok)row=data.row;
+    else console.error('[MS14] avvio timer non riuscito',data&&data.error);
+  }catch(e){console.error('[MS14] avvio timer non riuscito',e);}
+  delete entry.timerPending[itemKey];
+  if(ok){
+    entry.byItemKey[itemKey]=Object.assign({},entry.byItemKey[itemKey],{timerStartedAt:row.timer_started_at});
+  }else{
+    toast('Timer non avviato. Riprova.','ti-alert-circle');
+  }
+  render();
+}
+
+// Annulla (in corso) / Azzera (scaduto): stessa persistenza, cambia solo
+// l'etichetta. Il server azzera solo se l'avvio e' ancora quello atteso.
+async function cancelSessionStepTimer(sessionId,itemKey){
+  var sess=(S.productionSessions||[]).find(function(s){return s.id===sessionId;});
+  var entry=S.sessionStepState[sessionId];
+  if(!sess||sess.status!=='in_progress'||!entry||entry.status!=='loaded')return;
+  entry.timerPending=entry.timerPending||{};
+  if(entry.timerPending[itemKey])return;
+  var current=entry.byItemKey[itemKey];
+  if(!current||!current.timerStartedAt)return;
+  entry.timerPending[itemKey]=true;
+  render();
+  var ok=false;
+  try{
+    var r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'cancelSessionStepTimer',sessionId:sessionId,itemKey:itemKey,expectedStartedAt:current.timerStartedAt})});
+    var data=await r.json().catch(function(){return null;});
+    ok=!!(r.ok&&data&&data.ok===true&&data.row&&data.row.item_key===itemKey&&data.row.timer_started_at==null);
+    if(!ok)console.error('[MS14] azzeramento timer non riuscito',data&&data.error);
+  }catch(e){console.error('[MS14] azzeramento timer non riuscito',e);}
+  delete entry.timerPending[itemKey];
+  if(ok){
+    entry.byItemKey[itemKey]=Object.assign({},entry.byItemKey[itemKey],{timerStartedAt:null});
+  }else{
+    toast('Timer non azzerato. Riprova.','ti-alert-circle');
+  }
+  render();
+}
+
+// Aggiornamento visivo: UN solo setInterval per la vista Sessione operativa,
+// attivo solo se c'e' almeno un timer in corso. Ogni tick ricalcola dal
+// timestamp con l'ora corrente (mai dal numero di tick) e aggiorna solo il
+// testo dei countdown; un render completo solo quando un timer scade.
+var _stepTimerInterval=null;
+var _stepTimerSeenRunning={}; // timer visti "in corso" in questa pagina: solo loro suonano alla scadenza
+function openSessionRunningTimers(){
+  if(S.view!=='sessione-operativa')return[];
+  var sess=(S.productionSessions||[]).find(function(s){return s.id===S.openSessionId;});
+  var entry=sess&&S.sessionStepState[sess.id];
+  if(!sess||sess.status!=='in_progress'||!entry||entry.status!=='loaded')return[];
+  var now=ms14Now(),out=[];
+  (sess.snapshot&&Array.isArray(sess.snapshot.steps)?sess.snapshot.steps:[]).forEach(function(st){
+    var stato=entry.byItemKey[st.stepId];
+    var dur=stepTimerDurationSeconds(st.expectedDurationSeconds);
+    if(stato&&stato.timerStartedAt&&dur&&stepTimerState(stato.timerStartedAt,dur,now)==='running'){
+      out.push({key:sess.id+'|'+st.stepId+'|'+stato.timerStartedAt});
+    }
+  });
+  return out;
+}
+function syncStepTimerTicker(){
+  var running=openSessionRunningTimers();
+  running.forEach(function(t){_stepTimerSeenRunning[t.key]=true;});
+  if(running.length&&!_stepTimerInterval){
+    _stepTimerInterval=setInterval(tickStepTimers,1000);
+  }else if(!running.length&&_stepTimerInterval){
+    clearInterval(_stepTimerInterval);
+    _stepTimerInterval=null;
+  }
+}
+function tickStepTimers(){
+  if(S.view!=='sessione-operativa'){syncStepTimerTicker();return;}
+  var now=ms14Now(),scaduto=false;
+  document.querySelectorAll('[data-ms14-timer]').forEach(function(el){
+    var dur=stepTimerDurationSeconds(el.getAttribute('data-duration'));
+    var start=el.getAttribute('data-started-at');
+    var rem=stepTimerRemainingSeconds(start,dur,now);
+    if(rem>0){el.textContent=formatTimerCountdown(rem);return;}
+    scaduto=true;
+    var key=el.getAttribute('data-session-id')+'|'+el.getAttribute('data-item-key')+'|'+start;
+    if(_stepTimerSeenRunning[key]){delete _stepTimerSeenRunning[key];playStepTimerSound();}
+  });
+  if(scaduto)render(); // passa a "Tempo terminato" (e ferma l'interval se non resta nulla in corso)
+}
+
+// Suono alla scadenza: SOLO best-effort (Web Audio, nessuna dipendenza). Il
+// contesto audio viene creato/riattivato al click "Avvia timer" (gesto
+// richiesto dai browser): dopo un reload senza nuove interazioni, con la
+// scheda in background o il dispositivo silenzioso puo' non suonare. La
+// garanzia e' lo stato visivo "Tempo terminato".
+var _stepTimerAudioCtx=null;
+function primeStepTimerSound(){
+  try{
+    var AC=window.AudioContext||window.webkitAudioContext;
+    if(!AC)return;
+    if(!_stepTimerAudioCtx)_stepTimerAudioCtx=new AC();
+    if(_stepTimerAudioCtx.state==='suspended'&&_stepTimerAudioCtx.resume)_stepTimerAudioCtx.resume();
+  }catch(e){}
+}
+function playStepTimerSound(){
+  try{
+    var ctx=_stepTimerAudioCtx;
+    if(!ctx||ctx.state!=='running')return;
+    var t=ctx.currentTime;
+    [0,0.35,0.7].forEach(function(dt){
+      var osc=ctx.createOscillator(),gain=ctx.createGain();
+      osc.type='sine';osc.frequency.value=880;
+      gain.gain.setValueAtTime(0.0001,t+dt);
+      gain.gain.exponentialRampToValueAtTime(0.25,t+dt+0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001,t+dt+0.25);
+      osc.connect(gain);gain.connect(ctx.destination);
+      osc.start(t+dt);osc.stop(t+dt+0.3);
+    });
+  }catch(e){}
 }
 
 // MS13: durata prevista leggibile (300 -> "5 min", 90 -> "1 min 30 sec",
@@ -4004,9 +4187,33 @@ function renderSessioneOperativa(){
         var fatto=!!(statoSt&&statoSt.checked);
         var usabileSt=stepUsabili&&!!statoSt&&!inCorsoSt;
         var titoloSt=!statoSt&&stepUsabili?'Stato non disponibile per questo passaggio':(fatto?'Segna come non fatto':'Segna come fatto');
+        // MS14: timer (solo durata valida, Sessione in corso, riga presente)
+        var durTimer=stepTimerDurationSeconds(st.expectedDurationSeconds);
+        var bloccoTimer='';
+        if(durTimer&&stepUsabili&&statoSt){
+          var timerInCorso=!!(statoStep.timerPending&&statoStep.timerPending[st.stepId]);
+          var statoTimer=stepTimerState(statoSt.timerStartedAt,durTimer,ms14Now());
+          var dis=timerInCorso?'disabled':'';
+          var btnT='btn btn-outline btn-sm';
+          var argsT=`'${escAttr(sess.id)}','${escAttr(st.stepId)}'`;
+          if(statoTimer==='idle'){
+            bloccoTimer=`<button class="${btnT} ms14-timer-start" ${dis} onclick="startSessionStepTimer(${argsT})"><i class="ti ${timerInCorso?'ti-loader-2':'ti-player-play'}"></i> Avvia timer</button>`;
+          }else if(statoTimer==='running'){
+            bloccoTimer=`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span style="font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;color:var(--dark)"><i class="ti ti-hourglass"></i> <span data-ms14-timer data-session-id="${escAttr(sess.id)}" data-item-key="${escAttr(st.stepId)}" data-started-at="${escAttr(statoSt.timerStartedAt)}" data-duration="${durTimer}">${formatTimerCountdown(stepTimerRemainingSeconds(statoSt.timerStartedAt,durTimer,ms14Now()))}</span></span>
+              <button class="${btnT} ms14-timer-cancel" ${dis} onclick="cancelSessionStepTimer(${argsT})"><i class="ti ${timerInCorso?'ti-loader-2':'ti-x'}"></i> Annulla timer</button>
+            </div>`;
+          }else{
+            bloccoTimer=`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span class="ms14-timer-expired" style="font-weight:700;color:#c0392b"><i class="ti ti-bell-ringing"></i> Tempo terminato</span>
+              <button class="${btnT} ms14-timer-reset" ${dis} onclick="cancelSessionStepTimer(${argsT})"><i class="ti ${timerInCorso?'ti-loader-2':'ti-rotate'}"></i> Azzera timer</button>
+            </div>`;
+          }
+        }
         return`<div class="pg-card">
           <div class="pg-card-title">${idx+1}. ${st.text||''}</div>
           ${durata?`<div class="pg-card-meta"><i class="ti ti-clock"></i> ${durata}</div>`:''}
+          ${bloccoTimer}
           <button class="ms13-step-check" role="checkbox" aria-checked="${fatto?'true':'false'}" title="${titoloSt}" ${usabileSt?'':'disabled'}
             onclick="toggleSessionStep('${escAttr(sess.id)}','${escAttr(st.stepId)}')"
             style="align-self:flex-start;display:flex;align-items:center;gap:6px;background:none;border:none;padding:2px 0;font-family:inherit;font-size:13px;cursor:${usabileSt?'pointer':'default'};color:${fatto?'var(--sage,#3d7a5c)':'var(--mid)'};opacity:${usabileSt||fatto?'1':'0.45'}"><i class="ti ${inCorsoSt?'ti-loader-2':(fatto?'ti-square-check':'ti-square')}" style="font-size:20px;line-height:1"></i> Fatto</button>
@@ -7202,6 +7409,8 @@ function render(){
 
   // Bind events
   bindEvents();
+
+  syncStepTimerTicker(); // MS14: interval attivo solo con timer in corso nella Sessione operativa aperta
 
   syncHistory();
 }

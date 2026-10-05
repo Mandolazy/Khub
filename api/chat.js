@@ -465,6 +465,56 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, row: rows[0] });
     }
 
+    // Sprint Produzione — MS14: timer di UNO step. Il countdown NON e' mai
+    // persistito: si deriva da expectedDurationSeconds (snapshot) e da
+    // timer_started_at. Avvio: PATCH mirata sulla riga ESISTENTE
+    // (session_id, item_key) SOLO se il timer non e' gia' avviato
+    // (timer_started_at is null): un timer in corso/scaduto non viene mai
+    // riavviato in silenzio. timer_started_at = ora del server. Nessun altro
+    // campo inviato (checked/checked_at/timer_actual_seconds intatti).
+    if (body.supabaseAction === 'startSessionStepTimer') {
+      const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
+      const itemKey = typeof body.itemKey === 'string' ? body.itemKey : '';
+      if (!sessionId || !itemKey) return res.status(200).json({ error: 'startSessionStepTimer: parametri non validi' });
+      const pr = await fetch(SB + '/rest/v1/session_step_state?session_id=eq.' + encodeURIComponent(sessionId) + '&item_key=eq.' + encodeURIComponent(itemKey) + '&timer_started_at=is.null&select=id,session_id,item_key,checked,checked_at,timer_started_at,timer_actual_seconds', {
+        method: 'PATCH', headers: { ...SH_READ, 'Prefer': 'return=representation' }, body: JSON.stringify({ timer_started_at: new Date().toISOString() })
+      });
+      if (!pr.ok) {
+        const detail = await pr.text().catch(() => '');
+        console.error('Supabase error [session_step_state timer start]:', pr.status, detail);
+        return res.status(200).json({ error: detail || ('HTTP ' + pr.status), status: pr.status });
+      }
+      const rows = await pr.json().catch(() => null);
+      if (!Array.isArray(rows) || rows.length !== 1) {
+        return res.status(200).json({ error: 'startSessionStepTimer: righe aggiornate ' + (Array.isArray(rows) ? rows.length : '?') + ' (attesa 1: timer gia\' avviato o riga mancante)', updated: Array.isArray(rows) ? rows.length : null });
+      }
+      return res.status(200).json({ ok: true, row: rows[0] });
+    }
+
+    // MS14: annulla (in corso) / azzera (scaduto) il timer di UNO step:
+    // timer_started_at = null SOLO se vale ancora l'avvio atteso dal client
+    // (expectedStartedAt), cosi' un timer riavviato nel frattempo non viene
+    // azzerato in silenzio. Nessun altro campo inviato.
+    if (body.supabaseAction === 'cancelSessionStepTimer') {
+      const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
+      const itemKey = typeof body.itemKey === 'string' ? body.itemKey : '';
+      const expectedStartedAt = typeof body.expectedStartedAt === 'string' ? body.expectedStartedAt : '';
+      if (!sessionId || !itemKey || !expectedStartedAt) return res.status(200).json({ error: 'cancelSessionStepTimer: parametri non validi' });
+      const pr = await fetch(SB + '/rest/v1/session_step_state?session_id=eq.' + encodeURIComponent(sessionId) + '&item_key=eq.' + encodeURIComponent(itemKey) + '&timer_started_at=eq.' + encodeURIComponent(expectedStartedAt) + '&select=id,session_id,item_key,checked,checked_at,timer_started_at,timer_actual_seconds', {
+        method: 'PATCH', headers: { ...SH_READ, 'Prefer': 'return=representation' }, body: JSON.stringify({ timer_started_at: null })
+      });
+      if (!pr.ok) {
+        const detail = await pr.text().catch(() => '');
+        console.error('Supabase error [session_step_state timer cancel]:', pr.status, detail);
+        return res.status(200).json({ error: detail || ('HTTP ' + pr.status), status: pr.status });
+      }
+      const rows = await pr.json().catch(() => null);
+      if (!Array.isArray(rows) || rows.length !== 1) {
+        return res.status(200).json({ error: 'cancelSessionStepTimer: righe aggiornate ' + (Array.isArray(rows) ? rows.length : '?') + ' (attesa 1: timer cambiato nel frattempo o riga mancante)', updated: Array.isArray(rows) ? rows.length : null });
+      }
+      return res.status(200).json({ ok: true, row: rows[0] });
+    }
+
     if (body.supabaseAction === 'load') {
       // Tutte paginate (sbSelectAll): se anche una sola pagina fallisce la
       // load fallisce per intero — il client non riceve mai uno stato
