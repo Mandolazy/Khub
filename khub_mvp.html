@@ -966,6 +966,12 @@ const S = {
   // renderProdRecipe, invariate): una Sessione e' una fotografia congelata,
   // mai una vista sul modello Ricetta corrente.
   productionSessions: [],
+  // Sprint Produzione — MS12: spunte ingredienti per Sessione, lette da
+  // session_ingredient_state. Stato RUNTIME separato dallo snapshot (che
+  // resta immutabile: mai un campo checked dentro snapshot.ingredients).
+  // { [sessionId]: {status:'idle'|'loading'|'loaded'|'error',
+  //   byItemKey:{[itemKey]:{checked,checkedAt}}, pending:{[itemKey]:true}} }
+  sessionIngredientState: {},
   produzioneGuidataTab: 'pending', // 'pending' | 'in_progress' | 'completed'
   // Sprint Produzione — Micro-Step 11: id della Sessione aperta nella
   // schermata Sessione operativa (S.view='sessione-operativa'). Dedicato:
@@ -3696,10 +3702,69 @@ async function avviaProduzione(sessionId){
   apriSessioneOperativa(sessionId);
 }
 
-// Apre la Sessione operativa read-only (A11.6/A11.7).
+// Apre la Sessione operativa (A11.6/A11.7). MS12: a ogni apertura (anche
+// rientro) rilegge dal DB lo stato delle spunte ingredienti.
 function apriSessioneOperativa(sessionId){
   S.openSessionId=sessionId;
   S.view='sessione-operativa';
+  render();
+  loadSessionIngredientState(sessionId);
+}
+
+// MS12: legge le righe session_ingredient_state della Sessione. Le righe
+// mancanti NON vengono create: la relativa spunta resta non utilizzabile.
+async function loadSessionIngredientState(sessionId){
+  if(!sessionId)return;
+  var prev=S.sessionIngredientState[sessionId];
+  if(prev&&prev.status==='loading')return;
+  var entry={status:'loading',byItemKey:prev?prev.byItemKey:{},pending:{}};
+  S.sessionIngredientState[sessionId]=entry;
+  render();
+  try{
+    var r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'loadSessionIngredientState',sessionId:sessionId})});
+    var data=await r.json().catch(function(){return null;});
+    if(!r.ok||!data||!Array.isArray(data.rows))throw new Error((data&&data.error)||'risposta non valida');
+    var byItemKey={};
+    data.rows.forEach(function(row){
+      if(row&&row.session_id===sessionId&&row.item_key)byItemKey[row.item_key]={checked:row.checked===true,checkedAt:row.checked_at||null};
+    });
+    entry.byItemKey=byItemKey;
+    entry.status='loaded';
+  }catch(e){
+    console.error('[MS12] lettura spunte ingredienti non riuscita',e);
+    entry.status='error';
+  }
+  render();
+}
+
+// MS12: spunta/toglie la spunta di UN ingrediente. Click bloccato sulla riga
+// finche' la scrittura e' in corso; lo stato runtime cambia SOLO dopo la
+// conferma del server (esattamente una riga aggiornata). In errore lo
+// stato precedente resta com'era e l'operatore vede un avviso.
+async function toggleSessionIngredient(sessionId,itemKey){
+  var sess=(S.productionSessions||[]).find(function(s){return s.id===sessionId;});
+  var entry=S.sessionIngredientState[sessionId];
+  if(!sess||sess.status!=='in_progress'||!entry||entry.status!=='loaded')return;
+  if(entry.pending[itemKey])return; // scrittura gia' in corso su questa riga
+  var current=entry.byItemKey[itemKey];
+  if(!current){toast('Spunta non disponibile per questo ingrediente.','ti-alert-circle');return;} // riga mancante: mai creata
+  var next=!current.checked;
+  entry.pending[itemKey]=true;
+  render();
+  var ok=false,row=null;
+  try{
+    var r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'setSessionIngredientChecked',sessionId:sessionId,itemKey:itemKey,checked:next})});
+    var data=await r.json().catch(function(){return null;});
+    ok=!!(r.ok&&data&&data.ok===true&&data.row&&data.row.item_key===itemKey&&data.row.checked===next);
+    if(ok)row=data.row;
+    else console.error('[MS12] spunta ingrediente non salvata',data&&data.error);
+  }catch(e){console.error('[MS12] spunta ingrediente non salvata',e);}
+  delete entry.pending[itemKey];
+  if(ok){
+    entry.byItemKey[itemKey]={checked:row.checked===true,checkedAt:row.checked_at||null};
+  }else{
+    toast('Spunta non salvata. Riprova.','ti-alert-circle');
+  }
   render();
 }
 
@@ -3800,6 +3865,14 @@ function renderSessioneOperativa(){
   var portions=target.targetPortions!=null?target.targetPortions:null;
   var gpp=target.targetGramsPerPortion!=null?target.targetGramsPerPortion:null;
   var totaleLabel=formatFinishedTotalLabel(sess.targetFinishedTotal);
+  // MS12: spunte ingredienti (stato runtime, mai nello snapshot).
+  var statoSpunte=S.sessionIngredientState[sess.id]||null;
+  var spunteUsabili=sess.status==='in_progress'&&statoSpunte&&statoSpunte.status==='loaded';
+  var avvisoSpunte=!statoSpunte||statoSpunte.status==='loading'
+    ?'<div style="padding:0 22px 8px;font-size:12px;color:var(--mid)"><i class="ti ti-loader-2"></i> Carico le spunte…</div>'
+    :statoSpunte.status==='error'
+      ?'<div style="padding:0 22px 8px;font-size:12px;color:var(--orange-accessible);display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span><i class="ti ti-alert-triangle"></i> Non riesco a caricare le spunte degli ingredienti.</span><button class="btn btn-outline btn-sm" onclick="loadSessionIngredientState(\''+sess.id+'\')"><i class="ti ti-refresh"></i> Riprova</button></div>'
+      :'';
 
   return`<div class="prod-env">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
@@ -3814,11 +3887,22 @@ function renderSessioneOperativa(){
       <div class="pg-card-total">${totaleLabel}</div>
     </div>
     <div style="padding:0 22px 8px;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--dpop-grigio-dato)">Ingredienti</div>
+    ${avvisoSpunte}
     <div class="pg-list" style="padding:0 22px 22px">
       ${ingredients.map(function(ing){
         var qty=ing.operativeQty!=null?Math.round(ing.operativeQty*100)/100:null;
-        return`<div class="pg-card" style="flex-direction:row;align-items:center;justify-content:space-between">
-          <span>${ing.name||''}</span>
+        var stato=statoSpunte&&statoSpunte.byItemKey[ing.itemKey];
+        var inCorso=!!(statoSpunte&&statoSpunte.pending[ing.itemKey]);
+        var spuntato=!!(stato&&stato.checked);
+        var usabile=spunteUsabili&&!!stato&&!inCorso;
+        var titolo=!stato&&spunteUsabili?'Spunta non disponibile per questo ingrediente':(spuntato?'Togli la spunta':'Spunta');
+        return`<div class="pg-card" style="flex-direction:row;align-items:center;justify-content:space-between;gap:12px">
+          <span style="display:flex;align-items:center;gap:10px">
+            <button class="ms12-check" role="checkbox" aria-checked="${spuntato?'true':'false'}" title="${titolo}" ${usabile?'':'disabled'}
+              onclick="toggleSessionIngredient('${escAttr(sess.id)}','${escAttr(ing.itemKey)}')"
+              style="background:none;border:none;padding:2px;cursor:${usabile?'pointer':'default'};font-size:20px;line-height:1;color:${spuntato?'var(--sage,#3d7a5c)':'var(--mid)'};opacity:${usabile||spuntato?'1':'0.45'}"><i class="ti ${inCorso?'ti-loader-2':(spuntato?'ti-square-check':'ti-square')}"></i></button>
+            <span>${ing.name||''}</span>
+          </span>
           <span style="font-family:'IBM Plex Mono',monospace">${qty!=null?qty:'–'} ${ing.unit||''}</span>
         </div>`;
       }).join('')}
