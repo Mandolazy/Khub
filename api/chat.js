@@ -429,6 +429,42 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, row: rows[0] });
     }
 
+    // Sprint Produzione — MS13: stato "Fatto" degli step di una Sessione.
+    // Lettura SOLO delle righe di session_step_state della Sessione richiesta.
+    // timer_started_at/timer_actual_seconds sono solo letti (timer fuori scope).
+    if (body.supabaseAction === 'loadSessionStepState') {
+      const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
+      if (!sessionId) return res.status(200).json({ error: 'loadSessionStepState: sessionId mancante' });
+      const rows = await sbSelectAll('session_step_state?select=id,session_id,item_key,checked,checked_at,timer_started_at,timer_actual_seconds&session_id=eq.' + encodeURIComponent(sessionId) + '&order=item_key.asc,id.asc');
+      return res.status(200).json({ rows });
+    }
+
+    // MS13: segna/toglie "Fatto" su UNO step. Stesso principio di MS12: PATCH
+    // mirata sulla riga ESISTENTE (session_id, item_key), solo checked e
+    // checked_at (timestamp del server se checked, null altrimenti); i campi
+    // timer non vengono mai inviati. Successo solo con esattamente una riga.
+    if (body.supabaseAction === 'setSessionStepChecked') {
+      const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
+      const itemKey = typeof body.itemKey === 'string' ? body.itemKey : '';
+      if (!sessionId || !itemKey || typeof body.checked !== 'boolean') {
+        return res.status(200).json({ error: 'setSessionStepChecked: parametri non validi' });
+      }
+      const patch = { checked: body.checked, checked_at: body.checked ? new Date().toISOString() : null };
+      const pr = await fetch(SB + '/rest/v1/session_step_state?session_id=eq.' + encodeURIComponent(sessionId) + '&item_key=eq.' + encodeURIComponent(itemKey) + '&select=id,session_id,item_key,checked,checked_at,timer_started_at,timer_actual_seconds', {
+        method: 'PATCH', headers: { ...SH_READ, 'Prefer': 'return=representation' }, body: JSON.stringify(patch)
+      });
+      if (!pr.ok) {
+        const detail = await pr.text().catch(() => '');
+        console.error('Supabase error [session_step_state]:', pr.status, detail);
+        return res.status(200).json({ error: detail || ('HTTP ' + pr.status), status: pr.status });
+      }
+      const rows = await pr.json().catch(() => null);
+      if (!Array.isArray(rows) || rows.length !== 1) {
+        return res.status(200).json({ error: 'setSessionStepChecked: righe aggiornate ' + (Array.isArray(rows) ? rows.length : '?') + ' (attesa 1)', updated: Array.isArray(rows) ? rows.length : null });
+      }
+      return res.status(200).json({ ok: true, row: rows[0] });
+    }
+
     if (body.supabaseAction === 'load') {
       // Tutte paginate (sbSelectAll): se anche una sola pagina fallisce la
       // load fallisce per intero — il client non riceve mai uno stato

@@ -89,6 +89,8 @@ const CLIENT_SRC = [
   'function escAttr(s)', 'function formatFinishedTotalLabel(grams)', 'function apriSessioneOperativa(sessionId)',
   'async function loadSessionIngredientState(sessionId)', 'async function toggleSessionIngredient(sessionId,itemKey)',
   'function renderSessioneOperativa()',
+  // MS13: la Sessione operativa carica e mostra anche lo stato degli step
+  'async function loadSessionStepState(sessionId)', 'async function toggleSessionStep(sessionId,itemKey)', 'function formatStepDurationLabel(seconds)',
 ].map(extractFunction).join('\n');
 
 function makeSession(id, status, itemKeys) {
@@ -114,7 +116,7 @@ function makeClient(handler, sessions, recipes) {
     await handler({ method: 'POST', body }, { status(c) { status = c; return this; }, json(o) { out = o; return this; } });
     return { ok: status < 400, status, json: async () => out };
   };
-  const S = { view: 'app-home', openSessionId: null, productionSessions: sessions, sessionIngredientState: {}, recipes: recipes || [] };
+  const S = { view: 'app-home', openSessionId: null, productionSessions: sessions, sessionIngredientState: {}, sessionStepState: {}, recipes: recipes || [] };
   const api = new Function('S', 'fetch', 'render', 'toast', 'console', CLIENT_SRC + `
     return { apriSessioneOperativa, loadSessionIngredientState, toggleSessionIngredient, renderSessioneOperativa };`)(
     S, clientFetch, () => {}, (m) => toasts.push(m), { error() {} });
@@ -152,7 +154,7 @@ function makeClient(handler, sessions, recipes) {
     assert.deepStrictEqual(get.filters, [['session_id', 'eq', 'ps1']]);
     assert.ok(c.S.productionSessions[0].snapshot.ingredients.every(i => !('checked' in i)), 'mai checked dentro lo snapshot');
     const html = c.api.renderSessioneOperativa();
-    assert.strictEqual((html.match(/role="checkbox"/g) || []).length, 3);
+    assert.strictEqual((html.match(/class="ms12-check" role="checkbox"/g) || []).length, 3);
     assert.match(html, /Porcini[\s\S]*1\.25 kg/);
   });
 
@@ -247,7 +249,7 @@ function makeClient(handler, sessions, recipes) {
     const c2 = makeClient(handler, [makeSession('psVuota', 'in_progress', ['a', 'b'])]);
     await open(c2, 'psVuota');
     assert.strictEqual(c2.S.sessionIngredientState.psVuota.status, 'loaded');
-    assert.strictEqual((c2.api.renderSessioneOperativa().match(/ disabled/g) || []).length, 2);
+    assert.strictEqual((c2.api.renderSessioneOperativa().match(/class="ms12-check"[^>]* disabled/g) || []).length, 2);
   });
 
   await test('K: doppio click / scrittura concorrente sulla stessa riga -> una sola PATCH', async () => {
@@ -290,7 +292,7 @@ function makeClient(handler, sessions, recipes) {
     assert.strictEqual(c.S.sessionIngredientState.ps1.status, 'error');
     const html = c.api.renderSessioneOperativa();
     assert.match(html, /Non riesco a caricare le spunte/);
-    assert.strictEqual((html.match(/ disabled/g) || []).length, 3);
+    assert.strictEqual((html.match(/class="ms12-check"[^>]* disabled/g) || []).length, 3);
     await c.api.toggleSessionIngredient('ps1', 'vi1');
     assert.strictEqual(fake.calls.filter(x => x.method === 'PATCH').length, 0);
     fake.heal('session_ingredient_state:GET');

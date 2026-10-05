@@ -972,6 +972,11 @@ const S = {
   // { [sessionId]: {status:'idle'|'loading'|'loaded'|'error',
   //   byItemKey:{[itemKey]:{checked,checkedAt}}, pending:{[itemKey]:true}} }
   sessionIngredientState: {},
+  // Sprint Produzione — MS13: stato "Fatto" degli step per Sessione, letto da
+  // session_step_state. Stessa forma di sessionIngredientState, indipendente
+  // da esso e dallo snapshot (mai un campo checked dentro snapshot.steps).
+  // { [sessionId]: {status, byItemKey:{[itemKey]:{checked,checkedAt}}, pending} }
+  sessionStepState: {},
   produzioneGuidataTab: 'pending', // 'pending' | 'in_progress' | 'completed'
   // Sprint Produzione — Micro-Step 11: id della Sessione aperta nella
   // schermata Sessione operativa (S.view='sessione-operativa'). Dedicato:
@@ -3709,6 +3714,7 @@ function apriSessioneOperativa(sessionId){
   S.view='sessione-operativa';
   render();
   loadSessionIngredientState(sessionId);
+  loadSessionStepState(sessionId); // MS13: indipendente dalle spunte ingredienti
 }
 
 // MS12: legge le righe session_ingredient_state della Sessione. Le righe
@@ -3735,6 +3741,78 @@ async function loadSessionIngredientState(sessionId){
     entry.status='error';
   }
   render();
+}
+
+// MS13: legge le righe session_step_state della Sessione (solo lettura). Le
+// righe mancanti NON vengono create: il relativo "Fatto" resta non
+// utilizzabile. I campi timer arrivano ma non vengono usati.
+async function loadSessionStepState(sessionId){
+  if(!sessionId)return;
+  var prev=S.sessionStepState[sessionId];
+  if(prev&&prev.status==='loading')return;
+  var entry={status:'loading',byItemKey:prev?prev.byItemKey:{},pending:{}};
+  S.sessionStepState[sessionId]=entry;
+  render();
+  try{
+    var r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'loadSessionStepState',sessionId:sessionId})});
+    var data=await r.json().catch(function(){return null;});
+    if(!r.ok||!data||!Array.isArray(data.rows))throw new Error((data&&data.error)||'risposta non valida');
+    var byItemKey={};
+    data.rows.forEach(function(row){
+      if(row&&row.session_id===sessionId&&row.item_key)byItemKey[row.item_key]={checked:row.checked===true,checkedAt:row.checked_at||null};
+    });
+    entry.byItemKey=byItemKey;
+    entry.status='loaded';
+  }catch(e){
+    console.error('[MS13] lettura stato step non riuscita',e);
+    entry.status='error';
+  }
+  render();
+}
+
+// MS13: segna/toglie "Fatto" su UNO step. Nessun vincolo di sequenza: ogni
+// step e' indipendente. Stesso principio di MS12: riga bloccata durante la
+// scrittura, stato runtime aggiornato SOLO dopo conferma del server.
+async function toggleSessionStep(sessionId,itemKey){
+  var sess=(S.productionSessions||[]).find(function(s){return s.id===sessionId;});
+  var entry=S.sessionStepState[sessionId];
+  if(!sess||sess.status!=='in_progress'||!entry||entry.status!=='loaded')return;
+  if(entry.pending[itemKey])return; // scrittura gia' in corso su questo step
+  var current=entry.byItemKey[itemKey];
+  if(!current){toast('Stato non disponibile per questo passaggio.','ti-alert-circle');return;} // riga mancante: mai creata
+  var next=!current.checked;
+  entry.pending[itemKey]=true;
+  render();
+  var ok=false,row=null;
+  try{
+    var r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'setSessionStepChecked',sessionId:sessionId,itemKey:itemKey,checked:next})});
+    var data=await r.json().catch(function(){return null;});
+    ok=!!(r.ok&&data&&data.ok===true&&data.row&&data.row.item_key===itemKey&&data.row.checked===next);
+    if(ok)row=data.row;
+    else console.error('[MS13] stato step non salvato',data&&data.error);
+  }catch(e){console.error('[MS13] stato step non salvato',e);}
+  delete entry.pending[itemKey];
+  if(ok){
+    entry.byItemKey[itemKey]={checked:row.checked===true,checkedAt:row.checked_at||null};
+  }else{
+    toast('Passaggio non salvato. Riprova.','ti-alert-circle');
+  }
+  render();
+}
+
+// MS13: durata prevista leggibile (300 -> "5 min", 90 -> "1 min 30 sec",
+// 3600 -> "1 h"). Valore assente/zero/non valido -> '' (mai inventata).
+function formatStepDurationLabel(seconds){
+  var n=typeof seconds==='number'?seconds:(typeof seconds==='string'&&seconds.trim()!==''?Number(seconds):NaN);
+  if(!isFinite(n)||n<=0)return'';
+  n=Math.round(n);
+  if(n<=0)return'';
+  var h=Math.floor(n/3600),m=Math.floor((n%3600)/60),sec=n%60;
+  var parti=[];
+  if(h)parti.push(h+' h');
+  if(m)parti.push(m+' min');
+  if(sec)parti.push(sec+' sec');
+  return parti.join(' ');
 }
 
 // MS12: spunta/toglie la spunta di UN ingrediente. Click bloccato sulla riga
@@ -3874,6 +3952,15 @@ function renderSessioneOperativa(){
       ?'<div style="padding:0 22px 8px;font-size:12px;color:var(--orange-accessible);display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span><i class="ti ti-alert-triangle"></i> Non riesco a caricare le spunte degli ingredienti.</span><button class="btn btn-outline btn-sm" onclick="loadSessionIngredientState(\''+sess.id+'\')"><i class="ti ti-refresh"></i> Riprova</button></div>'
       :'';
 
+  // MS13: stato "Fatto" degli step (runtime, mai nello snapshot).
+  var statoStep=S.sessionStepState[sess.id]||null;
+  var stepUsabili=sess.status==='in_progress'&&statoStep&&statoStep.status==='loaded';
+  var avvisoStep=!statoStep||statoStep.status==='loading'
+    ?'<div style="padding:0 22px 8px;font-size:12px;color:var(--mid)"><i class="ti ti-loader-2"></i> Carico lo stato dei passaggi…</div>'
+    :statoStep.status==='error'
+      ?'<div style="padding:0 22px 8px;font-size:12px;color:var(--orange-accessible);display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span><i class="ti ti-alert-triangle"></i> Non riesco a caricare lo stato dei passaggi.</span><button class="btn btn-outline btn-sm" onclick="loadSessionStepState(\''+sess.id+'\')"><i class="ti ti-refresh"></i> Riprova</button></div>'
+      :'';
+
   return`<div class="prod-env">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
       <div class="prod-title">${recipeName}${variantName?` <span class="pg-card-variant">· ${variantName}</span>`:''}</div>
@@ -3908,10 +3995,21 @@ function renderSessioneOperativa(){
       }).join('')}
     </div>
     <div style="padding:0 22px 8px;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--dpop-grigio-dato)">Procedimento</div>
+    ${avvisoStep}
     <div class="pg-list" style="padding:0 22px 22px">
       ${steps.map(function(st,idx){
+        var durata=formatStepDurationLabel(st.expectedDurationSeconds);
+        var statoSt=statoStep&&statoStep.byItemKey[st.stepId];
+        var inCorsoSt=!!(statoStep&&statoStep.pending[st.stepId]);
+        var fatto=!!(statoSt&&statoSt.checked);
+        var usabileSt=stepUsabili&&!!statoSt&&!inCorsoSt;
+        var titoloSt=!statoSt&&stepUsabili?'Stato non disponibile per questo passaggio':(fatto?'Segna come non fatto':'Segna come fatto');
         return`<div class="pg-card">
           <div class="pg-card-title">${idx+1}. ${st.text||''}</div>
+          ${durata?`<div class="pg-card-meta"><i class="ti ti-clock"></i> ${durata}</div>`:''}
+          <button class="ms13-step-check" role="checkbox" aria-checked="${fatto?'true':'false'}" title="${titoloSt}" ${usabileSt?'':'disabled'}
+            onclick="toggleSessionStep('${escAttr(sess.id)}','${escAttr(st.stepId)}')"
+            style="align-self:flex-start;display:flex;align-items:center;gap:6px;background:none;border:none;padding:2px 0;font-family:inherit;font-size:13px;cursor:${usabileSt?'pointer':'default'};color:${fatto?'var(--sage,#3d7a5c)':'var(--mid)'};opacity:${usabileSt||fatto?'1':'0.45'}"><i class="ti ${inCorsoSt?'ti-loader-2':(fatto?'ti-square-check':'ti-square')}" style="font-size:20px;line-height:1"></i> Fatto</button>
         </div>`;
       }).join('')}
     </div>
