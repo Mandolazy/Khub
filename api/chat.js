@@ -235,6 +235,22 @@ function buildM2UserMessage(body) {
   ].join('\n');
 }
 
+// MS16: resa finale effettiva. Input ammesso {qty:number finito > 0,
+// unit:'g'|'kg'} oppure null/assente (nessuna resa). Persistita SEMPRE in
+// grammi: {qty:<grammi>, unit:'g'}; nessuna resa -> {qty:null, unit:null}.
+// Arrotondamento a 1e-6 g solo per assorbire l'errore binario di kg*1000
+// (4.72 kg -> 4720 g, non 4720.000000000001). Nessun limite massimo.
+function normalizeActualYield(y) {
+  if (y === null || y === undefined) return { qty: null, unit: null };
+  if (typeof y !== 'object' || Array.isArray(y)) return { error: 'resa non valida' };
+  const q = y.qty, u = y.unit;
+  if (typeof q !== 'number' || !Number.isFinite(q) || q <= 0) return { error: 'quantita\' di resa non valida' };
+  if (u !== 'g' && u !== 'kg') return { error: 'unita\' di resa non ammessa' };
+  const grams = u === 'kg' ? Math.round(q * 1000 * 1e6) / 1e6 : q;
+  if (!Number.isFinite(grams) || grams <= 0) return { error: 'quantita\' di resa non valida' };
+  return { qty: grams, unit: 'g' };
+}
+
 // MS15: lunghezza massima di una Nota di produzione (dopo trim). Limite
 // applicativo, validato anche dal client; nessun vincolo nel DB.
 const SESSION_NOTE_MAX_LENGTH = 2000;
@@ -285,6 +301,39 @@ export default async function handler(req, res) {
         if (page.length === 0) return rows;
         for (const row of page) rows.push(row);
       }
+    }
+
+    // MS16: status corrente di una Sessione ({sessionStatus:null} se non esiste).
+    async function readSessionStatus(sessionId) {
+      const r = await fetch(SB + '/rest/v1/production_sessions?id=eq.' + encodeURIComponent(sessionId) + '&select=id,status', { headers: SH_READ });
+      if (!r.ok) {
+        const detail = await r.text().catch(() => '');
+        console.error('Supabase error [production_sessions status]:', r.status, detail);
+        return { error: detail || ('HTTP ' + r.status), status: r.status };
+      }
+      const rows = await r.json().catch(() => null);
+      if (!Array.isArray(rows)) return { error: 'production_sessions: risposta non valida' };
+      return { sessionStatus: rows.length === 1 ? rows[0].status : null };
+    }
+    // MS16: read-only reale. Le mutazioni operative (spunte, Fatto, timer)
+    // sono ammesse SOLO su una Sessione in_progress. Restituisce null se la
+    // mutazione puo' procedere, altrimenti la risposta di rifiuto.
+    async function rejectUnlessInProgress(sessionId, action) {
+      const st = await readSessionStatus(sessionId);
+      if (st.error) return { error: st.error, code: 'db' };
+      if (st.sessionStatus === null) return { error: action + ': Sessione non trovata', code: 'not_found' };
+      if (st.sessionStatus !== 'in_progress') return { error: action + ': Sessione non in corso', code: 'not_in_progress', sessionStatus: st.sessionStatus };
+      return null;
+    }
+    const SESSION_LIFECYCLE_COLS = 'id,status,created_at,started_at,completed_at,actual_yield_qty,actual_yield_unit';
+    // MS16: rilettura della riga dopo un PATCH condizionale che non ha
+    // aggiornato nulla, per distinguere "inesistente" da "stato diverso".
+    async function readSessionLifecycle(sessionId) {
+      const r = await fetch(SB + '/rest/v1/production_sessions?id=eq.' + encodeURIComponent(sessionId) + '&select=' + SESSION_LIFECYCLE_COLS, { headers: SH_READ });
+      if (!r.ok) return { error: 'HTTP ' + r.status };
+      const rows = await r.json().catch(() => null);
+      if (!Array.isArray(rows)) return { error: 'risposta non valida' };
+      return { row: rows.length === 1 ? rows[0] : null };
     }
 
     if (body.fetchUrl) {
@@ -391,7 +440,7 @@ export default async function handler(req, res) {
     // operativa naturale); il client rifiltra comunque per sicurezza.
     if (body.supabaseAction === 'loadProductionSessions') {
       const sessions = await sbSelectAll(
-        'production_sessions?select=id,recipe_id,source_variant_id,status,snapshot_version,snapshot,target_finished_total,created_at,started_at,completed_at&order=created_at.asc,id.asc'
+        'production_sessions?select=id,recipe_id,source_variant_id,status,snapshot_version,snapshot,target_finished_total,created_at,started_at,completed_at,actual_yield_qty,actual_yield_unit&order=created_at.asc,id.asc'
       );
       return res.status(200).json({ sessions });
     }
@@ -417,6 +466,8 @@ export default async function handler(req, res) {
       if (!sessionId || !itemKey || typeof body.checked !== 'boolean') {
         return res.status(200).json({ error: 'setSessionIngredientChecked: parametri non validi' });
       }
+      const notInProgress = await rejectUnlessInProgress(sessionId, 'setSessionIngredientChecked'); // MS16: read-only reale
+      if (notInProgress) return res.status(200).json(notInProgress);
       const patch = { checked: body.checked, checked_at: body.checked ? new Date().toISOString() : null };
       const pr = await fetch(SB + '/rest/v1/session_ingredient_state?session_id=eq.' + encodeURIComponent(sessionId) + '&item_key=eq.' + encodeURIComponent(itemKey) + '&select=id,session_id,item_key,checked,checked_at', {
         method: 'PATCH', headers: { ...SH_READ, 'Prefer': 'return=representation' }, body: JSON.stringify(patch)
@@ -453,6 +504,8 @@ export default async function handler(req, res) {
       if (!sessionId || !itemKey || typeof body.checked !== 'boolean') {
         return res.status(200).json({ error: 'setSessionStepChecked: parametri non validi' });
       }
+      const notInProgress = await rejectUnlessInProgress(sessionId, 'setSessionStepChecked'); // MS16: read-only reale
+      if (notInProgress) return res.status(200).json(notInProgress);
       const patch = { checked: body.checked, checked_at: body.checked ? new Date().toISOString() : null };
       const pr = await fetch(SB + '/rest/v1/session_step_state?session_id=eq.' + encodeURIComponent(sessionId) + '&item_key=eq.' + encodeURIComponent(itemKey) + '&select=id,session_id,item_key,checked,checked_at,timer_started_at,timer_actual_seconds', {
         method: 'PATCH', headers: { ...SH_READ, 'Prefer': 'return=representation' }, body: JSON.stringify(patch)
@@ -467,6 +520,83 @@ export default async function handler(req, res) {
         return res.status(200).json({ error: 'setSessionStepChecked: righe aggiornate ' + (Array.isArray(rows) ? rows.length : '?') + ' (attesa 1)', updated: Array.isArray(rows) ? rows.length : null });
       }
       return res.status(200).json({ ok: true, row: rows[0] });
+    }
+
+    // Sprint Produzione — MS16 (correzione MS11): avvio pending -> in_progress.
+    // PATCH condizionale (status=eq.pending) che scrive SOLO status e
+    // started_at (ora del server): mai un upsert della riga intera, quindi
+    // una scheda stale non puo' riportare a in_progress una Sessione gia'
+    // avviata o completata, ne' sovrascrivere altri campi.
+    if (body.supabaseAction === 'startProductionSession') {
+      const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
+      if (!sessionId) return res.status(200).json({ error: 'startProductionSession: sessionId mancante', code: 'invalid' });
+      const pr = await fetch(SB + '/rest/v1/production_sessions?id=eq.' + encodeURIComponent(sessionId) + '&status=eq.pending&select=' + SESSION_LIFECYCLE_COLS, {
+        method: 'PATCH', headers: { ...SH_READ, 'Prefer': 'return=representation' },
+        body: JSON.stringify({ status: 'in_progress', started_at: new Date().toISOString() })
+      });
+      if (!pr.ok) {
+        const detail = await pr.text().catch(() => '');
+        console.error('Supabase error [production_sessions start]:', pr.status, detail);
+        return res.status(200).json({ error: detail || ('HTTP ' + pr.status), code: 'db', status: pr.status });
+      }
+      const rows = await pr.json().catch(() => null);
+      if (Array.isArray(rows) && rows.length === 1) return res.status(200).json({ ok: true, row: rows[0] });
+      const cur = await readSessionLifecycle(sessionId);
+      if (cur.error) return res.status(200).json({ error: 'startProductionSession: ' + cur.error, code: 'db' });
+      if (!cur.row) return res.status(200).json({ error: 'startProductionSession: Sessione non trovata', code: 'not_found' });
+      return res.status(200).json({ error: 'startProductionSession: Sessione non piu\' da iniziare', code: 'not_pending', row: cur.row });
+    }
+
+    // MS16: completa una Sessione in_progress. PATCH condizionale
+    // (status=eq.in_progress): status=completed, completed_at = ora del
+    // server, resa effettiva normalizzata in grammi (o null/null). Successo
+    // solo se e' stata aggiornata esattamente questa Sessione. Poi i timer
+    // ancora valorizzati della Sessione tornano a timer_started_at=null
+    // (nessun timer_actual_seconds, nessun checked toccato). Il completamento
+    // e' la verita': se la pulizia timer fallisce viene ritentata a ogni
+    // richiesta successiva sulla stessa Sessione (anche gia' completata).
+    if (body.supabaseAction === 'completeProductionSession') {
+      const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
+      if (!sessionId) return res.status(200).json({ error: 'completeProductionSession: sessionId mancante', code: 'invalid' });
+      const y = normalizeActualYield(body.actualYield);
+      if (y.error) return res.status(200).json({ error: 'completeProductionSession: ' + y.error, code: 'invalid_yield' });
+      async function clearSessionTimers() {
+        const tr = await fetch(SB + '/rest/v1/session_step_state?session_id=eq.' + encodeURIComponent(sessionId) + '&timer_started_at=not.is.null', {
+          method: 'PATCH', headers: { ...SH_READ, 'Prefer': 'return=minimal' }, body: JSON.stringify({ timer_started_at: null })
+        });
+        if (!tr.ok) {
+          const detail = await tr.text().catch(() => '');
+          console.error('Supabase error [session_step_state timer clear]:', tr.status, detail);
+        }
+        return tr.ok;
+      }
+      const pr = await fetch(SB + '/rest/v1/production_sessions?id=eq.' + encodeURIComponent(sessionId) + '&status=eq.in_progress&select=' + SESSION_LIFECYCLE_COLS, {
+        method: 'PATCH', headers: { ...SH_READ, 'Prefer': 'return=representation' },
+        body: JSON.stringify({ status: 'completed', completed_at: new Date().toISOString(), actual_yield_qty: y.qty, actual_yield_unit: y.unit })
+      });
+      if (!pr.ok) {
+        const detail = await pr.text().catch(() => '');
+        console.error('Supabase error [production_sessions complete]:', pr.status, detail);
+        return res.status(200).json({ error: detail || ('HTTP ' + pr.status), code: 'db', status: pr.status });
+      }
+      const rows = await pr.json().catch(() => null);
+      if (Array.isArray(rows) && rows.length === 1 && rows[0].id === sessionId && rows[0].status === 'completed') {
+        const timersCleared = await clearSessionTimers();
+        return res.status(200).json({ ok: true, row: rows[0], timersCleared });
+      }
+      if (Array.isArray(rows) && rows.length > 1) {
+        return res.status(200).json({ error: 'completeProductionSession: righe aggiornate ' + rows.length + ' (attesa 1)', code: 'db' });
+      }
+      const cur = await readSessionLifecycle(sessionId);
+      if (cur.error) return res.status(200).json({ error: 'completeProductionSession: ' + cur.error, code: 'db' });
+      if (!cur.row) return res.status(200).json({ error: 'completeProductionSession: Sessione non trovata', code: 'not_found' });
+      if (cur.row.status === 'completed') {
+        // Richiesta ripetuta (doppio invio / risposta persa): nessuna nuova
+        // scrittura della Sessione, si restituisce lo stato reale.
+        const timersCleared = await clearSessionTimers();
+        return res.status(200).json({ error: 'completeProductionSession: Sessione gia\' completata', code: 'already_completed', row: cur.row, timersCleared });
+      }
+      return res.status(200).json({ error: 'completeProductionSession: Sessione non in corso', code: 'not_in_progress', row: cur.row });
     }
 
     // Sprint Produzione — MS15: Note di produzione della Sessione. Lettura
@@ -548,6 +678,8 @@ export default async function handler(req, res) {
       const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
       const itemKey = typeof body.itemKey === 'string' ? body.itemKey : '';
       if (!sessionId || !itemKey) return res.status(200).json({ error: 'startSessionStepTimer: parametri non validi' });
+      const notInProgress = await rejectUnlessInProgress(sessionId, 'startSessionStepTimer'); // MS16: read-only reale
+      if (notInProgress) return res.status(200).json(notInProgress);
       const pr = await fetch(SB + '/rest/v1/session_step_state?session_id=eq.' + encodeURIComponent(sessionId) + '&item_key=eq.' + encodeURIComponent(itemKey) + '&timer_started_at=is.null&select=id,session_id,item_key,checked,checked_at,timer_started_at,timer_actual_seconds', {
         method: 'PATCH', headers: { ...SH_READ, 'Prefer': 'return=representation' }, body: JSON.stringify({ timer_started_at: new Date().toISOString() })
       });
@@ -572,6 +704,8 @@ export default async function handler(req, res) {
       const itemKey = typeof body.itemKey === 'string' ? body.itemKey : '';
       const expectedStartedAt = typeof body.expectedStartedAt === 'string' ? body.expectedStartedAt : '';
       if (!sessionId || !itemKey || !expectedStartedAt) return res.status(200).json({ error: 'cancelSessionStepTimer: parametri non validi' });
+      const notInProgress = await rejectUnlessInProgress(sessionId, 'cancelSessionStepTimer'); // MS16: read-only reale
+      if (notInProgress) return res.status(200).json(notInProgress);
       const pr = await fetch(SB + '/rest/v1/session_step_state?session_id=eq.' + encodeURIComponent(sessionId) + '&item_key=eq.' + encodeURIComponent(itemKey) + '&timer_started_at=eq.' + encodeURIComponent(expectedStartedAt) + '&select=id,session_id,item_key,checked,checked_at,timer_started_at,timer_actual_seconds', {
         method: 'PATCH', headers: { ...SH_READ, 'Prefer': 'return=representation' }, body: JSON.stringify({ timer_started_at: null })
       });

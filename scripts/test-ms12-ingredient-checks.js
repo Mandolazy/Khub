@@ -98,6 +98,11 @@ const CLIENT_SRC = [
   'function sessionNoteDraftKey(sessionId)', 'function readSessionNoteDraft(sessionId)', 'function restoreSessionNoteDraft(sessionId)',
   'function sessionNoteDictationBusy(sessionId)', 'function formatSessionNoteTime(iso)', 'function sortSessionNotes(notes)',
   'async function loadSessionNotes(sessionId)', 'function renderSessionNotesSection(sess)',
+  // MS16: la Sessione operativa mostra badge di stato, data produzione e blocco "Fine produzione"
+  'function renderSessionStatusBadge(status)', 'function formatSessionDate(iso)', 'function formatSessionDateTime(iso)', 'function formatSessionTime(iso)',
+  'function sessionDurationSeconds(startedIso,completedIso)', 'function formatSessionDuration(seconds)', 'function normalizeActualYieldGrams(qty,unit)',
+  'function parseActualYieldInput(text,unit)', 'function formatYieldGrams(grams)', 'function sessionCompletionState(sessionId)',
+  'function renderSessionCompletionSection(sess)',
 ].map(extractFunction).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0]]).join('\n');
 
 function makeSession(id, status, itemKeys) {
@@ -140,6 +145,8 @@ function makeClient(handler, sessions, recipes) {
     const fake = makeFakeSupabase();
     const row = (sid, k, checked = false) => ({ id: 'pis_' + sid + '_' + k, session_id: sid, item_key: k, checked, checked_at: checked ? '2026-10-01T09:30:00.000Z' : null });
     fake.tables.session_ingredient_state = [row('ps1', 'vi1'), row('ps1', 'vi2'), row('ps1', 'vi3'), row('ps2', 'vi1'), row('ps2', 'vi2', true)];
+    // MS16: il server ammette le mutazioni solo su Sessioni in_progress
+    fake.tables.production_sessions = [{ id: 'ps1', status: 'in_progress' }, { id: 'ps2', status: 'in_progress' }];
     globalThis.fetch = fake.fetch;
     return fake;
   }

@@ -691,6 +691,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
 .pg-badge{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;padding:4px 10px;border-radius:999px;white-space:nowrap;}
 .pg-badge-pending{background:var(--dpop-carta-toccata,#eee);color:var(--dpop-inchiostro-testo);}
 .pg-badge-in-progress{background:var(--sage-light);color:var(--sage-dark);}
+.pg-badge-completed{background:var(--dpop-inchiostro-testo,#333);color:#fff;}
 
 .prod-staff-riga{display:flex;align-items:center;gap:10px;padding:12px 4px;min-height:44px;border-bottom:1px solid var(--dpop-filetto-riga);cursor:pointer;font-family:'Archivo',sans-serif;font-size:15px;color:var(--dpop-inchiostro-testo);-webkit-tap-highlight-color:transparent;}
 .prod-staff-riga input[type=checkbox]{width:18px;height:18px;cursor:pointer;flex-shrink:0;}
@@ -989,6 +990,10 @@ const S = {
   sessionNoteDraft: {},
   // MS15: Sessione a cui appartiene la dettatura 'session-note' in corso.
   sessionNoteDictationSessionId: null,
+  // MS16: blocco "Fine produzione" per Sessione (solo UI, mai nel DB finche'
+  // il server non conferma). { [sessionId]: {qtyText, unit:'g'|'kg',
+  //   error, confirming, saving} }
+  sessionCompletion: {},
   produzioneGuidataTab: 'pending', // 'pending' | 'in_progress' | 'completed'
   // Sprint Produzione — Micro-Step 11: id della Sessione aperta nella
   // schermata Sessione operativa (S.view='sessione-operativa'). Dedicato:
@@ -3610,6 +3615,9 @@ async function loadProductionSessions(){
         createdAt:s.created_at||null,
         startedAt:s.started_at||null,
         completedAt:s.completed_at||null,
+        // MS16: resa finale effettiva (sempre in grammi quando presente)
+        actualYieldQty:s.actual_yield_qty!=null?parseFloat(s.actual_yield_qty):null,
+        actualYieldUnit:s.actual_yield_unit||null,
       };
     }).sort(function(a,b){return new Date(a.createdAt)-new Date(b.createdAt);});
     render();
@@ -3672,18 +3680,12 @@ function renderPendingSessionCard(sess){
   </div>`;
 }
 
-// Sprint Produzione — Micro-Step 11 (A11.1/A11.2/A11.3/A11.4/A11.5): avvia
-// una Sessione pending -> in_progress. L'upsert invia SEMPRE la riga
-// completa gia' disponibile in S.productionSessions, mai {id,status,
-// started_at} da soli: production_sessions ha colonne NOT NULL senza
-// default (status, snapshot_version, snapshot, target_finished_total) e
-// l'azione generica 'update' (Prefer: resolution=merge-duplicates) valida
-// il ramo INSERT anche quando l'esito reale e' un UPDATE per conflitto —
-// un payload parziale rischierebbe un errore reale, non un semplice no-op
-// (vedi audit MS11). snapshot viaggia identico al valore gia' caricato:
-// mai ricostruito, mai modificato (A11.3). started_at viene scritto una
-// sola volta qui: nessun altro punto del flusso MS11 lo tocca di nuovo
-// (A11.2).
+// Sprint Produzione — Micro-Step 11 (A11.1/A11.4/A11.5): avvia una Sessione
+// pending -> in_progress. MS16 (correzione tecnica di MS11): azione dedicata
+// startProductionSession — PATCH condizionale lato server (solo se ancora
+// pending), started_at = ora del SERVER, nessun upsert della riga intera.
+// Una scheda stale non puo' piu' riavviare (o riaprire) una Sessione gia'
+// in corso o completata: in quel caso si riallinea allo stato reale.
 async function avviaProduzione(sessionId){
   if(S.startingSessionId)return; // guard anti-doppio-click/doppio-avvio (A11.5)
   var sess=S.productionSessions.find(function(s){return s.id===sessionId;});
@@ -3692,31 +3694,39 @@ async function avviaProduzione(sessionId){
   S.startingSessionId=sessionId;
   render();
 
-  var startedAt=new Date().toISOString();
-  var row={
-    id:sess.id,
-    recipe_id:sess.recipeId,
-    source_variant_id:sess.sourceVariantId,
-    status:'in_progress',
-    snapshot_version:sess.snapshotVersion,
-    snapshot:sess.snapshot,
-    target_finished_total:sess.targetFinishedTotal,
-    created_at:sess.createdAt,
-    started_at:startedAt,
-    completed_at:sess.completedAt,
-  };
-
-  var res=await _supabaseUpsertRow('production_sessions',row);
+  var data=null;
+  try{
+    var r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'startProductionSession',sessionId:sessionId})});
+    data=await r.json().catch(function(){return null;});
+    if(!r.ok&&data&&!data.code)data=null;
+  }catch(e){console.error('avviaProduzione: richiesta fallita',e);}
   S.startingSessionId=null;
-  if(res&&res.error){
-    console.error('avviaProduzione: upsert fallito',res.error);
+
+  if(data&&data.ok===true&&data.row&&data.row.id===sessionId&&data.row.status==='in_progress'){
+    applySessionLifecycleRow(sess,data.row);
+    apriSessioneOperativa(sessionId);
+    return;
+  }
+  if(data&&data.code==='not_pending'&&data.row&&data.row.id===sessionId){
+    applySessionLifecycleRow(sess,data.row); // stato reale dal server
+    toast(data.row.status==='completed'?'Questa produzione è già stata completata.':'Questa produzione è già stata avviata.','ti-info-circle');
     render();
     return;
   }
+  console.error('avviaProduzione: avvio non riuscito',data&&data.error);
+  toast(data&&data.code==='not_found'?'Sessione non trovata.':'Avvio non riuscito. Riprova.','ti-alert-circle');
+  render();
+}
 
-  sess.status='in_progress';
-  sess.startedAt=startedAt;
-  apriSessioneOperativa(sessionId);
+// MS16: applica a una Sessione in memoria i campi di lifecycle confermati
+// dal server (mai snapshot/target: restano quelli gia' caricati).
+function applySessionLifecycleRow(sess,row){
+  if(!sess||!row)return;
+  sess.status=row.status;
+  sess.startedAt=row.started_at||null;
+  sess.completedAt=row.completed_at||null;
+  sess.actualYieldQty=row.actual_yield_qty!=null?parseFloat(row.actual_yield_qty):null;
+  sess.actualYieldUnit=row.actual_yield_unit||null;
 }
 
 // Apre la Sessione operativa (A11.6/A11.7). MS12: a ogni apertura (anche
@@ -4073,6 +4083,232 @@ function renderInProgressSessionCard(sess){
   </div>`;
 }
 
+// ══════════════════════════════════════════════════════════
+// MS16 — COMPLETA PRODUZIONE
+// Data produzione = started_at (ora del server all'avvio). Resa finale
+// effettiva facoltativa, persistita sempre in grammi. Completamento solo
+// tramite l'azione dedicata completeProductionSession (server: solo se
+// in_progress, completed_at = ora del server); la Sessione diventa
+// completata in UI SOLO dopo la conferma del server.
+// ══════════════════════════════════════════════════════════
+function renderSessionStatusBadge(status){
+  if(status==='completed')return '<span class="pg-badge pg-badge-completed">Completata</span>';
+  if(status==='pending')return '<span class="pg-badge pg-badge-pending">Da iniziare</span>';
+  return '<span class="pg-badge pg-badge-in-progress">In corso</span>';
+}
+
+function formatSessionDate(iso){
+  var d=new Date(iso);
+  if(!iso||isNaN(d.getTime()))return'';
+  return d.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric'});
+}
+function formatSessionDateTime(iso){
+  var d=new Date(iso);
+  if(!iso||isNaN(d.getTime()))return'';
+  return d.toLocaleString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+function formatSessionTime(iso){
+  var d=new Date(iso);
+  if(!iso||isNaN(d.getTime()))return'';
+  return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+
+// Durata derivata (mai persistita): completed_at - started_at. null se uno
+// dei due manca/non e' valido o se la differenza e' negativa.
+function sessionDurationSeconds(startedIso,completedIso){
+  var a=Date.parse(startedIso),b=Date.parse(completedIso);
+  if(!startedIso||!completedIso||isNaN(a)||isNaN(b)||b<a)return null;
+  return Math.floor((b-a)/1000);
+}
+function formatSessionDuration(seconds){
+  if(seconds==null)return'';
+  var min=Math.floor(seconds/60);
+  if(min<1)return 'meno di 1 min';
+  var h=Math.floor(min/60),m=min%60;
+  return h?(h+' h'+(m?' '+m+' min':'')):(m+' min');
+}
+
+// Stesso calcolo di normalizeActualYield in api/chat.js (il server ricalcola).
+function normalizeActualYieldGrams(qty,unit){
+  return unit==='kg'?Math.round(qty*1000*1e6)/1e6:qty;
+}
+// Input resa: vuoto -> nessuna resa; "4720", "4,72", "4.72" con unita' g/kg.
+// Un solo separatore decimale (virgola o punto), niente separatori migliaia.
+function parseActualYieldInput(text,unit){
+  var t=String(text==null?'':text).trim();
+  if(!t)return{ok:true,value:null};
+  if(unit!=='g'&&unit!=='kg')return{ok:false,error:'Unità non ammessa: usa g o kg.'};
+  if(!/^\d+([.,]\d+)?$/.test(t))return{ok:false,error:'Inserisci un numero valido (es. 4720 oppure 4,72).'};
+  var qty=parseFloat(t.replace(',','.'));
+  if(!isFinite(qty)||qty<=0)return{ok:false,error:'La resa deve essere maggiore di zero.'};
+  var grams=normalizeActualYieldGrams(qty,unit);
+  if(!isFinite(grams)||grams<=0)return{ok:false,error:'La resa deve essere maggiore di zero.'};
+  return{ok:true,value:{qty:qty,unit:unit,grams:grams}};
+}
+function formatYieldGrams(grams){
+  if(grams==null||isNaN(grams))return'';
+  return Number(grams).toLocaleString('it-IT',{maximumFractionDigits:3})+' g';
+}
+
+function sessionCompletionState(sessionId){
+  if(!S.sessionCompletion)S.sessionCompletion={};
+  if(!S.sessionCompletion[sessionId])S.sessionCompletion[sessionId]={qtyText:'',unit:'g',error:null,confirming:false,saving:false};
+  return S.sessionCompletion[sessionId];
+}
+// Digitazione resa: solo stato runtime, nessun render() a ogni tasto.
+function onSessionYieldInput(sessionId,field,value){
+  var st=sessionCompletionState(sessionId);
+  if(field==='unit')st.unit=value==='kg'?'kg':'g';
+  else st.qtyText=String(value==null?'':value);
+  st.error=null;
+}
+
+// "Completa produzione": valida la resa e mostra la conferma (nessuna scrittura).
+function requestCompleteSession(sessionId){
+  var sess=(S.productionSessions||[]).find(function(s){return s.id===sessionId;});
+  if(!sess||sess.status!=='in_progress')return;
+  var st=sessionCompletionState(sessionId);
+  if(st.saving)return;
+  var qtyEl=document.getElementById('session-yield-qty');
+  var unitEl=document.getElementById('session-yield-unit');
+  if(qtyEl)st.qtyText=qtyEl.value;
+  if(unitEl)st.unit=unitEl.value==='kg'?'kg':'g';
+  var parsed=parseActualYieldInput(st.qtyText,st.unit);
+  if(!parsed.ok){st.error=parsed.error;st.confirming=false;render();return;}
+  st.error=null;
+  st.confirming=true;
+  render();
+}
+function cancelCompleteSession(sessionId){
+  var st=sessionCompletionState(sessionId);
+  if(st.saving)return;
+  st.confirming=false;
+  render();
+}
+
+// Conferma: unica scrittura, tramite azione dedicata. La Sessione resta
+// in_progress in UI finche' il server non conferma il completamento.
+async function confirmCompleteSession(sessionId){
+  var sess=(S.productionSessions||[]).find(function(s){return s.id===sessionId;});
+  var st=sessionCompletionState(sessionId);
+  if(!sess||sess.status!=='in_progress'||st.saving||!st.confirming)return; // doppio submit
+  if(typeof sessionNoteDictationBusy==='function'&&sessionNoteDictationBusy(sessionId)){toast('Ferma la dettatura della nota prima di completare.','ti-microphone');return;}
+  var parsed=parseActualYieldInput(st.qtyText,st.unit);
+  if(!parsed.ok){st.error=parsed.error;st.confirming=false;render();return;}
+  st.saving=true;
+  render();
+  var data=null;
+  try{
+    var r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      supabaseAction:'completeProductionSession',sessionId:sessionId,
+      actualYield:parsed.value?{qty:parsed.value.qty,unit:parsed.value.unit}:null
+    })});
+    data=await r.json().catch(function(){return null;});
+  }catch(e){console.error('[MS16] completamento non riuscito',e);}
+  st.saving=false;
+  var row=data&&data.row&&data.row.id===sessionId?data.row:null;
+  if(data&&data.ok===true&&row&&row.status==='completed'){
+    applySessionLifecycleRow(sess,row);
+    delete S.sessionCompletion[sessionId];
+    toast('Produzione completata','ti-check');
+    loadSessionStepState(sessionId); // timer azzerati dal server: rilettura
+  }else if(data&&(data.code==='already_completed'||data.code==='not_in_progress')&&row){
+    applySessionLifecycleRow(sess,row); // stato reale confermato dal server
+    delete S.sessionCompletion[sessionId];
+    toast(row.status==='completed'?'Questa produzione risulta già completata.':'La produzione non è in corso.','ti-info-circle');
+    if(row.status==='completed')loadSessionStepState(sessionId);
+  }else{
+    console.error('[MS16] completamento non riuscito',data&&data.error);
+    st.confirming=false;
+    st.error=data&&data.code==='invalid_yield'?'Resa non valida.':(data&&data.code==='not_found'?'Sessione non trovata.':'Completamento non riuscito. Riprova.');
+    toast(st.error,'ti-alert-circle');
+  }
+  render();
+}
+
+function renderSessionCompletionSection(sess){
+  if(sess.status!=='in_progress'&&sess.status!=='completed')return'';
+  var sid=sess.id,aSid=escAttr(sid);
+  var titolo='<div style="padding:0 22px 8px;font-family:\'IBM Plex Mono\',monospace;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--dpop-grigio-dato)">Fine produzione</div>';
+  var riga=function(label,val,cls){return'<div class="pg-card-target'+(cls?' '+cls:'')+'"><span style="color:var(--mid)">'+label+':</span> '+val+'</div>';};
+  var dataProd=sess.startedAt?formatSessionDate(sess.startedAt)+' · avviata alle '+formatSessionTime(sess.startedAt):'non disponibile';
+  if(sess.status==='completed'){
+    var durata=formatSessionDuration(sessionDurationSeconds(sess.startedAt,sess.completedAt));
+    var resa=sess.actualYieldQty!=null?formatYieldGrams(sess.actualYieldQty):'non registrata';
+    return titolo+`<div class="pg-list" style="padding:0 22px 22px"><div class="pg-card ms16-completed-summary" style="gap:4px">
+      ${riga('Data produzione',dataProd,'ms16-production-date')}
+      ${riga('Completata il',formatSessionDateTime(sess.completedAt)||'non disponibile')}
+      ${durata?riga('Durata totale',durata,'ms16-duration'):''}
+      ${riga('Resa finale effettiva',resa,'ms16-actual-yield')}
+      <div style="font-size:12px;color:var(--mid);margin-top:4px"><i class="ti ti-lock"></i> Produzione completata: sola lettura.</div>
+    </div></div>`;
+  }
+  var st=sessionCompletionState(sid);
+  var dis=st.saving?'disabled':'';
+  var corpo;
+  if(st.confirming){
+    var parsed=parseActualYieldInput(st.qtyText,st.unit);
+    var resaTxt=parsed.ok&&parsed.value?formatYieldGrams(parsed.value.grams):'nessuna resa inserita';
+    var draft=typeof readSessionNoteDraft==='function'?(readSessionNoteDraft(sid).text||'').trim():'';
+    corpo=`<div class="ms16-confirm" style="display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:13px;color:var(--dark)">Completare la produzione? Dopo il completamento la Sessione sarà di sola lettura.</div>
+      <div style="font-size:12px;color:var(--mid)">Resa finale effettiva: ${resaTxt}</div>
+      ${draft?'<div style="font-size:12px;color:var(--orange-accessible)"><i class="ti ti-alert-triangle"></i> C\'è una nota non ancora aggiunta: dopo il completamento non potrà più essere salvata.</div>':''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-outline btn-sm" id="session-complete-cancel" ${dis} onclick="cancelCompleteSession('${aSid}')">Annulla</button>
+        <button class="btn btn-primary btn-sm" id="session-complete-confirm" ${dis} onclick="confirmCompleteSession('${aSid}')"><i class="ti ${st.saving?'ti-loader-2':'ti-check'}"></i> Completa</button>
+      </div>
+    </div>`;
+  }else{
+    corpo=`<div style="display:flex;flex-direction:column;gap:4px">
+        <label for="session-yield-qty" style="font-size:12px;color:var(--mid)">Resa finale effettiva (facoltativa)</label>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input id="session-yield-qty" type="text" inputmode="decimal" autocomplete="off" placeholder="es. 4720 o 4,72" value="${escAttr(st.qtyText)}" ${dis}
+            oninput="onSessionYieldInput('${aSid}','qty',this.value)"
+            style="width:140px;background:var(--cream);border:1px solid var(--border);border-radius:var(--r-md);padding:6px 10px;font-family:inherit;font-size:13px;color:var(--dark)">
+          <select id="session-yield-unit" ${dis} onchange="onSessionYieldInput('${aSid}','unit',this.value)"
+            style="background:var(--cream);border:1px solid var(--border);border-radius:var(--r-md);padding:6px 8px;font-family:inherit;font-size:13px;color:var(--dark)">
+            <option value="g" ${st.unit==='g'?'selected':''}>g</option>
+            <option value="kg" ${st.unit==='kg'?'selected':''}>kg</option>
+          </select>
+        </div>
+      </div>
+      ${st.error?`<div class="ms16-yield-error" style="font-size:12px;color:#c0392b">${escAttr(st.error)}</div>`:''}
+      <div><button class="btn btn-primary btn-sm" id="session-complete" ${dis} onclick="requestCompleteSession('${aSid}')"><i class="ti ti-flag-check"></i> Completa produzione</button></div>`;
+  }
+  return titolo+`<div class="pg-list" style="padding:0 22px 22px"><div class="pg-card" style="gap:8px">
+    ${riga('Data produzione',dataProd,'ms16-production-date')}
+    ${corpo}
+  </div></div>`;
+}
+
+function renderCompletedSessionCard(sess){
+  var snap=sess.snapshot||{};
+  var recipeInfo=snap.recipe||{};
+  var target=snap.target||{};
+  var recipeName=recipeInfo.recipeName||'Ricetta';
+  var variantName=recipeInfo.variantName||'';
+  var portions=target.targetPortions!=null?target.targetPortions:null;
+  var gpp=target.targetGramsPerPortion!=null?target.targetGramsPerPortion:null;
+  var targetLabel=(portions!=null&&gpp!=null)?(portions+' porzioni × '+gpp+' g'):'';
+  var totaleLabel=formatFinishedTotalLabel(sess.targetFinishedTotal);
+  return`
+  <div class="pg-card ms16-completed-card" onclick="apriSessioneOperativa('${escAttr(sess.id)}')" style="cursor:pointer">
+    <div class="pg-card-top">
+      <div>
+        <div class="pg-card-title">${recipeName}${variantName?` <span class="pg-card-variant">· ${variantName}</span>`:''}</div>
+        <div class="pg-card-meta">${sess.startedAt?'Produzione del '+formatSessionDate(sess.startedAt)+' · ':''}Completata il ${formatSessionDateTime(sess.completedAt)}</div>
+      </div>
+      <span class="pg-badge pg-badge-completed">Completata</span>
+    </div>
+    <div class="pg-card-body">
+      ${targetLabel?`<div class="pg-card-target">${targetLabel}</div>`:''}
+      <div class="pg-card-total">${totaleLabel}</div>
+      ${sess.actualYieldQty!=null?`<div class="pg-card-target">Resa effettiva: ${formatYieldGrams(sess.actualYieldQty)}</div>`:''}
+    </div>
+  </div>`;
+}
+
 function renderProduzioneGuidata(){
   var tab=S.produzioneGuidataTab||'pending';
   var pending=(S.productionSessions||[]).filter(function(s){return s.status==='pending';});
@@ -4092,7 +4328,14 @@ function renderProduzioneGuidata(){
       ?'<div class="prod-empty">Nessuna produzione in corso.</div>'
       :'<div class="pg-list">'+inProgress.map(renderInProgressSessionCard).join('')+'</div>';
   }else{
-    contenuto='<div class="prod-empty">In arrivo in un prossimo Micro-Step.</div>';
+    // MS16: accesso minimo alle Sessioni completate (non e' lo Storico MS17):
+    // lista semplice, la piu' recente prima, ogni card apre la Sessione in
+    // sola lettura.
+    var completed=(S.productionSessions||[]).filter(function(s){return s.status==='completed';});
+    completed=completed.slice().sort(function(a,b){return new Date(b.completedAt)-new Date(a.completedAt);});
+    contenuto=completed.length===0
+      ?'<div class="prod-empty">Nessuna produzione completata.</div>'
+      :'<div class="pg-list">'+completed.map(renderCompletedSessionCard).join('')+'</div>';
   }
 
   return`<div class="prod-env">
@@ -4421,10 +4664,11 @@ function renderSessioneOperativa(){
   return`<div class="prod-env">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
       <div class="prod-title">${recipeName}${variantName?` <span class="pg-card-variant">· ${variantName}</span>`:''}</div>
-      <button class="btn btn-ghost btn-sm" onclick="S.view='produzione-guidata';S.produzioneGuidataTab='in_progress';render()"><i class="ti ti-arrow-left"></i> Produzione Guidata</button>
+      <button class="btn btn-ghost btn-sm" onclick="S.view='produzione-guidata';S.produzioneGuidataTab='${sess.status==='completed'?'completed':'in_progress'}';render()"><i class="ti ti-arrow-left"></i> Produzione Guidata</button>
     </div>
-    <div style="padding:0 22px 6px">
-      <span class="pg-badge pg-badge-in-progress">In corso</span>
+    <div style="padding:0 22px 6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      ${renderSessionStatusBadge(sess.status)}
+      ${sess.startedAt?`<span class="pg-card-meta ms16-production-date">Produzione del ${formatSessionDate(sess.startedAt)}</span>`:''}
     </div>
     <div style="padding:0 22px 18px;display:flex;flex-direction:column;gap:2px">
       ${portions!=null&&gpp!=null?`<div class="pg-card-target">${portions} porzioni × ${gpp} g</div>`:''}
@@ -4495,6 +4739,7 @@ function renderSessioneOperativa(){
       }).join('')}
     </div>
     ${renderSessionNotesSection(sess)}
+    ${renderSessionCompletionSection(sess)}
   </div>`;
 }
 

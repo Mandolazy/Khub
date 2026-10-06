@@ -107,6 +107,11 @@ const CLIENT_SRC = [
   'function sessionNoteDictationBusy(sessionId)', 'function formatSessionNoteTime(iso)', 'function sortSessionNotes(notes)',
   'async function loadSessionNotes(sessionId)', 'async function addSessionNote(sessionId)', 'function sessionNoteDictationErrorMessage(code)',
   'function toggleSessionNoteDictation(sessionId)', 'function stopSessionNoteDictationIfLeft()', 'function renderSessionNotesSection(sess)',
+  // MS16: la Sessione operativa mostra badge di stato, data produzione e blocco "Fine produzione"
+  'function renderSessionStatusBadge(status)', 'function formatSessionDate(iso)', 'function formatSessionDateTime(iso)', 'function formatSessionTime(iso)',
+  'function sessionDurationSeconds(startedIso,completedIso)', 'function formatSessionDuration(seconds)', 'function normalizeActualYieldGrams(qty,unit)',
+  'function parseActualYieldInput(text,unit)', 'function formatYieldGrams(grams)', 'function sessionCompletionState(sessionId)',
+  'function renderSessionCompletionSection(sess)',
 ].map(extractFunction).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0]]).join('\n');
 
 function makeSession(id, status) {
