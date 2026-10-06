@@ -235,6 +235,10 @@ function buildM2UserMessage(body) {
   ].join('\n');
 }
 
+// MS15: lunghezza massima di una Nota di produzione (dopo trim). Limite
+// applicativo, validato anche dal client; nessun vincolo nel DB.
+const SESSION_NOTE_MAX_LENGTH = 2000;
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   try {
@@ -461,6 +465,74 @@ export default async function handler(req, res) {
       const rows = await pr.json().catch(() => null);
       if (!Array.isArray(rows) || rows.length !== 1) {
         return res.status(200).json({ error: 'setSessionStepChecked: righe aggiornate ' + (Array.isArray(rows) ? rows.length : '?') + ' (attesa 1)', updated: Array.isArray(rows) ? rows.length : null });
+      }
+      return res.status(200).json({ ok: true, row: rows[0] });
+    }
+
+    // Sprint Produzione — MS15: Note di produzione della Sessione. Lettura
+    // SOLO delle note della Sessione richiesta, dalla piu' recente (created_at
+    // DESC, id DESC come criterio stabile). Leggibili in qualsiasi stato.
+    if (body.supabaseAction === 'loadSessionNotes') {
+      const sessionId = typeof body.sessionId === 'string' ? body.sessionId : '';
+      if (!sessionId) return res.status(200).json({ error: 'loadSessionNotes: sessionId mancante' });
+      const rows = await sbSelectAll('session_notes?select=id,session_id,text,created_at&session_id=eq.' + encodeURIComponent(sessionId) + '&order=created_at.desc,id.desc');
+      return res.status(200).json({ rows });
+    }
+
+    // MS15: aggiunge UNA nota (append-only). Solo INSERT puro: nessun
+    // UPDATE/DELETE/upsert, nessun header resolution. created_at lo assegna
+    // il DB (DEFAULT now()), il client non lo invia mai. Consentita SOLO se la
+    // Sessione esiste ed e' in_progress (verificato qui, non solo in UI).
+    // Idempotenza: l'id e' generato dal client e riusato nei retry; se la
+    // riga con quell'id esiste gia' (409) e' la stessa nota (stessa Sessione,
+    // stesso testo) viene restituita cosi' com'e', mai modificata.
+    if (body.supabaseAction === 'addSessionNote') {
+      const n = body.note || {};
+      const id = typeof n.id === 'string' ? n.id : '';
+      const sessionId = typeof n.session_id === 'string' ? n.session_id : '';
+      if (!id || id.length > 100 || !sessionId || typeof n.text !== 'string') {
+        return res.status(200).json({ error: 'addSessionNote: parametri non validi', code: 'invalid' });
+      }
+      const text = n.text.trim();
+      if (!text) return res.status(200).json({ error: 'addSessionNote: nota vuota', code: 'empty' });
+      if (text.length > SESSION_NOTE_MAX_LENGTH) {
+        return res.status(200).json({ error: 'addSessionNote: nota oltre ' + SESSION_NOTE_MAX_LENGTH + ' caratteri', code: 'too_long' });
+      }
+      const sr = await fetch(SB + '/rest/v1/production_sessions?id=eq.' + encodeURIComponent(sessionId) + '&select=id,status', { headers: SH_READ });
+      if (!sr.ok) {
+        const detail = await sr.text().catch(() => '');
+        console.error('Supabase error [production_sessions]:', sr.status, detail);
+        return res.status(200).json({ error: detail || ('HTTP ' + sr.status), code: 'db', status: sr.status });
+      }
+      const sessRows = await sr.json().catch(() => null);
+      if (!Array.isArray(sessRows) || sessRows.length !== 1) {
+        return res.status(200).json({ error: 'addSessionNote: Sessione non trovata', code: 'not_found' });
+      }
+      if (sessRows[0].status !== 'in_progress') {
+        return res.status(200).json({ error: 'addSessionNote: Sessione non in corso', code: 'not_in_progress' });
+      }
+      const ir = await fetch(SB + '/rest/v1/session_notes?select=id,session_id,text,created_at', {
+        method: 'POST', headers: { ...SH_READ, 'Prefer': 'return=representation' },
+        body: JSON.stringify({ id, session_id: sessionId, text })
+      });
+      if (ir.status === 409) {
+        // Retry di una nota gia' salvata: rilettura per id, mai sovrascrittura.
+        const er = await fetch(SB + '/rest/v1/session_notes?id=eq.' + encodeURIComponent(id) + '&select=id,session_id,text,created_at', { headers: SH_READ });
+        const existing = er.ok ? await er.json().catch(() => null) : null;
+        const row = Array.isArray(existing) && existing.length === 1 ? existing[0] : null;
+        if (row && row.session_id === sessionId && row.text === text) {
+          return res.status(200).json({ ok: true, row, duplicate: true });
+        }
+        return res.status(200).json({ error: 'addSessionNote: id gia\' usato da un\'altra nota', code: 'conflict' });
+      }
+      if (!ir.ok) {
+        const detail = await ir.text().catch(() => '');
+        console.error('Supabase error [session_notes]:', ir.status, detail);
+        return res.status(200).json({ error: detail || ('HTTP ' + ir.status), code: 'db', status: ir.status });
+      }
+      const rows = await ir.json().catch(() => null);
+      if (!Array.isArray(rows) || rows.length !== 1) {
+        return res.status(200).json({ error: 'addSessionNote: righe inserite ' + (Array.isArray(rows) ? rows.length : '?') + ' (attesa 1)', code: 'db' });
       }
       return res.status(200).json({ ok: true, row: rows[0] });
     }

@@ -94,7 +94,11 @@ const CLIENT_SRC = [
   // MS14: la Sessione operativa mostra anche i timer degli step
   'function ms14Now()', 'function stepTimerDurationSeconds(value)', 'function stepTimerRemainingSeconds(startedAtIso,durationSeconds,nowMs)',
   'function stepTimerState(startedAtIso,durationSeconds,nowMs)', 'function formatTimerCountdown(seconds)',
-].map(extractFunction).join('\n');
+  // MS15: la Sessione operativa carica e mostra anche le Note di produzione
+  'function sessionNoteDraftKey(sessionId)', 'function readSessionNoteDraft(sessionId)', 'function restoreSessionNoteDraft(sessionId)',
+  'function sessionNoteDictationBusy(sessionId)', 'function formatSessionNoteTime(iso)', 'function sortSessionNotes(notes)',
+  'async function loadSessionNotes(sessionId)', 'function renderSessionNotesSection(sess)',
+].map(extractFunction).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0]]).join('\n');
 
 function makeSession(id, status, itemKeys) {
   return {

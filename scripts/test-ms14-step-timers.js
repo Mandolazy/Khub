@@ -97,7 +97,11 @@ const CLIENT_SRC = [
   'async function startSessionStepTimer(sessionId,itemKey)', 'async function cancelSessionStepTimer(sessionId,itemKey)',
   'function openSessionRunningTimers()', 'function syncStepTimerTicker()', 'function tickStepTimers()',
   'function primeStepTimerSound()', 'function playStepTimerSound()',
-].map(extractFunction).join('\n');
+  // MS15: la Sessione operativa carica e mostra anche le Note di produzione
+  'function sessionNoteDraftKey(sessionId)', 'function readSessionNoteDraft(sessionId)', 'function restoreSessionNoteDraft(sessionId)',
+  'function sessionNoteDictationBusy(sessionId)', 'function formatSessionNoteTime(iso)', 'function sortSessionNotes(notes)',
+  'async function loadSessionNotes(sessionId)', 'function renderSessionNotesSection(sess)',
+].map(extractFunction).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0]]).join('\n');
 
 function makeSession(id, status, stepIds, durations) {
   return {

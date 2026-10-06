@@ -978,6 +978,17 @@ const S = {
   // { [sessionId]: {status, byItemKey:{[itemKey]:{checked,checkedAt,timerStartedAt}},
   //   pending (Fatto), timerPending (timer, MS14)} }
   sessionStepState: {},
+  // Sprint Produzione — MS15: Note di produzione per Sessione (session_notes,
+  // append-only). { [sessionId]: {status:'loading'|'loaded'|'error',
+  //   notes:[{id,text,createdAt}] (piu' recente prima), saving} }
+  sessionNotes: {},
+  // MS15: bozza della nota per Sessione (mai nel DB), copiata anche in
+  // localStorage (vedi sessionNoteDraftKey). { [sessionId]: {text,
+  //   pendingId, pendingText} } — pendingId/pendingText: id gia' usato per
+  //   un tentativo di salvataggio di quel testo, riusato nei retry.
+  sessionNoteDraft: {},
+  // MS15: Sessione a cui appartiene la dettatura 'session-note' in corso.
+  sessionNoteDictationSessionId: null,
   produzioneGuidataTab: 'pending', // 'pending' | 'in_progress' | 'completed'
   // Sprint Produzione — Micro-Step 11: id della Sessione aperta nella
   // schermata Sessione operativa (S.view='sessione-operativa'). Dedicato:
@@ -3713,9 +3724,11 @@ async function avviaProduzione(sessionId){
 function apriSessioneOperativa(sessionId){
   S.openSessionId=sessionId;
   S.view='sessione-operativa';
+  restoreSessionNoteDraft(sessionId); // MS15: bozza non salvata (anche dopo un reload)
   render();
   loadSessionIngredientState(sessionId);
   loadSessionStepState(sessionId); // MS13: indipendente dalle spunte ingredienti
+  loadSessionNotes(sessionId); // MS15: note gia' salvate, sempre dal DB
 }
 
 // MS12: legge le righe session_ingredient_state della Sessione. Le righe
@@ -4105,6 +4118,267 @@ function renderProduzioneGuidata(){
 // sorgente cambia o viene cancellata dopo la creazione della Sessione.
 // Nessuna interazione: nessun check/timer/note/Completa produzione (fuori
 // scope MS11).
+// ══════════════════════════════════════════════════════════
+// MS15 — NOTE DI PRODUZIONE
+// Una nota persistita e' SEMPRE solo testo (session_notes, append-only:
+// solo INSERT via addSessionNote, mai modifica/cancellazione). Scrittura e
+// dettatura confluiscono nella STESSA textarea (bozza per Sessione); si
+// salva solo con "Aggiungi nota". L'audio non e' mai toccato da KHUB.
+// ══════════════════════════════════════════════════════════
+var SESSION_NOTE_MAX_LENGTH=2000; // stesso limite validato da api/chat.js
+
+function sessionNoteDraftKey(sessionId){return 'khub.productionSessionNoteDraft.'+sessionId;}
+
+function readSessionNoteDraft(sessionId){
+  var d=S.sessionNoteDraft&&S.sessionNoteDraft[sessionId];
+  return d||{text:'',pendingId:null,pendingText:null};
+}
+
+// Unico punto di scrittura della bozza: stato runtime + localStorage. Una
+// bozza vuota rimuove la chiave. localStorage non disponibile (modalita'
+// privata, quota) non blocca mai la scrittura: resta la copia runtime.
+function writeSessionNoteDraft(sessionId,draft){
+  if(!S.sessionNoteDraft)S.sessionNoteDraft={};
+  var d={text:typeof draft.text==='string'?draft.text:'',pendingId:draft.pendingId||null,pendingText:draft.pendingText||null};
+  S.sessionNoteDraft[sessionId]=d;
+  try{
+    if(d.text)localStorage.setItem(sessionNoteDraftKey(sessionId),JSON.stringify(d));
+    else localStorage.removeItem(sessionNoteDraftKey(sessionId));
+  }catch(e){console.error('[MS15] bozza nota non salvata in localStorage',e);}
+}
+
+function setSessionNoteDraftText(sessionId,text){
+  var d=readSessionNoteDraft(sessionId);
+  writeSessionNoteDraft(sessionId,{text:text,pendingId:d.pendingId,pendingText:d.pendingText});
+}
+
+// All'apertura della Sessione: se in memoria non c'e' ancora una bozza, la
+// ripristina da localStorage (reload accidentale). Mai sovrascrive quella runtime.
+function restoreSessionNoteDraft(sessionId){
+  if(!sessionId)return;
+  if(!S.sessionNoteDraft)S.sessionNoteDraft={};
+  if(S.sessionNoteDraft[sessionId])return;
+  var d=null;
+  try{
+    var raw=localStorage.getItem(sessionNoteDraftKey(sessionId));
+    if(raw){var p=JSON.parse(raw);if(p&&typeof p.text==='string')d=p;}
+  }catch(e){console.error('[MS15] bozza nota non leggibile da localStorage',e);}
+  S.sessionNoteDraft[sessionId]={
+    text:d?d.text:'',
+    pendingId:d&&typeof d.pendingId==='string'?d.pendingId:null,
+    pendingText:d&&typeof d.pendingText==='string'?d.pendingText:null
+  };
+}
+
+// Digitazione: aggiorna bozza (runtime + localStorage) senza render(), e
+// aggiorna in place contatore e pulsante.
+function onSessionNoteInput(sessionId,value){
+  setSessionNoteDraftText(sessionId,value);
+  var t=String(value||'').trim();
+  var cnt=document.getElementById('session-note-count');
+  if(cnt){cnt.textContent=t.length+'/'+SESSION_NOTE_MAX_LENGTH;cnt.style.color=t.length>SESSION_NOTE_MAX_LENGTH?'#c0392b':'var(--mid)';}
+  var btn=document.getElementById('session-note-add');
+  var entry=S.sessionNotes&&S.sessionNotes[sessionId];
+  if(btn)btn.disabled=!t||t.length>SESSION_NOTE_MAX_LENGTH||!!(entry&&entry.saving)||sessionNoteDictationBusy(sessionId);
+}
+
+// Dettatura della nota di QUESTA Sessione attiva o in chiusura (dopo Stop il
+// testo finale arriva solo a fine riconoscimento).
+function sessionNoteDictationBusy(sessionId){
+  return S.recordingTarget==='session-note'&&S.sessionNoteDictationSessionId===sessionId&&!!(S.recording||S._speechRecognition);
+}
+
+function formatSessionNoteTime(iso){
+  var d=new Date(iso);
+  if(!iso||isNaN(d.getTime()))return'';
+  return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+
+function sortSessionNotes(notes){
+  return notes.slice().sort(function(a,b){
+    var ta=Date.parse(a.createdAt)||0,tb=Date.parse(b.createdAt)||0;
+    if(ta!==tb)return tb-ta;
+    return a.id<b.id?1:a.id>b.id?-1:0;
+  });
+}
+
+// Legge le note della Sessione (sempre dal DB, qualunque sia lo stato).
+async function loadSessionNotes(sessionId){
+  if(!sessionId)return;
+  if(!S.sessionNotes)S.sessionNotes={};
+  var prev=S.sessionNotes[sessionId];
+  if(prev&&prev.status==='loading')return;
+  var entry={status:'loading',notes:prev?prev.notes:[],saving:prev?!!prev.saving:false};
+  S.sessionNotes[sessionId]=entry;
+  render();
+  try{
+    var r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'loadSessionNotes',sessionId:sessionId})});
+    var data=await r.json().catch(function(){return null;});
+    if(!r.ok||!data||!Array.isArray(data.rows))throw new Error((data&&data.error)||'risposta non valida');
+    var notes=[];
+    data.rows.forEach(function(row){
+      if(row&&row.session_id===sessionId&&row.id&&typeof row.text==='string')notes.push({id:row.id,text:row.text,createdAt:row.created_at||null});
+    });
+    entry.notes=sortSessionNotes(notes);
+    entry.status='loaded';
+  }catch(e){
+    console.error('[MS15] lettura note non riuscita',e);
+    entry.status='error';
+  }
+  render();
+}
+
+// "Aggiungi nota": solo INSERT. La bozza viene cancellata SOLO dopo la
+// conferma del server; qualsiasi errore la lascia intatta (runtime +
+// localStorage) insieme all'id del tentativo, riusato nel retry dello
+// stesso testo (nessun duplicato se il primo tentativo era arrivato al DB).
+async function addSessionNote(sessionId){
+  var sess=(S.productionSessions||[]).find(function(s){return s.id===sessionId;});
+  if(!sess)return;
+  if(!S.sessionNotes)S.sessionNotes={};
+  var entry=S.sessionNotes[sessionId];
+  if(entry&&entry.saving)return; // richiesta gia' in corso (doppio click)
+  if(sess.status!=='in_progress'){toast('Le note si aggiungono solo a una produzione in corso.','ti-alert-circle');return;}
+  if(sessionNoteDictationBusy(sessionId)){toast('Ferma la dettatura prima di aggiungere la nota.','ti-microphone');return;}
+  var inp=document.getElementById('session-note-input');
+  if(inp&&S.openSessionId===sessionId)setSessionNoteDraftText(sessionId,inp.value); // allinea a cio' che e' scritto ora
+  var draft=readSessionNoteDraft(sessionId);
+  var text=(draft.text||'').trim();
+  if(!text){toast('Scrivi o detta il testo della nota.','ti-alert-circle');return;}
+  if(text.length>SESSION_NOTE_MAX_LENGTH){toast('La nota supera i '+SESSION_NOTE_MAX_LENGTH+' caratteri.','ti-alert-circle');return;}
+  var noteId=draft.pendingId&&draft.pendingText===text?draft.pendingId:'sn_'+uid();
+  writeSessionNoteDraft(sessionId,{text:draft.text,pendingId:noteId,pendingText:text});
+  if(!entry){entry={status:'error',notes:[],saving:false};S.sessionNotes[sessionId]=entry;}
+  entry.saving=true;
+  render();
+  var ok=false,row=null,code=null;
+  try{
+    var r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'addSessionNote',note:{id:noteId,session_id:sessionId,text:text}})});
+    var data=await r.json().catch(function(){return null;});
+    ok=!!(r.ok&&data&&data.ok===true&&data.row&&data.row.id===noteId&&data.row.session_id===sessionId&&typeof data.row.text==='string');
+    if(ok)row=data.row;
+    else{code=data&&data.code;console.error('[MS15] nota non salvata',data&&data.error);}
+  }catch(e){console.error('[MS15] nota non salvata',e);}
+  entry=S.sessionNotes[sessionId]||entry;
+  entry.saving=false;
+  if(ok){
+    if(!entry.notes.some(function(n){return n.id===row.id;})){
+      entry.notes=sortSessionNotes([{id:row.id,text:row.text,createdAt:row.created_at||null}].concat(entry.notes));
+    }
+    var attuale=readSessionNoteDraft(sessionId);
+    if((attuale.text||'').trim()===text)writeSessionNoteDraft(sessionId,{text:'',pendingId:null,pendingText:null});
+    else writeSessionNoteDraft(sessionId,{text:attuale.text,pendingId:null,pendingText:null});
+    toast('Nota aggiunta','ti-check');
+    if(entry.status!=='loaded')loadSessionNotes(sessionId); // elenco incompleto: rilettura dal DB
+  }else if(code==='not_in_progress'){
+    toast('La produzione non e\' piu\' in corso: nota non salvata. Il testo resta nel campo.','ti-alert-circle');
+  }else{
+    toast('Nota non salvata. Il testo resta nel campo: riprova.','ti-alert-circle');
+  }
+  render();
+}
+
+// Messaggi comprensibili per gli errori della dettatura della nota.
+function sessionNoteDictationErrorMessage(code){
+  if(code==='not-allowed'||code==='service-not-allowed')return 'Permesso del microfono negato: abilitalo nelle impostazioni del browser per dettare. Puoi sempre scrivere la nota.';
+  if(code==='audio-capture')return 'Nessun microfono disponibile. Puoi sempre scrivere la nota.';
+  if(code==='no-speech')return 'Nessun parlato rilevato.';
+  if(code==='network')return 'Servizio vocale del browser non raggiungibile. Puoi sempre scrivere la nota.';
+  return null;
+}
+
+// Dettatura della nota: riusa il motore condiviso (Web Speech API). Il testo
+// finale viene AGGIUNTO alla bozza della Sessione da cui e' partita la
+// dettatura (mai sostituito, mai salvato automaticamente).
+function toggleSessionNoteDictation(sessionId){
+  if(S.recording){
+    if(S.recordingTarget!=='session-note'||S.sessionNoteDictationSessionId!==sessionId){toast("C'è già un microfono attivo","ti-microphone");return;}
+    stopDictation();return;
+  }
+  var sess=(S.productionSessions||[]).find(function(s){return s.id===sessionId;});
+  if(!sess||sess.status!=='in_progress')return;
+  var entry=S.sessionNotes&&S.sessionNotes[sessionId];
+  if(entry&&entry.saving)return;
+  var inp=document.getElementById('session-note-input');
+  if(inp&&S.openSessionId===sessionId)setSessionNoteDraftText(sessionId,inp.value);
+  // Assegnata PRIMA dell'avvio: startDictation chiama render(), e
+  // stopSessionNoteDictationIfLeft deve gia' sapere a quale Sessione appartiene.
+  var precedente=S.sessionNoteDictationSessionId;
+  S.sessionNoteDictationSessionId=sessionId;
+  var avviata=startDictation({target:'session-note',previewId:'session-note-voice-preview',
+    onFinal:function(text){
+      var base=readSessionNoteDraft(sessionId).text||'';
+      setSessionNoteDraftText(sessionId,base.trim()?base.replace(/\s+$/,'')+' '+text:text);
+    },
+    onEmpty:function(){toast('Nessun testo riconosciuto: la nota non e\' cambiata.','ti-microphone-off');},
+    errorMessage:sessionNoteDictationErrorMessage
+  });
+  if(!avviata)S.sessionNoteDictationSessionId=precedente;
+}
+
+// Uscita dalla Sessione (o cambio Sessione) durante la dettatura: la ferma.
+// Il testo gia' riconosciuto arriva comunque nella bozza della Sessione di
+// origine (onFinal). Chiamata da render(): mai render() da qui.
+function stopSessionNoteDictationIfLeft(){
+  if(!S.recording||S.recordingTarget!=='session-note')return;
+  if(S.view==='sessione-operativa'&&S.openSessionId===S.sessionNoteDictationSessionId)return;
+  try{if(S._speechRecognition)S._speechRecognition.stop();}catch(e){console.error('[MS15] stop dettatura',e);}
+  S.recording=false;
+}
+
+function renderSessionNotesSection(sess){
+  var sid=sess.id;
+  var entry=(S.sessionNotes||{})[sid]||null;
+  var notes=entry?entry.notes:[];
+  var titolo='<div style="padding:0 22px 8px;font-family:\'IBM Plex Mono\',monospace;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--dpop-grigio-dato)">Note di produzione</div>';
+  var form='';
+  if(sess.status==='in_progress'){
+    var draftText=readSessionNoteDraft(sid).text||'';
+    var lung=draftText.trim().length;
+    var saving=!!(entry&&entry.saving);
+    var dettando=S.recording&&S.recordingTarget==='session-note'&&S.sessionNoteDictationSessionId===sid;
+    var occupato=sessionNoteDictationBusy(sid);
+    var supportata=typeof window!=='undefined'&&!!(window.SpeechRecognition||window.webkitSpeechRecognition);
+    var aSid=escAttr(sid);
+    var micBtn=supportata
+      ?`<button class="btn btn-outline btn-sm" id="session-note-mic" ${dettando?'style="background:var(--orange);color:white;border-color:var(--orange)"':''} ${saving||(occupato&&!dettando)?'disabled':''} onclick="toggleSessionNoteDictation('${aSid}')"><i class="ti ti-${dettando?'player-stop':'microphone'}"></i> ${dettando?'Stop':'Detta'}</button>`
+      :`<button class="btn btn-outline btn-sm" id="session-note-mic" disabled title="Dettatura non supportata da questo browser"><i class="ti ti-microphone-off"></i> Dettatura non disponibile</button>`;
+    form=`<div class="pg-card" style="gap:8px">
+      <textarea id="session-note-input" class="ai-input" rows="3" style="flex:none;width:100%;box-sizing:border-box;resize:vertical" maxlength="${SESSION_NOTE_MAX_LENGTH}" placeholder="Scrivi o detta una nota sulla produzione…" ${saving?'readonly':''}
+        oninput="onSessionNoteInput('${aSid}',this.value)">${escAttr(draftText)}</textarea>
+      ${dettando?`<div id="session-note-voice-preview" style="font-size:12px;color:var(--mid);font-style:italic">In ascolto...</div>`:''}
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        ${micBtn}
+        <button class="btn btn-primary btn-sm" id="session-note-add" ${!lung||lung>SESSION_NOTE_MAX_LENGTH||saving||occupato?'disabled':''} onclick="addSessionNote('${aSid}')"><i class="ti ${saving?'ti-loader-2':'ti-plus'}"></i> Aggiungi nota</button>
+        <span id="session-note-count" style="margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:11px;color:${lung>SESSION_NOTE_MAX_LENGTH?'#c0392b':'var(--mid)'}">${lung}/${SESSION_NOTE_MAX_LENGTH}</span>
+      </div>
+      <div style="font-size:11px;color:var(--mid)">${supportata?'La dettatura utilizza il servizio vocale del browser. KHUB conserva solo il testo della nota.':'Dettatura non supportata da questo browser: puoi scrivere la nota.'}</div>
+    </div>`;
+  }else if(sess.status==='completed'){
+    form='<div style="padding:0 0 8px;font-size:12px;color:var(--mid)"><i class="ti ti-lock"></i> Produzione completata: note in sola lettura.</div>';
+  }else{
+    form='<div style="padding:0 0 8px;font-size:12px;color:var(--mid)">Le note si aggiungono quando la produzione è in corso.</div>';
+  }
+  var elenco;
+  if(!entry||entry.status==='loading'){
+    elenco='<div style="font-size:12px;color:var(--mid)"><i class="ti ti-loader-2"></i> Carico le note…</div>';
+  }else if(entry.status==='error'&&!notes.length){
+    elenco='<div style="font-size:12px;color:var(--orange-accessible);display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span><i class="ti ti-alert-triangle"></i> Non riesco a caricare le note.</span><button class="btn btn-outline btn-sm" onclick="loadSessionNotes(\''+escAttr(sid)+'\')"><i class="ti ti-refresh"></i> Riprova</button></div>';
+  }else if(!notes.length){
+    elenco='<div class="session-notes-empty" style="font-size:12px;color:var(--mid)">Nessuna nota</div>';
+  }else{
+    elenco=(entry.status==='error'?'<div style="font-size:12px;color:var(--orange-accessible);display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span><i class="ti ti-alert-triangle"></i> Elenco note forse incompleto.</span><button class="btn btn-outline btn-sm" onclick="loadSessionNotes(\''+escAttr(sid)+'\')"><i class="ti ti-refresh"></i> Riprova</button></div>':'')
+      +notes.map(function(n){
+        var full=n.createdAt&&!isNaN(new Date(n.createdAt).getTime())?new Date(n.createdAt).toLocaleString('it-IT'):'';
+        return`<div class="pg-card session-note" data-note-id="${escAttr(n.id)}">
+          <div class="pg-card-meta" title="${escAttr(full)}"><i class="ti ti-clock"></i> ${formatSessionNoteTime(n.createdAt)}</div>
+          <div style="white-space:pre-wrap;word-break:break-word">${escAttr(n.text)}</div>
+        </div>`;
+      }).join('');
+  }
+  return titolo+`<div class="pg-list" style="padding:0 22px 22px">${form}${elenco}</div>`;
+}
+
 function renderSessioneOperativa(){
   var sess=(S.productionSessions||[]).find(function(s){return s.id===S.openSessionId;});
   if(!sess){
@@ -4220,6 +4494,7 @@ function renderSessioneOperativa(){
         </div>`;
       }).join('')}
     </div>
+    ${renderSessionNotesSection(sess)}
   </div>`;
 }
 
@@ -5644,7 +5919,9 @@ function voiceClear(recipeId){delete S.pendingVoiceText[recipeId];render();}
 // salvato, nessuna chiamata AI): un solo microfono attivo alla volta in
 // tutta l'app. target identifica chi lo usa ('notes' | 'm2'); previewId e'
 // l'elemento in cui mostrare il testo provvisorio; onFinal riceve il testo
-// finale (solo se non vuoto) quando la dettatura termina.
+// finale (solo se non vuoto) quando la dettatura termina. Opzionali (MS15):
+// onEmpty() se termina senza testo; errorMessage(code) -> testo del toast
+// d'errore (null = messaggio generico invariato).
 function startDictation(opts){
   if(S.recording||S._speechRecognition)return false; // un solo microfono attivo (anche mentre il precedente si sta chiudendo)
   var SpeechRec=window.SpeechRecognition||window.webkitSpeechRecognition;
@@ -5668,13 +5945,16 @@ function startDictation(opts){
   };
   rec.onerror=function(e){
     S.recording=false;S.recordingTarget=null;S._speechRecognition=null;
-    toast("Errore microfono: "+e.error,"ti-microphone-off");
+    var msg=opts.errorMessage?opts.errorMessage(e.error):null; // opzionale (MS15): messaggio comprensibile
+    toast(msg||("Errore microfono: "+e.error),"ti-microphone-off");
     render();
   };
   rec.onend=function(){
     S.recording=false;S.recordingTarget=null;S._speechRecognition=null;
     if(finalText.trim()){
       opts.onFinal(finalText.trim());
+    }else if(opts.onEmpty){
+      opts.onEmpty(); // opzionale (MS15): dettatura terminata senza testo
     }
     render();
   };
@@ -7377,6 +7657,8 @@ function render(){
     if(prodBtn)prodBtn.className='mode-btn '+(S.mode==='produzione'?'prod-active':'');
   }
 
+  stopSessionNoteDictationIfLeft(); // MS15: uscita dalla Sessione durante la dettatura della nota
+
   // Main content
   let mainContent='';
   const recipe=S.selectedId?R(S.selectedId):null;
@@ -7401,7 +7683,12 @@ function render(){
   else if(S.view==='lab-globale'){mainContent=renderLabGlobale();}
 
   const main=document.getElementById('main');
+  // MS15: render() ricostruisce #main; se si sta scrivendo la nota, cursore e
+  // focus vengono ripristinati (il testo e' gia' nella bozza).
+  const noteFocus=(()=>{const a=document.activeElement;return a&&a.id==='session-note-input'?{s:a.selectionStart,e:a.selectionEnd}:null;})();
   if(main)main.innerHTML=mainContent+(S.showFamilyPicker?renderFamilyPicker():'')+(S.showMergePicker?renderMergePicker():'')+(S.showMergeConfirm?renderMergeConfirm():'')+(S.showSchedeFamiglie?renderSchedeFamigliePicker():'')+(S.showCondividiStaff?renderCondividiStaffModal():'')+(S.showOnboarding?renderOnboarding():'')+(S.toastAction?renderToastAction():S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:'')+renderUnitConversionModal()+renderMandaInProduzioneModal()+renderConversionPreflightModal();
+
+  if(noteFocus){const ta=document.getElementById('session-note-input');if(ta){try{ta.focus();ta.setSelectionRange(noteFocus.s,noteFocus.e);}catch(e){}}}
 
   // Bottom nav
   const bn=document.getElementById('bottom-nav');
