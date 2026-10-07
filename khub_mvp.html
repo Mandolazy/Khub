@@ -692,6 +692,36 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
 .pg-badge-pending{background:var(--dpop-carta-toccata,#eee);color:var(--dpop-inchiostro-testo);}
 .pg-badge-in-progress{background:var(--sage-light);color:var(--sage-dark);}
 .pg-badge-completed{background:var(--dpop-inchiostro-testo,#333);color:#fff;}
+/* MS17b.1 — Storico Produzioni: riepilogo a indicatori e card compatte */
+.ms17-label{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--dpop-grigio-dato);}
+.ms17-summary-head{font-size:15px;font-weight:600;color:var(--dpop-inchiostro-testo);}
+.ms17-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
+.ms17-kpi{border:1px solid var(--dpop-filetto-riga);border-radius:var(--r-md,10px);padding:10px 12px;min-width:0;}
+.ms17-kpi-value{font-size:20px;font-weight:600;color:var(--dpop-inchiostro-testo);line-height:1.25;margin-top:2px;overflow-wrap:anywhere;}
+.ms17-kpi-value-muted{font-size:15px;font-weight:500;color:var(--dpop-grigio-dato);}
+.ms17-kpi-sub{font-size:11px;color:var(--dpop-grigio-dato);margin-top:2px;}
+.ms17-note{font-size:11px;color:var(--dpop-grigio-dato);line-height:1.45;}
+.ms17-history-card{padding:12px 14px;gap:8px;}
+.ms17-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+.ms17-card-name{font-size:15px;font-weight:600;color:var(--dpop-inchiostro-testo);overflow-wrap:anywhere;}
+.ms17-card-variant{font-size:12px;color:var(--dpop-grigio-dato);margin-top:1px;overflow-wrap:anywhere;}
+.ms17-card-grid{display:grid;grid-template-columns:minmax(230px,1fr) minmax(0,1.6fr) auto;gap:8px 18px;align-items:end;}
+.ms17-nowrap{white-space:nowrap;}
+.ms17-card-when{font-size:14px;font-weight:600;color:var(--dpop-inchiostro-testo);}
+.ms17-card-sub{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--dpop-grigio-dato);margin-top:2px;}
+.ms17-card-yield{display:flex;align-items:flex-end;gap:6px 14px;flex-wrap:wrap;}
+.ms17-card-yield-value{font-size:14px;font-weight:600;color:var(--dpop-inchiostro-testo);}
+.ms17-card-yield-arrow{color:var(--dpop-grigio-dato);padding-bottom:1px;}
+.ms17-card-yield-muted{font-size:13px;color:var(--dpop-grigio-dato);}
+.ms17-open{white-space:nowrap;justify-self:end;}
+@media (max-width:640px){
+  .ms17-kpis{grid-template-columns:1fr;gap:6px;}
+  .ms17-kpi{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:8px 12px;}
+  .ms17-kpi-body{text-align:right;}
+  .ms17-kpi-value{font-size:17px;margin-top:0;}
+  .ms17-card-grid{grid-template-columns:1fr;align-items:start;}
+  .ms17-open{justify-self:stretch;}
+}
 
 .prod-staff-riga{display:flex;align-items:center;gap:10px;padding:12px 4px;min-height:44px;border-bottom:1px solid var(--dpop-filetto-riga);cursor:pointer;font-family:'Archivo',sans-serif;font-size:15px;color:var(--dpop-inchiostro-testo);-webkit-tap-highlight-color:transparent;}
 .prod-staff-riga input[type=checkbox]{width:18px;height:18px;cursor:pointer;flex-shrink:0;}
@@ -4585,48 +4615,84 @@ function resetHistoryFilters(){
   render();
 }
 
+// MS17b.1: data compatta per lo Storico ("7 ott · 17:01"; l'anno compare
+// solo se diverso da quello corrente).
+function formatHistoryWhen(iso){
+  var d=new Date(iso);
+  if(!iso||isNaN(d.getTime()))return'—';
+  var opts={day:'numeric',month:'short'};
+  if(d.getFullYear()!==historyNow().getFullYear())opts.year='numeric';
+  return d.toLocaleDateString('it-IT',opts).replace(/\.$/,'')+' · '+formatSessionTime(iso);
+}
+// MS17b.1: la riga "Ricetta: ..." compare solo se aggiunge informazione
+// (nome della versione diverso da quello della Scheda, ignorando
+// maiuscole e spazi).
+function historyVariantAddsInfo(recipeName,variantName){
+  var n=function(v){return String(v==null?'':v).toLowerCase().replace(/\s+/g,' ').trim();};
+  return!!n(variantName)&&n(variantName)!==n(recipeName);
+}
+
+// Riepilogo a tre indicatori. Previsto = tutte le produzioni filtrate;
+// Effettivo = resa registrata; Scostamento = SOLO l'insieme confrontabile
+// (MS17a). Con copertura parziale l'asterisco e la nota lo dichiarano.
 function renderHistorySummary(agg){
-  var righe=['<div class="pg-card-title ms17-summary-count">'+agg.count+(agg.count===1?' produzione':' produzioni')+'</div>',
-    '<div class="pg-card-target">Resa prevista: <strong>'+formatHistoryQty(agg.totalExpected)+'</strong></div>'];
-  if(agg.actualCount===0){
-    righe.push('<div class="pg-card-target ms17-no-actual" style="color:var(--mid)">Resa effettiva non registrata in nessuna produzione: nessun confronto disponibile.</div>');
-  }else{
-    var tutte=agg.comparableCount===agg.count;
-    righe.push('<div class="pg-card-target">Resa effettiva registrata: <strong>'+formatHistoryQty(agg.totalActual)+'</strong></div>');
-    if(agg.aggregateDeviation!=null){
-      // Confronto SOLO sull'insieme confrontabile: se la copertura e' parziale
-      // si mostrano esplicitamente il previsto e l'effettivo di quelle sole produzioni.
-      righe.push('<div class="pg-card-target ms17-summary-deviation">'+(tutte?'Scostamento':'Scostamento sulle '+agg.comparableCount+' produzioni con resa registrata ('+formatHistoryQty(agg.totalExpectedComparable)+' previsti → '+formatHistoryQty(agg.totalActualComparable)+' effettivi)')
-        +': <strong>'+formatHistorySigned(agg.aggregateDeviation)+(agg.aggregateDeviationPct!=null?' · '+formatHistoryPct(agg.aggregateDeviationPct):'')+'</strong></div>');
-    }
-    righe.push('<div class="pg-card-meta ms17-coverage">'+(agg.coverage.withActual===agg.coverage.total
-      ?'Resa effettiva registrata in tutte le produzioni'
-      :'Resa effettiva registrata in '+agg.coverage.withActual+' produzion'+(agg.coverage.withActual===1?'e':'i')+' su '+agg.coverage.total)+'</div>');
-  }
-  return'<div class="pg-card ms17-summary" style="gap:4px">'+righe.join('')+'</div>';
+  var nessuna=agg.actualCount===0;
+  var parziale=!nessuna&&agg.coverage.withActual<agg.coverage.total;
+  var star=parziale?'*':'';
+  var kpi=function(label,value,sub,muted,cls){
+    return'<div class="ms17-kpi'+(cls?' '+cls:'')+'"><div class="ms17-label">'+label+'</div><div class="ms17-kpi-body"><div class="ms17-kpi-value'+(muted?' ms17-kpi-value-muted':'')+'">'+value+'</div>'+(sub?'<div class="ms17-kpi-sub">'+sub+'</div>':'')+'</div></div>';
+  };
+  var scost=agg.aggregateDeviation!=null
+    ?formatHistorySigned(agg.aggregateDeviation)+(agg.aggregateDeviationPct!=null?'<div class="ms17-kpi-sub" style="font-size:13px">'+formatHistoryPct(agg.aggregateDeviationPct)+'</div>':'')
+    :'—';
+  var nota=nessuna
+    ?'Nessuna resa effettiva registrata: scostamento non calcolabile.'
+    :parziale
+      ?'* Resa effettiva registrata in '+agg.coverage.withActual+' produzion'+(agg.coverage.withActual===1?'e':'i')+' su '+agg.coverage.total+'. Lo scostamento considera solo le produzioni con resa registrata.'
+      :'Resa effettiva registrata in tutte le produzioni.';
+  return'<div class="pg-card ms17-summary" style="gap:10px">'
+    +'<div class="ms17-summary-head ms17-summary-count">'+agg.count+(agg.count===1?' produzione':' produzioni')+'</div>'
+    +'<div class="ms17-kpis">'
+      +kpi('Previsto',formatHistoryQty(agg.totalExpected),'',false,'ms17-kpi-expected')
+      +kpi('Effettivo'+star,nessuna?'Non disponibile':formatHistoryQty(agg.totalActual),'',nessuna,nessuna?'ms17-kpi-actual ms17-no-actual':'ms17-kpi-actual')
+      +kpi('Scostamento'+star,scost,parziale?'su '+formatHistoryQty(agg.totalExpectedComparable)+' previsti confrontabili':'',agg.aggregateDeviation==null,agg.aggregateDeviation!=null?'ms17-kpi-deviation ms17-summary-deviation':'ms17-kpi-deviation')
+    +'</div>'
+    +'<div class="ms17-note ms17-coverage">'+nota+'</div>'
+  +'</div>';
 }
 
 function renderHistoryCard(r){
-  var meta=function(label,val){return'<div class="pg-card-meta"><span style="color:var(--mid)">'+label+'</span> '+val+'</div>';};
-  var resa=r.actualYield!=null
-    ?'Effettiva <strong>'+formatHistoryQty(r.actualYield)+'</strong>'+(r.absoluteDeviation!=null?' <span class="ms17-card-deviation">· '+formatHistorySigned(r.absoluteDeviation)+(r.percentageDeviation!=null?' · '+formatHistoryPct(r.percentageDeviation):'')+'</span>':'')
-    :'<span class="ms17-card-no-actual" style="color:var(--mid)">Effettiva non registrata</span>';
+  var showVariant=historyVariantAddsInfo(r.recipeName,r.variantName);
+  var tempi=['<span class="ms17-nowrap">Iniziata '+formatHistoryWhen(r.startedAt)+'</span>'];
+  if(r.durationSeconds!=null)tempi.push('<span class="ms17-nowrap">Durata '+formatSessionDuration(r.durationSeconds)+'</span>');
+  var effettiva=r.actualYield!=null
+    ?`<div><div class="ms17-label">Effettiva</div><div class="ms17-card-yield-value">${formatHistoryQty(r.actualYield)}</div></div>`
+    :`<div><div class="ms17-label">Effettiva</div><div class="ms17-card-yield-muted ms17-card-no-actual">Non registrata</div></div>`;
+  var scost=r.absoluteDeviation!=null
+    ?`<div class="ms17-card-deviation"><div class="ms17-label">Scostamento</div><div class="ms17-card-yield-value">${formatHistorySigned(r.absoluteDeviation)}${r.percentageDeviation!=null?' · '+formatHistoryPct(r.percentageDeviation):''}</div></div>`
+    :'';
   return`<div class="pg-card ms17-history-card" data-session-id="${escAttr(r.sessionId)}">
-    <div class="pg-card-top">
-      <div>
-        <div class="pg-card-title">${escAttr(r.recipeName||'Preparazione')}</div>
-        ${r.variantName?`<div class="pg-card-meta">Ricetta: ${escAttr(r.variantName)}</div>`:''}
+    <div class="ms17-card-head">
+      <div style="min-width:0">
+        <div class="ms17-card-name">${escAttr(r.recipeName||'Preparazione')}</div>
+        ${showVariant?`<div class="ms17-card-variant">Ricetta: ${escAttr(r.variantName)}</div>`:''}
       </div>
       <span class="pg-badge pg-badge-completed">Completata</span>
     </div>
-    <div class="pg-card-body">
-      ${meta('Completata',formatSessionDateTime(r.completedAt)||'—')}
-      ${meta('Iniziata',formatSessionDateTime(r.startedAt)||'—')}
-      ${r.durationSeconds!=null?meta('Durata',formatSessionDuration(r.durationSeconds)):''}
-      <div class="pg-card-target">Prevista <strong>${r.expectedYield!=null?formatHistoryQty(r.expectedYield):'—'}</strong></div>
-      <div class="pg-card-target">${resa}</div>
+    <div class="ms17-card-grid">
+      <div class="ms17-card-time">
+        <div class="ms17-label">Completata</div>
+        <div class="ms17-card-when">${formatHistoryWhen(r.completedAt)}</div>
+        <div class="ms17-card-sub">${tempi.join(' · ')}</div>
+      </div>
+      <div class="ms17-card-yield">
+        <div><div class="ms17-label">Prevista</div><div class="ms17-card-yield-value">${r.expectedYield!=null?formatHistoryQty(r.expectedYield):'—'}</div></div>
+        <div class="ms17-card-yield-arrow">→</div>
+        ${effettiva}
+        ${scost}
+      </div>
+      <button class="btn btn-outline btn-sm ms17-open" onclick="openHistorySession('${escAttr(r.sessionId)}')">Apri produzione <i class="ti ti-arrow-right"></i></button>
     </div>
-    <button class="btn btn-outline btn-sm ms17-open" onclick="openHistorySession('${escAttr(r.sessionId)}')">Apri produzione <i class="ti ti-arrow-right"></i></button>
   </div>`;
 }
 
@@ -4670,7 +4736,7 @@ function renderStoricoProduzioni(){
   }
   return wrap(renderHistorySummary(aggregateHistoryRecords(res.records))
     +(filtriAttivi?`<div>${reset}</div>`:'')
-    +'<div class="pg-list">'+res.records.map(renderHistoryCard).join('')+'</div>');
+    +'<div class="pg-list" style="padding:0;gap:10px">'+res.records.map(renderHistoryCard).join('')+'</div>');
 }
 
 function renderProduzioneGuidata(){

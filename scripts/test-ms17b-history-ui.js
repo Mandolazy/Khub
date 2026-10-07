@@ -113,6 +113,7 @@ const CLIENT_SRC = [
   'function formatHistorySigned(grams)', 'function formatHistoryPct(pct)', 'function goToStoricoProduzioni()',
   'function tornaAlloStoricoProduzioni()', 'function openHistorySession(sessionId)', 'function onHistoryQueryInput(value)',
   'function setHistoryPreset(preset)', 'function onHistoryDateInput(field,value)', 'function resetHistoryFilters()',
+  'function formatHistoryWhen(iso)', 'function historyVariantAddsInfo(recipeName,variantName)', // MS17b.1
   'function renderHistorySummary(agg)', 'function renderHistoryCard(r)', 'function renderStoricoProduzioni()',
 ].map(extractFunction).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0]]).join('\n');
 
@@ -167,7 +168,8 @@ function makeClient(handler) {
     ${CLIENT_SRC}
     return { render, goToStoricoProduzioni, goToProduzioneGuidata, setProduzioneGuidataTab, apriSessioneOperativa, openHistorySession,
       tornaAlloStoricoProduzioni, onHistoryQueryInput, setHistoryPreset, onHistoryDateInput, resetHistoryFilters, loadProductionSessions,
-      toggleSessionIngredient, requestCompleteSession };`)(
+      toggleSessionIngredient, requestCompleteSession, selectHistoryRecords, aggregateHistoryRecords, historyPeriodFromFilters,
+      formatHistoryQty, formatHistorySigned, formatHistoryPct };`)(
     S, clientFetch, () => {}, { error() {} }, doc, {}, storage, () => 1, () => {}, last, { t: NOW.getTime() });
   return { S, api, apiCalls, last };
 }
@@ -184,6 +186,8 @@ function makeClient(handler) {
     return fake;
   }
   async function openStorico(c) { c.api.goToStoricoProduzioni(); await flush(); }
+  // Testo visibile (tag rimossi, spazi compattati): asserzioni indipendenti dal markup (MS17b.1).
+  const vis = (h) => h.replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ');
   const cardIds = (c) => [...c.last.html.matchAll(/class="pg-card ms17-history-card" data-session-id="([^"]*)"/g)].map(m => m[1]);
   // Dataset di riferimento (ora = 07/10/2026 12:00 Roma)
   const dataset = () => [
@@ -270,28 +274,29 @@ function makeClient(handler) {
     const c = makeClient(handler);
     await openStorico(c);
     c.api.setHistoryPreset('month'); // today(5000→4720) d03(3000→3150) d01(2000, nessuna resa)
-    const h = c.last.html;
-    assert.ok(h.includes('3 produzioni'));
-    assert.ok(h.includes('Resa prevista: <strong>10 kg</strong>'));
-    assert.ok(h.includes('Resa effettiva registrata: <strong>7,87 kg</strong>'));
-    assert.ok(h.includes('Scostamento sulle 2 produzioni con resa registrata (8 kg previsti → 7,87 kg effettivi)'), 'confronto esplicito sul solo insieme confrontabile');
-    assert.ok(h.includes('−130 g · −1,6%'));
-    assert.ok(h.includes('Resa effettiva registrata in 2 produzioni su 3'));
-    assert.ok(!h.includes('−2,13 kg'), 'mai 10 kg previsti contro 7,87 kg effettivi');
+    const t = vis(c.last.html);
+    assert.ok(t.includes('3 produzioni'));
+    assert.ok(t.includes('Previsto 10 kg'));
+    assert.ok(t.includes('Effettivo* 7,87 kg'));
+    assert.ok(t.includes('Scostamento* −130 g −1,6% su 8 kg previsti confrontabili'), 'confronto sul solo insieme confrontabile, dichiarato');
+    assert.ok(t.includes('* Resa effettiva registrata in 2 produzioni su 3. Lo scostamento considera solo le produzioni con resa registrata.'));
+    assert.ok(!t.includes('−2,13 kg'), 'mai 10 kg previsti contro 7,87 kg effettivi');
     c.api.setHistoryPreset('today');
-    assert.ok(c.last.html.includes('1 produzione') && c.last.html.includes('Resa effettiva registrata in tutte le produzioni'));
-    assert.ok(c.last.html.includes('Scostamento: <strong>−280 g · −5,6%</strong>'), 'copertura completa: forma compatta');
+    const t2 = vis(c.last.html);
+    assert.ok(t2.includes('1 produzione') && t2.includes('Resa effettiva registrata in tutte le produzioni.'));
+    assert.ok(t2.includes('Scostamento −280 g −5,6%') && !t2.includes('*'), 'copertura completa: nessun asterisco');
   });
 
   await test('14-15. nessuna resa effettiva: messaggio chiaro, nessuno scostamento (mai 0)', async () => {
     freshDb([dbSession({ id: 'a', target: 2000 }), dbSession({ id: 'b', target: 1000, completedAt: '2026-10-06T10:00:00.000Z' })]);
     const c = makeClient(handler);
     await openStorico(c);
-    const h = c.last.html;
-    assert.ok(h.includes('Resa effettiva non registrata in nessuna produzione'));
-    assert.ok(!h.includes('ms17-summary-deviation') && !h.includes('Scostamento'));
-    assert.ok(!/0 g · 0,0%|±0/.test(h));
-    assert.strictEqual((h.match(/Effettiva non registrata/g) || []).length, 2, 'card senza scostamento');
+    const h = c.last.html, t = vis(h);
+    assert.ok(t.includes('Effettivo Non disponibile') && t.includes('Scostamento —'));
+    assert.ok(t.includes('Nessuna resa effettiva registrata: scostamento non calcolabile.'));
+    assert.ok(!h.includes('ms17-summary-deviation'));
+    assert.ok(!/0 g · 0,0%|±0| 0 g /.test(t));
+    assert.strictEqual((t.match(/Effettiva Non registrata/g) || []).length, 2, 'card senza scostamento');
     assert.ok(!h.includes('ms17-card-deviation'));
   });
 
@@ -300,13 +305,12 @@ function makeClient(handler) {
       startedAt: '2026-10-07T07:58:00.000Z', completedAt: '2026-10-07T09:42:00.000Z' })]);
     const c = makeClient(handler);
     await openStorico(c);
-    const h = c.last.html;
-    assert.ok(h.includes('<span style="color:var(--mid)">Completata</span> 07/10/2026, 11:42'), 'completed_at');
-    assert.ok(h.includes('<span style="color:var(--mid)">Iniziata</span> 07/10/2026, 09:58'), 'started_at');
-    assert.ok(h.includes('<span style="color:var(--mid)">Durata</span> 1 h 44 min'));
-    assert.ok(h.includes('Prevista <strong>5 kg</strong>'));
-    assert.ok(h.includes('Effettiva <strong>4,72 kg</strong>'));
-    assert.ok(h.includes('· −280 g · −5,6%'));
+    const h = c.last.html, t = vis(h);
+    assert.ok(t.includes('Completata 7 ott · 11:42'), 'completed_at');
+    assert.ok(t.includes('Iniziata 7 ott · 09:58'), 'started_at');
+    assert.ok(t.includes('Durata 1 h 44 min'));
+    assert.ok(t.includes('Prevista 5 kg → Effettiva 4,72 kg'));
+    assert.ok(t.includes('Scostamento −280 g · −5,6%'));
     assert.ok(!h.includes('<img src=x'), 'nessun HTML iniettato');
     assert.ok(h.includes('&lt;img src=x onerror=alert(1)&gt;Tiramisù'));
     assert.ok(h.includes('Ricetta: Classica &quot;v2&quot; &amp; co'));
@@ -411,6 +415,84 @@ function makeClient(handler) {
     assert.ok(c.last.html.includes("apriSessioneOperativa('prog')"));
     c.api.setProduzioneGuidataTab('pending'); c.api.render();
     assert.ok(c.last.html.includes("avviaProduzione('pend')"));
+  });
+
+
+  // ── MS17b.1: rifinitura UI (solo presentazione) ──────────────
+  await test('MS17b.1-1/2. riga "Ricetta:" nascosta se equivalente al nome (maiuscole/spazi), mostrata se diversa', async () => {
+    freshDb([
+      dbSession({ id: 'same', recipeName: 'Mistrà fatto in casa', variantName: '  mistrà   FATTO in casa ' }),
+      dbSession({ id: 'diff', recipeName: 'Crema al mascarpone e caffè', variantName: 'crema caffè e mascarpone con panna vegetale', completedAt: '2026-10-06T10:00:00.000Z' }),
+      dbSession({ id: 'none', recipeName: 'Brodo', variantName: '   ', completedAt: '2026-10-05T10:00:00.000Z' }),
+    ]);
+    const c = makeClient(handler);
+    await openStorico(c);
+    const card = (id) => { const i = c.last.html.indexOf('data-session-id="' + id + '"'); return c.last.html.slice(i, c.last.html.indexOf('openHistorySession', i)); };
+    assert.ok(!card('same').includes('Ricetta:'));
+    assert.ok(vis(card('diff')).includes('Ricetta: crema caffè e mascarpone con panna vegetale'));
+    assert.ok(!card('none').includes('Ricetta:'));
+  });
+
+  await test('MS17b.1-3/4. resa effettiva mancante: card "Non registrata" senza scostamento; riepilogo "Non disponibile" e "—"', async () => {
+    freshDb([dbSession({ id: 'n', target: 10000 })]);
+    const c = makeClient(handler);
+    await openStorico(c);
+    const t = vis(c.last.html);
+    assert.ok(t.includes('Prevista 10 kg → Effettiva Non registrata'));
+    assert.ok(!c.last.html.includes('ms17-card-deviation'));
+    assert.ok(t.includes('Previsto 10 kg') && t.includes('Effettivo Non disponibile') && t.includes('Scostamento —'));
+  });
+
+  await test('MS17b.1-5/6. aggregati invariati rispetto al motore MS17a; copertura parziale dichiarata', async () => {
+    freshDb(dataset());
+    const c = makeClient(handler);
+    await openStorico(c);
+    c.api.setHistoryPreset('month');
+    const recs = c.api.selectHistoryRecords(c.S.productionSessions, { query: '', period: c.api.historyPeriodFromFilters(c.S.historyFilters, NOW) }).records;
+    const a = c.api.aggregateHistoryRecords(recs);
+    const t = vis(c.last.html);
+    assert.ok(t.includes('Previsto ' + c.api.formatHistoryQty(a.totalExpected)));
+    assert.ok(t.includes('Effettivo* ' + c.api.formatHistoryQty(a.totalActual)));
+    assert.ok(t.includes('Scostamento* ' + c.api.formatHistorySigned(a.aggregateDeviation) + ' ' + c.api.formatHistoryPct(a.aggregateDeviationPct)));
+    assert.ok(t.includes('su ' + c.api.formatHistoryQty(a.totalExpectedComparable) + ' previsti confrontabili'));
+    assert.strictEqual(a.aggregateDeviation, a.totalActualComparable - a.totalExpectedComparable, 'scostamento sul solo insieme confrontabile');
+    assert.ok(t.includes('Resa effettiva registrata in ' + a.coverage.withActual + ' produzioni su ' + a.coverage.total));
+  });
+
+  await test('MS17b.1-7/8/9. completed_at in evidenza, started_at e durata (anche anomala) sempre presenti; anno se diverso', async () => {
+    freshDb([
+      dbSession({ id: 'long', startedAt: '2026-09-19T13:27:00.000Z', completedAt: '2026-10-07T15:01:00.000Z' }),
+      dbSession({ id: 'y25', startedAt: '2025-12-30T09:00:00.000Z', completedAt: '2025-12-30T10:30:00.000Z' }),
+    ]);
+    const c = makeClient(handler);
+    await openStorico(c);
+    const t = vis(c.last.html);
+    assert.ok(c.last.html.includes('<div class="ms17-card-when">7 ott · 17:01</div>'), 'completed_at come dato principale');
+    assert.ok(t.includes('Iniziata 19 set · 15:27 · Durata 433 h 34 min'), 'durata reale, non corretta');
+    assert.ok(t.includes('30 dic 2025 · 11:30') && t.includes('Iniziata 30 dic 2025 · 10:00'));
+  });
+
+  await test('MS17b.1-10/11/12. CTA, ritorno e filtri invariati', async () => {
+    freshDb(dataset());
+    const c = makeClient(handler);
+    await openStorico(c);
+    c.api.onHistoryQueryInput('tiramisu');
+    assert.ok(c.last.html.includes(`class="btn btn-outline btn-sm ms17-open" onclick="openHistorySession('today')"`));
+    c.api.openHistorySession('today');
+    await flush();
+    assert.strictEqual(c.S.view, 'sessione-operativa');
+    c.api.tornaAlloStoricoProduzioni();
+    assert.strictEqual(c.S.view, 'storico-produzioni');
+    assert.strictEqual(c.S.historyFilters.query, 'tiramisu');
+    assert.deepStrictEqual(cardIds(c), ['today', 'd01', 'sep30', 'old']);
+  });
+
+  await test('MS17b.1-13. responsive: indicatori e card si impilano sotto 640px, testi lunghi vanno a capo', async () => {
+    const css = html.match(/\/\* MS17b\.1[\s\S]*?@media \(max-width:640px\)\{([\s\S]*?)\n\}/);
+    assert.ok(css, 'blocco CSS MS17b.1 con media query');
+    assert.ok(/\.ms17-kpis\{grid-template-columns:1fr;/.test(css[1]));
+    assert.ok(/\.ms17-card-grid\{grid-template-columns:1fr;/.test(css[1]));
+    assert.ok(/\.ms17-card-name\{[^}]*overflow-wrap:anywhere/.test(css[0]) && /\.ms17-kpi-value\{[^}]*overflow-wrap:anywhere/.test(css[0]));
   });
 
   console.log('');
