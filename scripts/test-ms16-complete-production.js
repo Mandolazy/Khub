@@ -101,7 +101,7 @@ const CLIENT_SRC = [
   'function escAttr(s)', 'function uid()', 'function formatFinishedTotalLabel(grams)',
   'async function loadProductionSessions()', 'function setProduzioneGuidataTab(tab)',
   'function renderPendingSessionCard(sess)', 'function renderInProgressSessionCard(sess)', 'function renderProduzioneGuidata()',
-  'async function avviaProduzione(sessionId)', 'function applySessionLifecycleRow(sess,row)', 'function apriSessioneOperativa(sessionId)',
+  'async function avviaProduzione(sessionId)', 'function applySessionLifecycleRow(sess,row)', 'function apriSessioneOperativa(sessionId,returnView)',
   // MS12/MS13/MS14
   'async function loadSessionIngredientState(sessionId)', 'async function toggleSessionIngredient(sessionId,itemKey)',
   'async function loadSessionStepState(sessionId)', 'async function toggleSessionStep(sessionId,itemKey)', 'function formatStepDurationLabel(seconds)',

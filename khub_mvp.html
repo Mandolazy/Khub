@@ -994,6 +994,15 @@ const S = {
   // il server non conferma). { [sessionId]: {qtyText, unit:'g'|'kg',
   //   error, confirming, saving} }
   sessionCompletion: {},
+  // MS17b: filtri dello Storico Produzioni (solo runtime, non persistiti):
+  // preset 'all'|'today'|'last7'|'month'|'custom'; from/to = 'YYYY-MM-DD'
+  // usati solo con 'custom'.
+  historyFilters: {query:'',preset:'all',from:'',to:''},
+  // MS17b: vista a cui tornare dalla Sessione operativa (null = comportamento
+  // originale verso Produzione Guidata; 'storico-produzioni' = Storico).
+  sessionReturnView: null,
+  // MS17b: stato del caricamento di S.productionSessions ('idle'|'loading'|'loaded'|'error').
+  productionSessionsLoad: 'idle',
   produzioneGuidataTab: 'pending', // 'pending' | 'in_progress' | 'completed'
   // Sprint Produzione — Micro-Step 11: id della Sessione aperta nella
   // schermata Sessione operativa (S.view='sessione-operativa'). Dedicato:
@@ -3599,10 +3608,11 @@ function renderMandaInProduzioneModal(){
 // il resto dell'app; ordina comunque created_at ASC lato client anche se
 // il server gia' ordina cosi', per non dipendere dall'ordine di risposta.
 async function loadProductionSessions(){
+  S.productionSessionsLoad='loading'; // MS17b: lo Storico distingue "in caricamento" da "vuoto"
   try{
     const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'loadProductionSessions'})});
     const data=await r.json();
-    if(!Array.isArray(data.sessions))return;
+    if(!Array.isArray(data.sessions)){S.productionSessionsLoad='error';render();return;}
     S.productionSessions=data.sessions.map(function(s){
       return{
         id:s.id,
@@ -3620,8 +3630,9 @@ async function loadProductionSessions(){
         actualYieldUnit:s.actual_yield_unit||null,
       };
     }).sort(function(a,b){return new Date(a.createdAt)-new Date(b.createdAt);});
+    S.productionSessionsLoad='loaded';
     render();
-  }catch(e){console.error('Load production sessions error',e);}
+  }catch(e){console.error('Load production sessions error',e);S.productionSessionsLoad='error';render();}
 }
 
 // Punto di ingresso alla nuova schermata: naviga subito (stato eventualmente
@@ -3731,7 +3742,8 @@ function applySessionLifecycleRow(sess,row){
 
 // Apre la Sessione operativa (A11.6/A11.7). MS12: a ogni apertura (anche
 // rientro) rilegge dal DB lo stato delle spunte ingredienti.
-function apriSessioneOperativa(sessionId){
+function apriSessioneOperativa(sessionId,returnView){
+  S.sessionReturnView=returnView||null; // MS17b: da dove si e' aperta (default: Produzione Guidata)
   S.openSessionId=sessionId;
   S.view='sessione-operativa';
   restoreSessionNoteDraft(sessionId); // MS15: bozza non salvata (anche dopo un reload)
@@ -4498,6 +4510,169 @@ function groupHistoryByPreparation(records){
   });
 }
 
+// ══════════════════════════════════════════════════════════
+// MS17b — STORICO PRODUZIONI: UI + NAVIGAZIONE
+// Solo presentazione: selezione, ricerca, periodo, ordinamento e aggregati
+// arrivano dal motore MS17a (selectHistoryRecords / aggregateHistoryRecords).
+// "Apri produzione" riusa la Sessione operativa read-only di MS16.
+// ══════════════════════════════════════════════════════════
+function historyNow(){return new Date();}
+
+// Preset -> periodo per il motore (giorni locali). 'last7' = oggi e i 6
+// giorni precedenti; 'month' = dal primo del mese a oggi.
+function historyPeriodFromFilters(filters,now){
+  var f=filters||{};
+  var day=function(d){return historyLocalDayKey(d.toISOString());};
+  var today=day(now);
+  if(f.preset==='today')return{date:today};
+  if(f.preset==='last7'){var d=new Date(now.getTime());d.setDate(d.getDate()-6);return{from:day(d),to:today};}
+  if(f.preset==='month'){var m=new Date(now.getFullYear(),now.getMonth(),1,12,0,0);return{from:day(m),to:today};}
+  if(f.preset==='custom')return{from:f.from||null,to:f.to||null};
+  return{};
+}
+
+function historyErrorMessage(code){
+  if(code==='invalid_range')return'La data di inizio è successiva alla data di fine.';
+  if(code==='invalid_date')return'Data non valida.';
+  return'Filtro non valido.';
+}
+
+// 5000 -> "5 kg", 4720 -> "4,72 kg", 850 -> "850 g".
+function formatHistoryQty(grams){
+  if(grams==null||!isFinite(grams))return'';
+  var a=Math.abs(grams);
+  if(a>=1000)return(grams/1000).toLocaleString('it-IT',{maximumFractionDigits:2})+' kg';
+  return grams.toLocaleString('it-IT',{maximumFractionDigits:1})+' g';
+}
+function formatHistorySigned(grams){
+  if(grams==null||!isFinite(grams))return'';
+  return(grams>0?'+':grams<0?'−':'')+formatHistoryQty(Math.abs(grams));
+}
+function formatHistoryPct(pct){
+  if(pct==null||!isFinite(pct))return'';
+  var r=Math.round(pct*10)/10;
+  return(r>0?'+':r<0?'−':'')+Math.abs(r).toLocaleString('it-IT',{minimumFractionDigits:1,maximumFractionDigits:1})+'%';
+}
+
+function goToStoricoProduzioni(){
+  S.view='storico-produzioni';
+  render();
+  loadProductionSessions();
+}
+// Ritorno dalla Sessione aperta dallo Storico: filtri intatti in S.historyFilters.
+function tornaAlloStoricoProduzioni(){
+  S.view='storico-produzioni';
+  S.sessionReturnView=null;
+  render();
+}
+function openHistorySession(sessionId){
+  apriSessioneOperativa(sessionId,'storico-produzioni');
+}
+function onHistoryQueryInput(value){
+  S.historyFilters.query=String(value==null?'':value);
+  render();
+}
+function setHistoryPreset(preset){
+  S.historyFilters.preset=preset;
+  render();
+}
+function onHistoryDateInput(field,value){
+  if(field==='from'||field==='to')S.historyFilters[field]=String(value||'');
+  render();
+}
+function resetHistoryFilters(){
+  S.historyFilters={query:'',preset:'all',from:'',to:''};
+  render();
+}
+
+function renderHistorySummary(agg){
+  var righe=['<div class="pg-card-title ms17-summary-count">'+agg.count+(agg.count===1?' produzione':' produzioni')+'</div>',
+    '<div class="pg-card-target">Resa prevista: <strong>'+formatHistoryQty(agg.totalExpected)+'</strong></div>'];
+  if(agg.actualCount===0){
+    righe.push('<div class="pg-card-target ms17-no-actual" style="color:var(--mid)">Resa effettiva non registrata in nessuna produzione: nessun confronto disponibile.</div>');
+  }else{
+    var tutte=agg.comparableCount===agg.count;
+    righe.push('<div class="pg-card-target">Resa effettiva registrata: <strong>'+formatHistoryQty(agg.totalActual)+'</strong></div>');
+    if(agg.aggregateDeviation!=null){
+      // Confronto SOLO sull'insieme confrontabile: se la copertura e' parziale
+      // si mostrano esplicitamente il previsto e l'effettivo di quelle sole produzioni.
+      righe.push('<div class="pg-card-target ms17-summary-deviation">'+(tutte?'Scostamento':'Scostamento sulle '+agg.comparableCount+' produzioni con resa registrata ('+formatHistoryQty(agg.totalExpectedComparable)+' previsti → '+formatHistoryQty(agg.totalActualComparable)+' effettivi)')
+        +': <strong>'+formatHistorySigned(agg.aggregateDeviation)+(agg.aggregateDeviationPct!=null?' · '+formatHistoryPct(agg.aggregateDeviationPct):'')+'</strong></div>');
+    }
+    righe.push('<div class="pg-card-meta ms17-coverage">'+(agg.coverage.withActual===agg.coverage.total
+      ?'Resa effettiva registrata in tutte le produzioni'
+      :'Resa effettiva registrata in '+agg.coverage.withActual+' produzion'+(agg.coverage.withActual===1?'e':'i')+' su '+agg.coverage.total)+'</div>');
+  }
+  return'<div class="pg-card ms17-summary" style="gap:4px">'+righe.join('')+'</div>';
+}
+
+function renderHistoryCard(r){
+  var meta=function(label,val){return'<div class="pg-card-meta"><span style="color:var(--mid)">'+label+'</span> '+val+'</div>';};
+  var resa=r.actualYield!=null
+    ?'Effettiva <strong>'+formatHistoryQty(r.actualYield)+'</strong>'+(r.absoluteDeviation!=null?' <span class="ms17-card-deviation">· '+formatHistorySigned(r.absoluteDeviation)+(r.percentageDeviation!=null?' · '+formatHistoryPct(r.percentageDeviation):'')+'</span>':'')
+    :'<span class="ms17-card-no-actual" style="color:var(--mid)">Effettiva non registrata</span>';
+  return`<div class="pg-card ms17-history-card" data-session-id="${escAttr(r.sessionId)}">
+    <div class="pg-card-top">
+      <div>
+        <div class="pg-card-title">${escAttr(r.recipeName||'Preparazione')}</div>
+        ${r.variantName?`<div class="pg-card-meta">Ricetta: ${escAttr(r.variantName)}</div>`:''}
+      </div>
+      <span class="pg-badge pg-badge-completed">Completata</span>
+    </div>
+    <div class="pg-card-body">
+      ${meta('Completata',formatSessionDateTime(r.completedAt)||'—')}
+      ${meta('Iniziata',formatSessionDateTime(r.startedAt)||'—')}
+      ${r.durationSeconds!=null?meta('Durata',formatSessionDuration(r.durationSeconds)):''}
+      <div class="pg-card-target">Prevista <strong>${r.expectedYield!=null?formatHistoryQty(r.expectedYield):'—'}</strong></div>
+      <div class="pg-card-target">${resa}</div>
+    </div>
+    <button class="btn btn-outline btn-sm ms17-open" onclick="openHistorySession('${escAttr(r.sessionId)}')">Apri produzione <i class="ti ti-arrow-right"></i></button>
+  </div>`;
+}
+
+function renderStoricoProduzioni(){
+  var f=S.historyFilters||{query:'',preset:'all',from:'',to:''};
+  var presets=[['all','Tutte'],['today','Oggi'],['last7','Ultimi 7 giorni'],['month','Questo mese'],['custom','Personalizzato']];
+  var filtriAttivi=!!(f.query&&f.query.trim())||f.preset!=='all';
+  var reset=`<button class="btn btn-ghost btn-sm" id="history-reset" onclick="resetHistoryFilters()"><i class="ti ti-x"></i> Azzera filtri</button>`;
+  var inputStyle='background:var(--cream);border:1px solid var(--border);border-radius:var(--r-md);padding:6px 10px;font-family:inherit;font-size:13px;color:var(--dark)';
+  var head=`<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div class="prod-title">Storico Produzioni</div>
+      <button class="btn btn-ghost btn-sm" onclick="S.view='attive';render()"><i class="ti ti-arrow-left"></i> Produzione</button>
+    </div>
+    <div style="padding:0 22px 10px">
+      <input id="history-search" type="search" autocomplete="off" placeholder="Cerca una preparazione…" value="${escAttr(f.query)}" oninput="onHistoryQueryInput(this.value)" style="${inputStyle};width:100%;box-sizing:border-box;font-size:14px;padding:10px 12px">
+    </div>
+    <div class="pg-tabs" style="flex-wrap:wrap">
+      ${presets.map(function(p){return`<button class="pg-tab ${f.preset===p[0]?'pg-tab-active':''}" data-history-preset="${p[0]}" onclick="setHistoryPreset('${p[0]}')">${p[1]}</button>`;}).join('')}
+    </div>
+    ${f.preset==='custom'?`<div style="padding:0 22px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <label style="font-size:12px;color:var(--mid)">Da <input id="history-from" type="date" value="${escAttr(f.from)}" onchange="onHistoryDateInput('from',this.value)" style="${inputStyle}"></label>
+      <label style="font-size:12px;color:var(--mid)">A <input id="history-to" type="date" value="${escAttr(f.to)}" onchange="onHistoryDateInput('to',this.value)" style="${inputStyle}"></label>
+    </div>`:''}`;
+  var wrap=function(body){return`<div class="prod-env ms17-history">${head}<div style="padding:0 22px 22px;display:flex;flex-direction:column;gap:12px">${body}</div></div>`;};
+  var sessions=S.productionSessions||[];
+  if(!sessions.length&&(S.productionSessionsLoad==='loading'||S.productionSessionsLoad==='idle')){
+    return wrap('<div class="prod-empty"><i class="ti ti-loader-2"></i> Carico le produzioni…</div>');
+  }
+  if(S.productionSessionsLoad==='error'&&!sessions.length){
+    return wrap('<div class="prod-empty">Non riesco a caricare le produzioni. <button class="btn btn-outline btn-sm" onclick="loadProductionSessions()"><i class="ti ti-refresh"></i> Riprova</button></div>');
+  }
+  if(!selectHistoryRecords(sessions,{}).records.length){
+    return wrap('<div class="prod-empty ms17-empty-none">Non ci sono ancora produzioni completate.</div>');
+  }
+  var res=selectHistoryRecords(sessions,{query:f.query,period:historyPeriodFromFilters(f,historyNow())});
+  if(res.error){
+    return wrap(`<div class="prod-empty ms17-period-error" style="color:#c0392b"><i class="ti ti-alert-triangle"></i> ${historyErrorMessage(res.error)}</div><div>${reset}</div>`);
+  }
+  if(!res.records.length){
+    return wrap(`<div class="prod-empty ms17-empty-filters">Nessuna produzione trovata con questi filtri.</div><div>${reset}</div>`);
+  }
+  return wrap(renderHistorySummary(aggregateHistoryRecords(res.records))
+    +(filtriAttivi?`<div>${reset}</div>`:'')
+    +'<div class="pg-list">'+res.records.map(renderHistoryCard).join('')+'</div>');
+}
+
 function renderProduzioneGuidata(){
   var tab=S.produzioneGuidataTab||'pending';
   var pending=(S.productionSessions||[]).filter(function(s){return s.status==='pending';});
@@ -4853,7 +5028,9 @@ function renderSessioneOperativa(){
   return`<div class="prod-env">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
       <div class="prod-title">${recipeName}${variantName?` <span class="pg-card-variant">· ${variantName}</span>`:''}</div>
-      <button class="btn btn-ghost btn-sm" onclick="S.view='produzione-guidata';S.produzioneGuidataTab='${sess.status==='completed'?'completed':'in_progress'}';render()"><i class="ti ti-arrow-left"></i> Produzione Guidata</button>
+      ${S.sessionReturnView==='storico-produzioni'
+        ?`<button class="btn btn-ghost btn-sm" id="session-back-history" onclick="tornaAlloStoricoProduzioni()"><i class="ti ti-arrow-left"></i> Storico Produzioni</button>`
+        :`<button class="btn btn-ghost btn-sm" onclick="S.view='produzione-guidata';S.produzioneGuidataTab='${sess.status==='completed'?'completed':'in_progress'}';render()"><i class="ti ti-arrow-left"></i> Produzione Guidata</button>`}
     </div>
     <div style="padding:0 22px 6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
       ${renderSessionStatusBadge(sess.status)}
@@ -6489,7 +6666,7 @@ function renderSidebar(){
   // Schede, LAB. MichelinAI e Profilo scollegate dalla navigazione primaria
   // (architettura approvata) — codice delle due schermate non toccato.
   const isRicette=S.view==='home'||S.view==='recipes-all'||S.view==='ricetta-madre'||S.view==='ricetta-madre-v2'||S.view==='recipe'||S.view==='confronto'||S.view==='load'||S.view==='preview';
-  const isProduzione=S.view==='attive'||S.view==='produzione-guidata'||S.view==='sessione-operativa';
+  const isProduzione=S.view==='attive'||S.view==='produzione-guidata'||S.view==='sessione-operativa'||S.view==='storico-produzioni';
   const isLab=S.view==='lab-globale';
   return `<button class="new-btn" id="btn-new-recipe"><i class="ti ti-plus"></i> Nuova Scheda</button>
   <button class="load-btn ${S.view==='load'?'active':''}" id="btn-load-view"><i class="ti ti-upload"></i> Carica Scheda</button>
@@ -7772,7 +7949,7 @@ function renderAttive(){
     return `<div class="prod-env">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
         <div class="prod-title">Produzione</div>
-        <button class="btn btn-outline btn-sm" onclick="goToProduzioneGuidata()"><i class="ti ti-clipboard-list"></i> Produzione Guidata</button>
+        <span style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-outline btn-sm" onclick="goToProduzioneGuidata()"><i class="ti ti-clipboard-list"></i> Produzione Guidata</button><button class="btn btn-outline btn-sm" id="btn-storico-produzioni" onclick="goToStoricoProduzioni()"><i class="ti ti-history"></i> Storico Produzioni</button></span>
       </div>
       <div class="prod-empty"><i class="ti ti-circle-check" style="font-size:28px;display:block;margin-bottom:10px"></i>Nessuna Ricetta attiva al momento.</div>
     </div>`;
@@ -7791,7 +7968,7 @@ function renderAttive(){
   return `<div class="prod-env">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
       <div class="prod-title">Produzione</div>
-      <button class="btn btn-outline btn-sm" onclick="goToProduzioneGuidata()"><i class="ti ti-clipboard-list"></i> Produzione Guidata</button>
+      <span style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-outline btn-sm" onclick="goToProduzioneGuidata()"><i class="ti ti-clipboard-list"></i> Produzione Guidata</button><button class="btn btn-outline btn-sm" id="btn-storico-produzioni" onclick="goToStoricoProduzioni()"><i class="ti ti-history"></i> Storico Produzioni</button></span>
     </div>
     <div class="prod-count">${totale} RICETT${totale===1?'A ATTIVA':'E ATTIVE'}</div>
     ${categorie.map(cat=>{
@@ -8003,7 +8180,7 @@ function renderBottomNav(){
   // (architettura approvata): il codice delle due schermate resta intatto,
   // solo scollegato da qui. Impostazioni si raggiunge dalla Home.
   const isRicette=S.view==='home'||S.view==='recipes-all'||S.view==='ricetta-madre'||S.view==='ricetta-madre-v2'||S.view==='recipe'||S.view==='confronto'||S.view==='load'||S.view==='preview';
-  const isProduzione=S.view==='attive'||S.view==='produzione-guidata'||S.view==='sessione-operativa';
+  const isProduzione=S.view==='attive'||S.view==='produzione-guidata'||S.view==='sessione-operativa'||S.view==='storico-produzioni';
   const isLab=S.view==='lab-globale';
   return `
     <button class="bnav-btn ${isProduzione?'active':''}" id="bnav-produzione"><i class="ti ti-tools-kitchen-2"></i>Produzione</button>
@@ -8112,6 +8289,7 @@ function render(){
   else if(S.view==='attive'){mainContent=renderAttive();}
   else if(S.view==='produzione-guidata'){mainContent=renderProduzioneGuidata();}
   else if(S.view==='sessione-operativa'){mainContent=renderSessioneOperativa();}
+  else if(S.view==='storico-produzioni'){mainContent=renderStoricoProduzioni();}
   else if(S.view==='profilo'){mainContent=renderProfiloPlaceholder();}
   else if(S.view==='michelinai-globale'){mainContent=renderMichelinAIGlobalePlaceholder();}
   else if(S.view==='lab-globale'){mainContent=renderLabGlobale();}
@@ -8119,10 +8297,11 @@ function render(){
   const main=document.getElementById('main');
   // MS15: render() ricostruisce #main; se si sta scrivendo la nota, cursore e
   // focus vengono ripristinati (il testo e' gia' nella bozza).
-  const noteFocus=(()=>{const a=document.activeElement;return a&&a.id==='session-note-input'?{s:a.selectionStart,e:a.selectionEnd}:null;})();
+  // MS17b: stesso trattamento per la ricerca dello Storico (si filtra a ogni tasto).
+  const noteFocus=(()=>{const a=document.activeElement;return a&&(a.id==='session-note-input'||a.id==='history-search')?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null;})();
   if(main)main.innerHTML=mainContent+(S.showFamilyPicker?renderFamilyPicker():'')+(S.showMergePicker?renderMergePicker():'')+(S.showMergeConfirm?renderMergeConfirm():'')+(S.showSchedeFamiglie?renderSchedeFamigliePicker():'')+(S.showCondividiStaff?renderCondividiStaffModal():'')+(S.showOnboarding?renderOnboarding():'')+(S.toastAction?renderToastAction():S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:'')+renderUnitConversionModal()+renderMandaInProduzioneModal()+renderConversionPreflightModal();
 
-  if(noteFocus){const ta=document.getElementById('session-note-input');if(ta){try{ta.focus();ta.setSelectionRange(noteFocus.s,noteFocus.e);}catch(e){}}}
+  if(noteFocus){const ta=document.getElementById(noteFocus.id);if(ta){try{ta.focus();ta.setSelectionRange(noteFocus.s,noteFocus.e);}catch(e){}}}
 
   // Bottom nav
   const bn=document.getElementById('bottom-nav');

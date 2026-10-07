@@ -88,7 +88,7 @@ async function loadHandler() {
 }
 
 const CLIENT_SRC = [
-  'function escAttr(s)', 'function formatFinishedTotalLabel(grams)', 'function apriSessioneOperativa(sessionId)',
+  'function escAttr(s)', 'function formatFinishedTotalLabel(grams)', 'function apriSessioneOperativa(sessionId,returnView)',
   'async function loadSessionIngredientState(sessionId)', 'async function toggleSessionIngredient(sessionId,itemKey)',
   'function renderSessioneOperativa()',
   'async function loadSessionStepState(sessionId)', 'async function toggleSessionStep(sessionId,itemKey)', 'function formatStepDurationLabel(seconds)',

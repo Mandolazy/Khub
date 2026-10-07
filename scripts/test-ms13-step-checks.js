@@ -86,7 +86,7 @@ async function loadHandler() {
 }
 
 const CLIENT_SRC = [
-  'function escAttr(s)', 'function formatFinishedTotalLabel(grams)', 'function apriSessioneOperativa(sessionId)',
+  'function escAttr(s)', 'function formatFinishedTotalLabel(grams)', 'function apriSessioneOperativa(sessionId,returnView)',
   'async function loadSessionIngredientState(sessionId)', 'async function toggleSessionIngredient(sessionId,itemKey)',
   'function renderSessioneOperativa()',
   // MS13: la Sessione operativa carica e mostra anche lo stato degli step

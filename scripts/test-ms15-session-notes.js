@@ -94,7 +94,7 @@ async function loadHandler() {
 }
 
 const CLIENT_SRC = [
-  'function escAttr(s)', 'function uid()', 'function formatFinishedTotalLabel(grams)', 'function apriSessioneOperativa(sessionId)',
+  'function escAttr(s)', 'function uid()', 'function formatFinishedTotalLabel(grams)', 'function apriSessioneOperativa(sessionId,returnView)',
   'async function loadSessionIngredientState(sessionId)', 'function renderSessioneOperativa()',
   'async function loadSessionStepState(sessionId)', 'function formatStepDurationLabel(seconds)',
   'function stepTimerDurationSeconds(value)', 'function stepTimerRemainingSeconds(startedAtIso,durationSeconds,nowMs)',
