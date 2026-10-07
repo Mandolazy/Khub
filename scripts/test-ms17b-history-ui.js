@@ -87,8 +87,14 @@ async function loadHandler() {
 
 const CLIENT_SRC = [
   'function escAttr(s)', 'function uid()', 'function formatFinishedTotalLabel(grams)', 'function activeVariants(recipe)', 'function renderAttive()',
-  'async function loadProductionSessions()', 'function goToProduzioneGuidata()', 'function setProduzioneGuidataTab(tab)',
-  'function renderPendingSessionCard(sess)', 'function renderInProgressSessionCard(sess)', 'function renderProduzioneGuidata()',
+  'async function loadProductionSessions()',
+  'function renderPendingSessionCard(sess)', 'function renderInProgressSessionCard(sess)',
+  'function selectProductionHomeSessions(sessions,section,context)', 'function activeRecipeEntries(recipes)',
+  'function rankActiveRecipeEntries(entries,sessions)', 'function filterActiveRecipeEntries(entries,query)',
+  'function openProductionHomeSection(section)', 'function closeProductionHomeSection()', 'function onProductionRecipeSearch(value)',
+  'function openActiveRecipe(recipeId,variantId)', 'function renderActiveRecipeRow(entry,withShare)',
+  'function renderProductionHomeSessionsBlock(section,limit)', 'function renderProductionRecipeSearch()',
+  'function renderProductionHomeRecipesBlock()', 'function renderAllActiveRecipes()',
   'async function avviaProduzione(sessionId)', 'function applySessionLifecycleRow(sess,row)', 'function apriSessioneOperativa(sessionId,returnView)',
   'async function loadSessionIngredientState(sessionId)', 'async function toggleSessionIngredient(sessionId,itemKey)',
   'async function loadSessionStepState(sessionId)', 'async function toggleSessionStep(sessionId,itemKey)', 'function formatStepDurationLabel(seconds)',
@@ -102,7 +108,7 @@ const CLIENT_SRC = [
   'function renderSessionStatusBadge(status)', 'function formatSessionDate(iso)', 'function formatSessionDateTime(iso)', 'function formatSessionTime(iso)',
   'function sessionDurationSeconds(startedIso,completedIso)', 'function formatSessionDuration(seconds)', 'function normalizeActualYieldGrams(qty,unit)',
   'function parseActualYieldInput(text,unit)', 'function formatYieldGrams(grams)', 'function sessionCompletionState(sessionId)',
-  'function requestCompleteSession(sessionId)', 'function renderSessionCompletionSection(sess)', 'function renderCompletedSessionCard(sess)',
+  'function requestCompleteSession(sessionId)', 'function renderSessionCompletionSection(sess)',
   // MS17a (motore, invariato)
   'function historyNormalizeText(value)', 'function historyLocalDayKey(iso)', 'function historyNormalizePeriod(period)',
   'function historyNumberOrNull(v)', 'function buildHistoryRecord(sess)', 'function historyMatchesQuery(record,query)',
@@ -115,7 +121,7 @@ const CLIENT_SRC = [
   'function setHistoryPreset(preset)', 'function onHistoryDateInput(field,value)', 'function resetHistoryFilters()',
   'function formatHistoryWhen(iso)', 'function historyVariantAddsInfo(recipeName,variantName)', // MS17b.1
   'function renderHistorySummary(agg)', 'function renderHistoryCard(r)', 'function renderStoricoProduzioni()',
-].map(extractFunction).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0]]).join('\n');
+].map(extractFunction).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0], html.match(/var PRODUCTION_HOME_LIMIT=\d+;/)[0]]).join('\n');
 
 // "Adesso" per lo Storico: 7 ottobre 2026, 12:00 a Roma.
 const NOW = new Date('2026-10-07T10:00:00.000Z');
@@ -149,7 +155,7 @@ function makeClient(handler) {
   };
   const last = { html: '' };
   const doc = { getElementById: () => null, querySelectorAll: () => [] };
-  const S = { view: 'attive', openSessionId: null, productionSessions: [], produzioneGuidataTab: 'pending', startingSessionId: null,
+  const S = { view: 'attive', openSessionId: null, productionSessions: [], produzioneHome: { recipeQuery: '', expanded: null }, startingSessionId: null,
     sessionIngredientState: {}, sessionStepState: {}, sessionNotes: {}, sessionNoteDraft: {}, sessionNoteDictationSessionId: null,
     sessionCompletion: {}, recording: false, recordingTarget: null, recipes: [], recipeStaffCondivisi: {},
     historyFilters: { query: '', preset: 'all', from: '', to: '' }, sessionReturnView: null, productionSessionsLoad: 'idle' };
@@ -160,13 +166,12 @@ function makeClient(handler) {
     function historyNow(){ return new Date(__now.t); }
     function render(){
       __last.html = S.view==='sessione-operativa' ? renderSessioneOperativa()
-        : S.view==='produzione-guidata' ? renderProduzioneGuidata()
         : S.view==='storico-produzioni' ? renderStoricoProduzioni()
         : S.view==='attive' ? renderAttive() : '';
       syncStepTimerTicker();
     }
     ${CLIENT_SRC}
-    return { render, goToStoricoProduzioni, goToProduzioneGuidata, setProduzioneGuidataTab, apriSessioneOperativa, openHistorySession,
+    return { render, goToStoricoProduzioni, apriSessioneOperativa, openHistorySession, avviaProduzione,
       tornaAlloStoricoProduzioni, onHistoryQueryInput, setHistoryPreset, onHistoryDateInput, resetHistoryFilters, loadProductionSessions,
       toggleSessionIngredient, requestCompleteSession, selectHistoryRecords, aggregateHistoryRecords, historyPeriodFromFilters,
       formatHistoryQty, formatHistorySigned, formatHistoryPct };`)(
@@ -207,7 +212,7 @@ function makeClient(handler) {
     const c = makeClient(handler);
     c.api.render();
     assert.ok(c.last.html.includes('id="btn-storico-produzioni"') && c.last.html.includes('goToStoricoProduzioni()'));
-    assert.ok(c.last.html.includes('goToProduzioneGuidata()'), 'Produzione Guidata ancora presente');
+    assert.ok(!c.last.html.includes('goToProduzioneGuidata') && !c.last.html.includes('Produzione Guidata'), 'Produzione Guidata ritirata: lo Storico si apre dalla Home Produzione');
     await openStorico(c);
     assert.strictEqual(c.S.view, 'storico-produzioni');
     assert.ok(c.apiCalls.some(x => x.supabaseAction === 'loadProductionSessions'));
@@ -394,29 +399,23 @@ function makeClient(handler) {
     assert.strictEqual(cardIds(c).length, 5);
   });
 
-  await test('31-32. Produzione Guidata invariata: tab Completate presente, apertura e ritorno a Produzione Guidata', async () => {
+  await test('31-32. Home Produzione (sostituisce Produzione Guidata): Sessione aperta dalla Home torna alla Home, dallo Storico allo Storico', async () => {
     freshDb(dataset());
     const c = makeClient(handler);
-    // prima un'apertura dallo Storico, poi da Produzione Guidata: il ritorno non deve "ricordare" lo Storico
+    // prima un'apertura dallo Storico, poi dalla Home: il ritorno non deve "ricordare" lo Storico
     await openStorico(c);
     c.api.openHistorySession('today');
     await flush();
-    c.api.goToProduzioneGuidata();
-    await flush();
-    c.api.setProduzioneGuidataTab('completed');
-    assert.ok(c.last.html.includes('Completate') && c.last.html.includes("apriSessioneOperativa('today')"));
-    assert.ok(!c.last.html.includes('In arrivo in un prossimo Micro-Step'));
-    c.api.apriSessioneOperativa('today');
+    assert.ok(c.last.html.includes('id="session-back-history"'));
+    c.S.view = 'attive'; c.api.render();
+    assert.ok(c.last.html.includes("apriSessioneOperativa('prog')"), 'in corso nella Home');
+    assert.ok(c.last.html.includes("avviaProduzione('pend')"), 'da iniziare nella Home');
+    assert.ok(!c.last.html.includes("apriSessioneOperativa('today')"), 'le completate restano nello Storico');
+    c.api.apriSessioneOperativa('prog');
     await flush();
     assert.strictEqual(c.S.sessionReturnView, null);
-    assert.ok(c.last.html.includes("S.produzioneGuidataTab='completed'") && !c.last.html.includes('session-back-history'));
-    c.api.setProduzioneGuidataTab('in_progress');
-    c.S.view = 'produzione-guidata'; c.api.render();
-    assert.ok(c.last.html.includes("apriSessioneOperativa('prog')"));
-    c.api.setProduzioneGuidataTab('pending'); c.api.render();
-    assert.ok(c.last.html.includes("avviaProduzione('pend')"));
+    assert.ok(c.last.html.includes(`id="session-back-home" onclick="S.view='attive';render()"`) && !c.last.html.includes('session-back-history'));
   });
-
 
   // ── MS17b.1: rifinitura UI (solo presentazione) ──────────────
   await test('MS17b.1-1/2. riga "Ricetta:" nascosta se equivalente al nome (maiuscole/spazi), mostrata se diversa', async () => {

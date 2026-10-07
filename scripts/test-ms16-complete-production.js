@@ -99,8 +99,16 @@ async function loadHandler() {
 
 const CLIENT_SRC = [
   'function escAttr(s)', 'function uid()', 'function formatFinishedTotalLabel(grams)',
-  'async function loadProductionSessions()', 'function setProduzioneGuidataTab(tab)',
-  'function renderPendingSessionCard(sess)', 'function renderInProgressSessionCard(sess)', 'function renderProduzioneGuidata()',
+  'async function loadProductionSessions()',
+  'function renderPendingSessionCard(sess)', 'function renderInProgressSessionCard(sess)',
+  // Home Produzione (sostituisce Produzione Guidata)
+  'function activeVariants(recipe)', 'function historyNormalizeText(value)',
+  'function selectProductionHomeSessions(sessions,section,context)', 'function activeRecipeEntries(recipes)',
+  'function rankActiveRecipeEntries(entries,sessions)', 'function filterActiveRecipeEntries(entries,query)',
+  'function openProductionHomeSection(section)', 'function closeProductionHomeSection()', 'function onProductionRecipeSearch(value)',
+  'function openActiveRecipe(recipeId,variantId)', 'function renderActiveRecipeRow(entry,withShare)',
+  'function renderProductionHomeSessionsBlock(section,limit)', 'function renderProductionRecipeSearch()',
+  'function renderProductionHomeRecipesBlock()', 'function renderAllActiveRecipes()', 'function renderAttive()',
   'async function avviaProduzione(sessionId)', 'function applySessionLifecycleRow(sess,row)', 'function apriSessioneOperativa(sessionId,returnView)',
   // MS12/MS13/MS14
   'async function loadSessionIngredientState(sessionId)', 'async function toggleSessionIngredient(sessionId,itemKey)',
@@ -120,8 +128,8 @@ const CLIENT_SRC = [
   'function sessionDurationSeconds(startedIso,completedIso)', 'function formatSessionDuration(seconds)', 'function normalizeActualYieldGrams(qty,unit)',
   'function parseActualYieldInput(text,unit)', 'function formatYieldGrams(grams)', 'function sessionCompletionState(sessionId)',
   'function onSessionYieldInput(sessionId,field,value)', 'function requestCompleteSession(sessionId)', 'function cancelCompleteSession(sessionId)',
-  'async function confirmCompleteSession(sessionId)', 'function renderSessionCompletionSection(sess)', 'function renderCompletedSessionCard(sess)',
-].map(extractFunction).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0]]).join('\n');
+  'async function confirmCompleteSession(sessionId)', 'function renderSessionCompletionSection(sess)',
+].map(extractFunction).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0], html.match(/var PRODUCTION_HOME_LIMIT=\d+;/)[0]]).join('\n');
 
 const SNAPSHOT = {
   snapshotVersion: 1, recipe: { recipeName: 'Risotto', variantName: 'Porcini' },
@@ -156,7 +164,7 @@ function makeClient(handler) {
   const last = { html: '' };
   const els = {};
   const doc = { getElementById: id => els[id] || null, querySelectorAll: () => [] };
-  const S = { view: 'app-home', openSessionId: null, productionSessions: [], produzioneGuidataTab: 'pending', startingSessionId: null,
+  const S = { view: 'app-home', openSessionId: null, productionSessions: [], produzioneHome: { recipeQuery: '', expanded: null }, recipeStaffCondivisi: {}, startingSessionId: null,
     sessionIngredientState: {}, sessionStepState: {}, sessionNotes: {}, sessionNoteDraft: {}, sessionNoteDictationSessionId: null,
     sessionCompletion: {}, recording: false, recordingTarget: null, recipes: [] };
   const storage = { m: new Map(), getItem(k) { return this.m.has(k) ? this.m.get(k) : null; }, setItem(k, v) { this.m.set(k, String(v)); }, removeItem(k) { this.m.delete(k); } };
@@ -164,11 +172,11 @@ function makeClient(handler) {
     var _stepTimerInterval=null; var _stepTimerSeenRunning={}; var _stepTimerAudioCtx=null;
     function ms14Now(){ return Date.now(); }
     function render(){
-      __last.html = S.view==='sessione-operativa' ? renderSessioneOperativa() : S.view==='produzione-guidata' ? renderProduzioneGuidata() : '';
+      __last.html = S.view==='sessione-operativa' ? renderSessioneOperativa() : S.view==='attive' ? renderAttive() : '';
       syncStepTimerTicker();
     }
     ${CLIENT_SRC}
-    return { render, loadProductionSessions, avviaProduzione, apriSessioneOperativa, setProduzioneGuidataTab,
+    return { render, loadProductionSessions, avviaProduzione, apriSessioneOperativa,
       toggleSessionIngredient, toggleSessionStep, startSessionStepTimer, cancelSessionStepTimer, addSessionNote,
       onSessionYieldInput, requestCompleteSession, cancelCompleteSession, confirmCompleteSession, parseActualYieldInput,
       formatSessionDate, formatSessionDateTime, formatSessionDuration, sessionDurationSeconds };`)(
@@ -466,28 +474,22 @@ function makeClient(handler) {
     assert.ok(/actual_yield_qty,actual_yield_unit/.test(chatSrc.match(/production_sessions\?select=id,recipe_id[^']*/)[0]));
   });
 
-  await test('E30. tab Completate: card minimale che apre la Sessione; nessun segnaposto', async () => {
+  await test('E30. completate fuori dalla Home Produzione (accesso dallo Storico, MS17b); dalla Sessione completata si torna alla Home', async () => {
+    // Produzione Guidata e la sua tab Completate sono state sostituite dalla Home Produzione + Storico.
     freshDb([dbSession('ps1', 'in_progress'), dbSession('pc', 'completed', { actual_yield_qty: 4720, actual_yield_unit: 'g' })]);
     const c = makeClient(handler);
-    c.S.view = 'produzione-guidata';
+    c.S.view = 'attive';
     await c.api.loadProductionSessions();
-    c.api.setProduzioneGuidataTab('completed');
-    assert.ok(!c.last.html.includes('In arrivo in un prossimo Micro-Step'));
-    assert.ok(c.last.html.includes("apriSessioneOperativa('pc')"));
-    assert.ok(!c.last.html.includes("apriSessioneOperativa('ps1')"), 'solo completed');
-    assert.ok(c.last.html.includes('Risotto'));
-    assert.ok(c.last.html.includes('Produzione del ' + c.api.formatSessionDate('2026-10-06T08:00:00.000Z')));
-    assert.ok(c.last.html.includes('Resa effettiva: ' + (4720).toLocaleString('it-IT') + ' g'));
+    assert.ok(c.last.html.includes("apriSessioneOperativa('ps1')"), 'in corso nella Home');
+    assert.ok(!c.last.html.includes("apriSessioneOperativa('pc')") && !c.last.html.includes("avviaProduzione('pc')"), 'completata non in Home');
+    assert.ok(c.last.html.includes('goToStoricoProduzioni()'), 'accesso allo Storico');
+    assert.ok(!/produzione-guidata|setProduzioneGuidataTab|Completate/.test(c.last.html), 'nessuna Produzione Guidata / tab Completate');
     c.api.apriSessioneOperativa('pc');
     await flush();
     assert.strictEqual(c.S.view, 'sessione-operativa');
     assert.strictEqual(c.S.openSessionId, 'pc');
-    assert.ok(c.last.html.includes("S.produzioneGuidataTab='completed'"), 'si torna alla tab Completate');
-    freshDb([dbSession('ps1', 'in_progress')]);
-    const c2 = makeClient(handler);
-    c2.S.view = 'produzione-guidata'; c2.S.produzioneGuidataTab = 'completed';
-    await c2.api.loadProductionSessions();
-    assert.ok(c2.last.html.includes('Nessuna produzione completata.'));
+    assert.ok(c.last.html.includes(`id="session-back-home" onclick="S.view='attive';render()"`), 'si torna alla Home Produzione');
+    assert.ok(c.last.html.includes('Produzione del ' + c.api.formatSessionDate('2026-10-06T08:00:00.000Z')));
   });
 
   await test('E31-32. completata: badge "Completata", nessun controllo operativo, note in sola lettura, tentativi client bloccati', async () => {
