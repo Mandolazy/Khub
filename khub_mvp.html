@@ -4309,6 +4309,195 @@ function renderCompletedSessionCard(sess){
   </div>`;
 }
 
+// ══════════════════════════════════════════════════════════
+// MS17a — STORICO PRODUZIONI: MOTORE DATI (nessuna UI)
+// Funzioni pure: nessuna lettura di S, nessuna scrittura, nessuna chiamata
+// di rete. Ricevono le Sessioni nella forma di S.productionSessions
+// (loadProductionSessions) e restituiscono record/aggregati.
+// - Solo Sessioni status='completed'.
+// - Data principale = completed_at, confrontata sul giorno LOCALE.
+// - Identita' della preparazione = Scheda: production_sessions.recipe_id
+//   (copia anche in snapshot.recipe.recipeId), mai il solo nome. La
+//   versione usata resta distinta: source_variant_id / variantName.
+// - Resa prevista = target_finished_total congelato nella Sessione (mai
+//   ricalcolata dalla Ricetta corrente); nomi = quelli dello snapshot.
+// - Scostamenti e confronti previsto/effettivo SOLO dove la resa effettiva
+//   e' registrata, sullo stesso identico insieme di Sessioni.
+// ══════════════════════════════════════════════════════════
+
+// "Tiramisù  CLASSICO" -> "tiramisu classico"
+function historyNormalizeText(value){
+  return String(value==null?'':value).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/\s+/g,' ').trim();
+}
+
+// Giorno LOCALE (YYYY-MM-DD) di un istante ISO; null se non valido.
+function historyLocalDayKey(iso){
+  if(!iso)return null;
+  var d=new Date(iso);
+  if(isNaN(d.getTime()))return null;
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+
+// Periodo del filtro: giorni locali 'YYYY-MM-DD', estremi inclusivi.
+// {} / null -> nessun limite; solo from o solo to -> limite aperto
+// dall'altro lato; date=X -> from=to=X. Data non valida o from>to -> errore.
+function historyNormalizePeriod(period){
+  var p=period||{};
+  var valid=function(v){
+    if(v==null||v==='')return null;
+    if(typeof v!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(v))return undefined;
+    var d=new Date(v+'T12:00:00');
+    return isNaN(d.getTime())||historyLocalDayKey(d.toISOString())!==v?undefined:v;
+  };
+  var from,to;
+  if(p.date!=null&&p.date!==''){from=to=valid(p.date);}
+  else{from=valid(p.from);to=valid(p.to);}
+  if(from===undefined||to===undefined)return{ok:false,error:'invalid_date'};
+  if(from&&to&&from>to)return{ok:false,error:'invalid_range'};
+  return{ok:true,from:from,to:to};
+}
+
+function historyNumberOrNull(v){
+  if(v==null||v==='')return null;
+  var n=typeof v==='number'?v:parseFloat(v);
+  return isFinite(n)?n:null;
+}
+
+// Sessione -> record storico (null se la Sessione non e' completed).
+function buildHistoryRecord(sess){
+  if(!sess||sess.status!=='completed')return null;
+  var snap=sess.snapshot||{};
+  var info=snap.recipe||{};
+  var target=snap.target||{};
+  var expected=historyNumberOrNull(sess.targetFinishedTotal);
+  var expectedUnit=target.normalizationUnit||'g';
+  var actual=historyNumberOrNull(sess.actualYieldQty);
+  var actualUnit=actual!=null?(sess.actualYieldUnit||null):null;
+  var comparable=actual!=null&&expected!=null&&expected>0&&actualUnit===expectedUnit;
+  var absDev=comparable?actual-expected:null;
+  return{
+    sessionId:sess.id,
+    preparationId:sess.recipeId!=null?sess.recipeId:(info.recipeId!=null?info.recipeId:null),
+    recipeName:info.recipeName!=null?info.recipeName:null,
+    sourceVariantId:sess.sourceVariantId!=null?sess.sourceVariantId:(info.variantId!=null?info.variantId:null),
+    variantName:info.variantName!=null?info.variantName:null,
+    startedAt:sess.startedAt||null,
+    completedAt:sess.completedAt||null,
+    completedDay:historyLocalDayKey(sess.completedAt),
+    durationSeconds:sessionDurationSeconds(sess.startedAt,sess.completedAt),
+    expectedYield:expected,
+    expectedYieldUnit:expected!=null?expectedUnit:null,
+    actualYield:actual,
+    actualYieldUnit:actualUnit,
+    absoluteDeviation:absDev,
+    percentageDeviation:comparable?absDev/expected*100:null,
+  };
+}
+
+// Ricerca: ogni parola della query deve comparire (senza maiuscole/accenti)
+// nel nome della Scheda o della Ricetta usata. Query vuota -> tutto.
+function historyMatchesQuery(record,query){
+  var q=historyNormalizeText(query);
+  if(!q)return true;
+  var hay=historyNormalizeText((record.recipeName||'')+' '+(record.variantName||''));
+  return q.split(' ').every(function(tok){return hay.indexOf(tok)!==-1;});
+}
+
+// Periodo gia' normalizzato ({from,to} giorni locali o null).
+function historyMatchesPeriod(record,period){
+  if(!period||(!period.from&&!period.to))return true;
+  if(!record.completedDay)return false;
+  if(period.from&&record.completedDay<period.from)return false;
+  if(period.to&&record.completedDay>period.to)return false;
+  return true;
+}
+
+// Punto unico di selezione dello Storico: completed -> record -> ricerca AND
+// periodo -> ordine completed_at DESC, id DESC. Periodo non valido -> nessun
+// risultato con l'errore esplicito (mai un filtro ignorato in silenzio).
+function selectHistoryRecords(sessions,filters){
+  var f=filters||{};
+  var period=historyNormalizePeriod(f.period);
+  if(!period.ok)return{records:[],error:period.error};
+  var records=[];
+  (sessions||[]).forEach(function(s){
+    var r=buildHistoryRecord(s);
+    if(r&&historyMatchesQuery(r,f.query)&&historyMatchesPeriod(r,period))records.push(r);
+  });
+  records.sort(function(a,b){
+    var ta=Date.parse(a.completedAt)||0,tb=Date.parse(b.completedAt)||0;
+    if(ta!==tb)return tb-ta;
+    return a.sessionId<b.sessionId?1:a.sessionId>b.sessionId?-1:0;
+  });
+  return{records:records,error:null};
+}
+
+// Aggregati su un insieme di record. Il confronto previsto/effettivo usa
+// SOLO i record confrontabili (resa effettiva registrata + prevista valida):
+// stesso insieme per entrambi i totali. Le altre produzioni contano
+// comunque nel totale e nella copertura.
+function aggregateHistoryRecords(records){
+  var list=records||[];
+  var out={count:list.length,totalExpected:0,expectedCount:0,actualCount:0,totalActual:0,
+    comparableCount:0,totalExpectedComparable:0,totalActualComparable:0,
+    aggregateDeviation:null,aggregateDeviationPct:null,coverage:{withActual:0,total:list.length}};
+  list.forEach(function(r){
+    if(r.expectedYield!=null){out.totalExpected+=r.expectedYield;out.expectedCount++;}
+    if(r.actualYield!=null){out.totalActual+=r.actualYield;out.actualCount++;}
+    if(r.absoluteDeviation!=null){
+      out.comparableCount++;
+      out.totalExpectedComparable+=r.expectedYield;
+      out.totalActualComparable+=r.actualYield;
+    }
+  });
+  out.coverage.withActual=out.actualCount;
+  if(out.comparableCount){
+    out.aggregateDeviation=out.totalActualComparable-out.totalExpectedComparable;
+    out.aggregateDeviationPct=out.totalExpectedComparable>0?out.aggregateDeviation/out.totalExpectedComparable*100:null;
+  }
+  return out;
+}
+
+// Raggruppamento per preparazione (Scheda = preparationId), con il dettaglio
+// per versione (sourceVariantId). Mai per nome: senza preparationId ogni
+// Sessione resta un gruppo a se'. Nome mostrato = quello dello snapshot piu'
+// recente del gruppo; i nomi storici distinti restano disponibili.
+function groupHistoryByPreparation(records){
+  var groups={},order=[];
+  (records||[]).forEach(function(r){
+    var key=r.preparationId!=null?'p:'+r.preparationId:'s:'+r.sessionId;
+    if(!groups[key]){groups[key]={preparationId:r.preparationId,records:[],variants:{},variantOrder:[]};order.push(key);}
+    var g=groups[key];
+    g.records.push(r);
+    var vk=r.sourceVariantId!=null?'v:'+r.sourceVariantId:'s:'+r.sessionId;
+    if(!g.variants[vk]){g.variants[vk]={sourceVariantId:r.sourceVariantId,records:[]};g.variantOrder.push(vk);}
+    g.variants[vk].records.push(r);
+  });
+  var latest=function(recs){
+    return recs.slice().sort(function(a,b){return(Date.parse(b.completedAt)||0)-(Date.parse(a.completedAt)||0);})[0];
+  };
+  var distinct=function(recs,field){
+    var seen={},out=[];
+    recs.forEach(function(r){var v=r[field];if(v!=null&&!seen[v]){seen[v]=1;out.push(v);}});
+    return out;
+  };
+  return order.map(function(key){
+    var g=groups[key];
+    var variants=g.variantOrder.map(function(vk){
+      var v=g.variants[vk];
+      return{sourceVariantId:v.sourceVariantId,variantName:latest(v.records).variantName,
+        variantNames:distinct(v.records,'variantName'),count:v.records.length,
+        aggregate:aggregateHistoryRecords(v.records),sessionIds:v.records.map(function(r){return r.sessionId;})};
+    }).sort(function(a,b){return b.count-a.count;});
+    return{preparationId:g.preparationId,recipeName:latest(g.records).recipeName,
+      recipeNames:distinct(g.records,'recipeName'),count:g.records.length,
+      aggregate:aggregateHistoryRecords(g.records),variants:variants};
+  }).sort(function(a,b){
+    if(b.count!==a.count)return b.count-a.count;
+    return historyNormalizeText(a.recipeName)<historyNormalizeText(b.recipeName)?-1:1;
+  });
+}
+
 function renderProduzioneGuidata(){
   var tab=S.produzioneGuidataTab||'pending';
   var pending=(S.productionSessions||[]).filter(function(s){return s.status==='pending';});
