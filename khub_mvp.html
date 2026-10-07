@@ -714,6 +714,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
 .ms17-card-yield-arrow{color:var(--dpop-grigio-dato);padding-bottom:1px;}
 .ms17-card-yield-muted{font-size:13px;color:var(--dpop-grigio-dato);}
 .ms17-open{white-space:nowrap;justify-self:end;}
+.ms17-back{color:var(--dpop-inchiostro-testo);background:var(--white,#fff);border-color:var(--dpop-filetto-riga);}
 @media (max-width:640px){
   .ms17-kpis{grid-template-columns:1fr;gap:6px;}
   .ms17-kpi{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:8px 12px;}
@@ -4677,7 +4678,6 @@ function renderHistoryCard(r){
         <div class="ms17-card-name">${escAttr(r.recipeName||'Preparazione')}</div>
         ${showVariant?`<div class="ms17-card-variant">Ricetta: ${escAttr(r.variantName)}</div>`:''}
       </div>
-      <span class="pg-badge pg-badge-completed">Completata</span>
     </div>
     <div class="ms17-card-grid">
       <div class="ms17-card-time">
@@ -4704,7 +4704,7 @@ function renderStoricoProduzioni(){
   var inputStyle='background:var(--cream);border:1px solid var(--border);border-radius:var(--r-md);padding:6px 10px;font-family:inherit;font-size:13px;color:var(--dark)';
   var head=`<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
       <div class="prod-title">Storico Produzioni</div>
-      <button class="btn btn-ghost btn-sm" onclick="S.view='attive';render()"><i class="ti ti-arrow-left"></i> Produzione</button>
+      <button class="btn btn-outline btn-sm ms17-back" onclick="S.view='attive';render()"><i class="ti ti-arrow-left"></i> Produzione</button>
     </div>
     <div style="padding:0 22px 10px">
       <input id="history-search" type="search" autocomplete="off" placeholder="Cerca una preparazione…" value="${escAttr(f.query)}" oninput="onHistoryQueryInput(this.value)" style="${inputStyle};width:100%;box-sizing:border-box;font-size:14px;padding:10px 12px">

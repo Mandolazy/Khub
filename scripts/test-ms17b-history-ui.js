@@ -495,6 +495,20 @@ function makeClient(handler) {
     assert.ok(/\.ms17-card-name\{[^}]*overflow-wrap:anywhere/.test(css[0]) && /\.ms17-kpi-value\{[^}]*overflow-wrap:anywhere/.test(css[0]));
   });
 
+
+  await test('MS17b.1 correzioni: nessun badge di stato nelle card, etichetta "Completata" su completed_at; "← Produzione" ben visibile', async () => {
+    freshDb(dataset());
+    const c = makeClient(handler);
+    await openStorico(c);
+    const h = c.last.html;
+    const cards = h.slice(h.indexOf('ms17-history-card'));
+    assert.ok(!cards.includes('pg-badge'), 'nessun badge nelle card');
+    assert.ok(cards.includes('<div class="ms17-label">Completata</div>'), 'etichetta associata a completed_at');
+    assert.ok(h.includes(`<button class="btn btn-outline btn-sm ms17-back" onclick="S.view='attive';render()"><i class="ti ti-arrow-left"></i> Produzione</button>`), 'stessa destinazione, stile visibile');
+    assert.ok(!/btn-ghost[^"]*"[^>]*onclick="S\.view='attive'/.test(extractFunction('function renderStoricoProduzioni()')), 'pulsante indietro senza stile bianco su fondo chiaro');
+    assert.ok(/\.ms17-back\{[^}]*color:var\(--dpop-inchiostro-testo\)/.test(html));
+  });
+
   console.log('');
   console.log(passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
