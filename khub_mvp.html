@@ -7679,7 +7679,7 @@ function renderQuickCalcPanel(recipe,vv){
     var r=c.result;
     body=`<div class="qc-total" style="font-size:14px;color:var(--dark)">Prodotto finito: <strong>${formatQuickCalcQty(r.targetFinishedTotal,'g')} g</strong> <span style="color:var(--mid);font-size:12px">(${formatQuickCalcQty(c.portions,'n')} porz. × ${formatQuickCalcQty(c.gpp,'g')} g)</span></div>
     <table class="ing-table qc-table">
-      <thead><tr><th>Ingrediente</th><th>Quantità a crudo</th><th>Unità</th></tr></thead>
+      <thead><tr><th>Ingrediente</th><th>Quantità a crudo · temporanee, non salvate</th><th>Unità</th></tr></thead>
       <tbody>${r.ingredients.map(function(i){
         return`<tr data-qc-item="${escAttr(i.itemKey)}"><td class="ing-name">${escAttr(i.name)}${i.estimatedYieldPct!=null?` <span style="font-size:11px;color:var(--mid)">resa ${escAttr(i.estimatedYieldPct)}%</span>`:''}</td><td class="qc-qty">${formatQuickCalcQty(i.operativeQty,i.unit)}</td><td>${escAttr(i.unit)}</td></tr>`;
       }).join('')}</tbody>
@@ -7793,7 +7793,7 @@ function renderProdRecipe(recipe){
 
   ${qcOpen?renderQuickCalcPanel(recipe,vv):''}
 
-  <div class="card">
+  ${qcOpen?'':`<div class="card rw-ingredients">
     <div class="card-label"><i class="ti ti-list-details"></i> Ingredienti${hasYieldProd?' · Quantità a crudo da preparare':' · Le proporzioni si mantengono'}</div>
     <table class="ing-table">
       <thead><tr><th>Ingrediente</th><th>Quantità</th><th>Unità</th><th style="text-align:right" title="Percentuale sul peso totale a crudo">% crudo</th></tr></thead>
@@ -7807,7 +7807,7 @@ function renderProdRecipe(recipe){
         </tr>`).join('')}
       </tbody>
     </table>
-  </div>
+  </div>`}
 
   ${vv.steps&&vv.steps.length?`
   <div class="card">

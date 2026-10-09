@@ -321,6 +321,42 @@ function makeClient(handler, opts = {}) {
     assert.ok(c.last.html.includes('Inserisci i grammi finiti per porzione'));
   });
 
+  await test('una sola tabella ingredienti: originale a calcolo chiuso, ricalcolata a calcolo aperto, originale invariata alla chiusura', async () => {
+    const fake = freshDb();
+    const c = makeClient(handler);
+    const prima = JSON.stringify(c.S.recipes);
+    const tables = (h) => (h.match(/<table class="ing-table/g) || []).length;
+    c.api.render();
+    let h = c.last.html;
+    assert.strictEqual(tables(h), 1, 'chiuso: una tabella');
+    assert.ok(h.includes('rw-ingredients') && h.includes('% crudo') && !h.includes('qc-table'), 'chiuso: tabella originale con intestazione');
+    assert.ok(h.includes('rw-summary') && h.includes('rw-finished'), 'riepiloghi conservati');
+    assert.ok(h.includes('id="btn-quick-calc"') && h.includes("openMandaInProduzione('r1','v1')"));
+    c.api.openQuickCalc('r1', 'v1');
+    c.api.onQuickCalcInput('portions', '8');
+    h = c.last.html;
+    assert.strictEqual(tables(h), 1, 'aperto: una tabella');
+    assert.ok(h.includes('qc-table') && !h.includes('rw-ingredients') && !h.includes('% crudo'), 'aperto: solo la tabella ricalcolata, intestazione originale nascosta');
+    assert.ok(h.includes('temporanee, non salvate') && h.includes('Temporaneo: la Ricetta attiva non viene modificata'));
+    assert.ok(h.includes('id="quick-calc-portions"') && h.includes('id="quick-calc-gpp"') && h.includes('id="qc-send"') && h.includes('id="qc-close"'));
+    assert.ok(!/<input[^>]*(ing-qty|onVar)/.test(h), 'nessun altro campo modificabile');
+    const ex = c.api.computeSessionScaling(c.api.buildPreparedInputDaRicettaAttiva(c.S.recipes[0], c.S.recipes[0].validatedVariants[0], 8, 250));
+    const farina = ex.ingredients.find(i => i.itemKey === 'i1').operativeQty;
+    assert.ok(h.includes('<td class="qc-qty">' + Number(farina).toLocaleString('it-IT', { maximumFractionDigits: 1 }) + '</td>'), 'quantita\' aggiornate');
+    c.api.sendQuickCalcToProduction();
+    assert.deepStrictEqual([c.S.pendingMandaInProduzione.portions, c.S.pendingMandaInProduzione.gpp], ['8', '250'], 'modale precompilato');
+    c.S.pendingMandaInProduzione = null;
+    c.api.closeQuickCalc();
+    h = c.last.html;
+    assert.strictEqual(c.S.quickCalc, null);
+    assert.strictEqual(tables(h), 1);
+    assert.ok(h.includes('rw-ingredients') && !h.includes('qc-table'), 'chiusura: ricompare la tabella originale');
+    assert.deepStrictEqual([...h.matchAll(/<td class="ing-qty-ro">([^<]*)<\/td>/g)].map(m => m[1]), ['500', '0.2', '300', '2', '100'], 'formulazione originale');
+    assert.strictEqual(JSON.stringify(c.S.recipes), prima);
+    assert.deepStrictEqual(c.spy, { upRec: 0, autosave: 0, saveToSupabase: 0 });
+    assert.strictEqual(recipeWrites(fake, c), 0);
+  });
+
   console.log('');
   console.log(passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
