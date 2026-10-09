@@ -714,6 +714,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
 .ms17-card-yield-arrow{color:var(--dpop-grigio-dato);padding-bottom:1px;}
 .ms17-card-yield-muted{font-size:13px;color:var(--dpop-grigio-dato);}
 .ms17-open{white-space:nowrap;justify-self:end;}
+.ph-new{border:2px solid var(--orange);box-shadow:0 0 0 4px rgba(200,90,30,0.12);}
+.ph-new-label{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--orange);}
 .ph-section{padding:0 22px 22px;display:flex;flex-direction:column;gap:10px;}
 .ph-section-title{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--dpop-grigio-dato);}
 .ph-list{padding:0;gap:10px;}
@@ -1048,7 +1050,9 @@ const S = {
   // Home Produzione (sostituisce Produzione Guidata): ricerca Ricette attive
   // ed eventuale sezione espansa ("Mostra tutte"): null | 'in_progress' |
   // 'pending' | 'recipes'. Solo stato UI, nessun dato nuovo.
-  produzioneHome: {recipeQuery:'',expanded:null},
+  produzioneHome: {recipeQuery:'',expanded:null,
+    // Sessione appena creata da evidenziare: {sessionId,expandedOnce,scrolled} | null
+    highlight:null},
   // Sprint Produzione — Micro-Step 11: id della Sessione aperta nella
   // schermata Sessione operativa (S.view='sessione-operativa'). Dedicato:
   // MAI S.selectedId, che in tutto il resto di KHUB identifica sempre una
@@ -3436,10 +3440,10 @@ async function confirmMandaInProduzione(){
   }
 
   try{
-    await createProductionSession(preparedInput);
+    var created=await createProductionSession(preparedInput);
     S.pendingMandaInProduzione=null;
     toast('Produzione creata','ti-chef-hat');
-    render();
+    goToNewProductionSession(created.sessionId); // solo dopo il salvataggio riuscito
   }catch(e){
     // Nessuna Sessione creata (computeSessionScaling/createProductionSession
     // falliscono PRIMA di scrivere qualunque cosa — Micro-Step 7/8). Il
@@ -3563,10 +3567,10 @@ async function confirmConversionPreflightStep(rawValue){
 
   // Tutte le conversioni sono risolte: crea la Sessione ora.
   try{
-    await createProductionSession(preparedInput);
+    var created=await createProductionSession(preparedInput);
     S.pendingConversionPreflight=null;
     toast('Produzione creata','ti-chef-hat');
-    render();
+    goToNewProductionSession(created.sessionId); // solo dopo il salvataggio riuscito
   }catch(e){
     // Le fact confermate in questo tentativo restano valide e salvate; solo
     // la Sessione non viene creata. Messaggio chiaro, nessuna falsa conferma.
@@ -3743,8 +3747,10 @@ function renderPendingSessionCard(sess){
   // specifica Sessione ha una richiesta di avvio in corso — non solo il
   // guard interno di avviaProduzione(), anche il click stesso resta bloccato.
   var starting=S.startingSessionId===sess.id;
+  var nuova=isHighlightedProductionSession(sess.id);
   return`
-  <div class="pg-card">
+  <div class="pg-card${nuova?' ph-new':''}" id="ph-session-${escAttr(sess.id)}">
+    ${nuova?'<div class="ph-new-label"><i class="ti ti-sparkles"></i> Appena creata</div>':''}
     <div class="pg-card-top">
       <div>
         <div class="pg-card-title">${escAttr(recipeName)}${variantName?` <span class="pg-card-variant">· ${escAttr(variantName)}</span>`:''}</div>
@@ -8189,11 +8195,37 @@ function filterActiveRecipeEntries(entries,query){
 var _lastViewForProductionLoad=null;
 function syncProductionHomeLoad(){
   var entering=S.view==='attive'&&_lastViewForProductionLoad!=='attive';
+  // Uscendo dalla Home l'evidenziazione della Sessione appena creata decade.
+  if(S.view!=='attive'&&_lastViewForProductionLoad==='attive'&&S.produzioneHome)S.produzioneHome.highlight=null;
   // "Mostra tutte" resta aperto solo tornando da una Sessione aperta da li';
   // da qualunque altro ingresso si riparte dalla Home.
   if(entering&&_lastViewForProductionLoad!=='sessione-operativa'&&S.produzioneHome)S.produzioneHome.expanded=null;
   _lastViewForProductionLoad=S.view;
   if(entering)setTimeout(loadProductionSessions,0);
+}
+
+// Dopo una creazione riuscita: Home Produzione -> Da iniziare, con la nuova
+// Sessione evidenziata. Ordinamento e limite della Home invariati: se non e'
+// tra le prime 3 si apre (una sola volta) l'elenco completo "Da iniziare".
+function goToNewProductionSession(sessionId){
+  if(!S.produzioneHome)S.produzioneHome={recipeQuery:'',expanded:null,highlight:null};
+  S.produzioneHome.highlight={sessionId:sessionId,expandedOnce:false,scrolled:false};
+  S.produzioneHome.expanded=null;
+  S.view='attive';
+  render(); // l'ingresso nella Home ricarica le Sessioni (syncProductionHomeLoad)
+}
+function isHighlightedProductionSession(id){
+  var hl=S.produzioneHome&&S.produzioneHome.highlight;
+  return!!(hl&&hl.sessionId===id);
+}
+// Porta la card evidenziata nell'area visibile, una volta (chiamata da render()).
+function revealProductionHighlight(){
+  var hl=S.produzioneHome&&S.produzioneHome.highlight;
+  if(!hl||hl.scrolled||S.view!=='attive')return;
+  var el=document.getElementById('ph-session-'+hl.sessionId);
+  if(!el)return;
+  hl.scrolled=true;
+  try{el.scrollIntoView({block:'center',behavior:'smooth'});}catch(e){}
 }
 
 function openProductionHomeSection(section){
@@ -8285,6 +8317,12 @@ function renderAllActiveRecipes(){
 
 function renderAttive(){
   var titoli={in_progress:'In corso',pending:'Da iniziare',recipes:'Ricette attive'};
+  // Sessione appena creata oltre le prime 3 "Da iniziare": elenco completo, una volta.
+  var hl=S.produzioneHome&&S.produzioneHome.highlight;
+  if(hl&&!hl.expandedOnce&&!S.produzioneHome.expanded){
+    var idx=selectProductionHomeSessions(S.productionSessions,'pending').findIndex(function(x){return x.id===hl.sessionId;});
+    if(idx>=0){hl.expandedOnce=true;if(idx>=PRODUCTION_HOME_LIMIT)S.produzioneHome.expanded='pending';}
+  }
   var exp=S.produzioneHome&&S.produzioneHome.expanded;
   if(exp&&titoli[exp]){
     return`<div class="prod-env ph-home ph-expanded">
@@ -8624,6 +8662,7 @@ function render(){
   syncStepTimerTicker(); // MS14: interval attivo solo con timer in corso nella Sessione operativa aperta
 
   syncProductionHomeLoad(); // Home Produzione: Sessioni ricaricate a ogni ingresso
+  revealProductionHighlight(); // Sessione appena creata: portata nell'area visibile
 
   syncHistory();
 }

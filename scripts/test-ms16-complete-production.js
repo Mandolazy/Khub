@@ -129,6 +129,7 @@ const CLIENT_SRC = [
   'function parseActualYieldInput(text,unit)', 'function formatYieldGrams(grams)', 'function sessionCompletionState(sessionId)',
   'function onSessionYieldInput(sessionId,field,value)', 'function requestCompleteSession(sessionId)', 'function cancelCompleteSession(sessionId)',
   'async function confirmCompleteSession(sessionId)', 'function renderSessionCompletionSection(sess)',
+  'function goToNewProductionSession(sessionId)', 'function isHighlightedProductionSession(id)', 'function revealProductionHighlight()',
 ].map(extractFunction).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0], html.match(/var PRODUCTION_HOME_LIMIT=\d+;/)[0]]).join('\n');
 
 const SNAPSHOT = {

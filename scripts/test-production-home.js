@@ -128,6 +128,7 @@ const CLIENT_SRC = [
   // Home Produzione: ingresso e "Manda in Produzione" solo da Ricetta attiva
   'function syncProductionHomeLoad()', 'function R(id)', 'function canSendToProduction(vv)', 'function findRecipeVariant(recipeId,variantId)',
   'function openMandaInProduzione(recipeId,variantId,target)', 'async function confirmMandaInProduzione()',
+  'function goToNewProductionSession(sessionId)', 'function isHighlightedProductionSession(id)', 'function revealProductionHighlight()',
 ].map(extractFunction).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0], html.match(/var PRODUCTION_HOME_LIMIT=\d+;/)[0]]).join('\n');
 
 const NOW = new Date('2026-10-07T10:00:00.000Z');
