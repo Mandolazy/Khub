@@ -989,6 +989,9 @@ const S = {
   // unitWeights resta l'unica struttura letta da onIngUnit/onVarIngUnit.
   unitWeightFacts: {},
   pendingMandaInProduzione: null, // {recipeId,variantId,portions,gpp,error,loading} — modal target Sessione
+  // Calcolo rapido: target TEMPORANEO (mai nella Ricetta, mai salvato).
+  // {recipeId,variantId,portions,gpp} — testi dei due campi; null = chiuso.
+  quickCalc: null,
   // Sprint Produzione — Micro-Step 9b (corretta): {"nomeNormalizzato|fromUnit|toUnit":{id,factor,sourceType,confirmedAt}}
   // — cache runtime generica delle conversion fact confermate persistite,
   // popolata da loadFromSupabase riusando gli stessi dati gia' caricati
@@ -3234,9 +3237,13 @@ function findRecipeVariant(recipeId,variantId){
   return r?(r.validatedVariants||[]).find(function(v){return v.id===variantId;}):null;
 }
 
-function openMandaInProduzione(recipeId,variantId){
+// target (facoltativo, Calcolo rapido): {portions,gpp} numerici con cui
+// precompilare il modale; la conferma resta quella normale.
+function openMandaInProduzione(recipeId,variantId,target){
   if(!canSendToProduction(findRecipeVariant(recipeId,variantId))){toast('Solo una Ricetta attiva può essere mandata in produzione.','ti-alert-circle');return;}
-  S.pendingMandaInProduzione={recipeId:recipeId,variantId:variantId,portions:'',gpp:'',error:null,loading:false};
+  var t=target||{};
+  S.pendingMandaInProduzione={recipeId:recipeId,variantId:variantId,
+    portions:t.portions!=null?String(t.portions):'',gpp:t.gpp!=null?String(t.gpp):'',error:null,loading:false};
   render();
 }
 function closeMandaInProduzione(){
@@ -3533,6 +3540,16 @@ async function confirmConversionPreflightStep(rawValue){
     pf.missing=stillMissing;
     pf.value='';
     pf.loading=false;
+    render();
+    return;
+  }
+
+  // Calcolo rapido: le conversioni confermate sono salvate come fatti di
+  // conversione (sopra); NESSUNA Sessione viene creata e la Ricetta non e'
+  // toccata. Il calcolatore si ricalcola al render successivo.
+  if(pf.purpose==='quickcalc'){
+    S.pendingConversionPreflight=null;
+    toast('Conversioni confermate','ti-check');
     render();
     return;
   }
@@ -7550,6 +7567,133 @@ function renderLabRecipe(recipe){
   </div>`;
 }
 
+// ══════════════════════════════════════════════════════════
+// CALCOLO RAPIDO — non distruttivo
+// Target temporaneo (porzioni, g/porzione finiti) in S.quickCalc. Le
+// quantita' sono SEMPRE derivate dalla Ricetta attiva salvata tramite lo
+// stesso motore delle Sessioni (buildPreparedInputDaRicettaAttiva ->
+// computeSessionScaling): nessun upRec/autosave/saveToSupabase, nessun
+// arrotondamento memorizzato. Uscendo il target viene scartato.
+// ══════════════════════════════════════════════════════════
+function parseQuickCalcNumber(text){
+  var t=String(text==null?'':text).trim().replace(',','.');
+  if(!/^\d+(\.\d+)?$/.test(t))return null;
+  var n=parseFloat(t);
+  return isFinite(n)&&n>0?n:null;
+}
+
+// Puro: nessuna lettura di S, nessuna scrittura. Esito:
+// {ok:true,portions,gpp,result} | {error:'invalid_portions'|'invalid_gpp'}
+// | {error:'missing_conversions',missing,portions,gpp} | {error:'scaling',message}
+function computeQuickCalc(recipe,vv,portionsText,gppText){
+  var portions=parseQuickCalcNumber(portionsText);
+  if(portions==null)return{error:'invalid_portions'};
+  var gpp=parseQuickCalcNumber(gppText);
+  if(gpp==null)return{error:'invalid_gpp'};
+  var input=buildPreparedInputDaRicettaAttiva(recipe,vv,portions,gpp);
+  var missing=findMissingProductionConversions(input);
+  if(missing.length)return{error:'missing_conversions',missing:missing,portions:portions,gpp:gpp};
+  try{
+    return{ok:true,portions:portions,gpp:gpp,result:computeSessionScaling(input)};
+  }catch(e){
+    return{error:'scaling',message:(e&&e.message)||'Calcolo non riuscito'};
+  }
+}
+
+// Solo visualizzazione: il valore calcolato resta intatto.
+function formatQuickCalcQty(qty,unit){
+  if(qty==null||!isFinite(qty))return'—';
+  var dec=(unit==='kg'||unit==='l')?3:(Math.abs(qty)<10?2:1);
+  return Number(qty).toLocaleString('it-IT',{maximumFractionDigits:dec});
+}
+
+function openQuickCalc(recipeId,variantId){
+  var vv=findRecipeVariant(recipeId,variantId);
+  if(!canSendToProduction(vv)){toast('Il Calcolo rapido è disponibile solo per una Ricetta attiva.','ti-alert-circle');return;}
+  // Riparte SEMPRE dai valori salvati della Ricetta attiva (solo letti).
+  S.quickCalc={recipeId:recipeId,variantId:variantId,
+    portions:vv.portionsCount!=null?String(vv.portionsCount):'',
+    gpp:vv.gramsPerPortion!=null?String(vv.gramsPerPortion):''};
+  render();
+}
+function closeQuickCalc(){
+  S.quickCalc=null;
+  render();
+}
+function onQuickCalcInput(field,value){
+  if(!S.quickCalc||(field!=='portions'&&field!=='gpp'))return;
+  S.quickCalc[field]=String(value==null?'':value);
+  render();
+}
+// Il target temporaneo vive solo dentro la propria Ricetta attiva: cambiando
+// vista, Scheda o modalita' viene scartato (chiamata da render()).
+function syncQuickCalcScope(){
+  var q=S.quickCalc;
+  if(!q)return;
+  if(S.view!=='recipe'||S.mode!=='produzione'||S.selectedId!==q.recipeId)S.quickCalc=null;
+}
+// Conversioni mancanti: stesso meccanismo del preflight di Manda in
+// Produzione, in modalita' 'quickcalc' (salva solo i fatti di conversione).
+function openQuickCalcConversions(){
+  var q=S.quickCalc;if(!q)return;
+  var recipe=R(q.recipeId),vv=findRecipeVariant(q.recipeId,q.variantId);
+  if(!recipe||!vv)return;
+  var c=computeQuickCalc(recipe,vv,q.portions,q.gpp);
+  if(c.error!=='missing_conversions')return;
+  S.pendingConversionPreflight={recipeId:q.recipeId,variantId:q.variantId,portions:c.portions,gpp:c.gpp,
+    missing:c.missing,value:'',error:null,loading:false,finalError:null,purpose:'quickcalc'};
+  render();
+}
+// Manda in Produzione dal calcolatore: apre il modale ESISTENTE precompilato.
+function sendQuickCalcToProduction(){
+  var q=S.quickCalc;if(!q)return;
+  var portions=parseQuickCalcNumber(q.portions),gpp=parseQuickCalcNumber(q.gpp);
+  if(portions==null||gpp==null){toast('Inserisci porzioni e grammi per porzione validi.','ti-alert-circle');return;}
+  openMandaInProduzione(q.recipeId,q.variantId,{portions:portions,gpp:gpp});
+}
+
+function renderQuickCalcPanel(recipe,vv){
+  var q=S.quickCalc;
+  var c=computeQuickCalc(recipe,vv,q.portions,q.gpp);
+  var aR=escAttr(recipe.id),aV=escAttr(vv.id);
+  var inputStyle='width:110px;background:var(--cream);border:1px solid var(--border);border-radius:var(--r-md);padding:8px 10px;font-family:inherit;font-size:15px;color:var(--dark)';
+  var body;
+  if(c.error==='invalid_portions'||c.error==='invalid_gpp'){
+    body=`<div class="qc-error" style="font-size:13px;color:#c0392b">${c.error==='invalid_portions'?'Inserisci un numero di porzioni maggiore di zero.':'Inserisci i grammi finiti per porzione (maggiore di zero).'}</div>`;
+  }else if(c.error==='missing_conversions'){
+    body=`<div class="qc-missing" style="font-size:13px;color:var(--dark);display:flex;flex-direction:column;gap:6px">
+      <div>Per calcolare servono le conversioni in grammi di:</div>
+      <ul style="margin:0;padding-left:18px">${c.missing.map(function(m){return'<li>'+escAttr(m.ingredientName)+' ('+escAttr(m.currentUnit)+')</li>';}).join('')}</ul>
+      <div><button class="btn btn-outline btn-sm" id="qc-conversions" onclick="openQuickCalcConversions()">Conferma conversioni</button></div>
+    </div>`;
+  }else if(c.error){
+    body=`<div class="qc-error" style="font-size:13px;color:#c0392b">${escAttr(c.message)}</div>`;
+  }else{
+    var r=c.result;
+    body=`<div class="qc-total" style="font-size:14px;color:var(--dark)">Prodotto finito: <strong>${formatQuickCalcQty(r.targetFinishedTotal,'g')} g</strong> <span style="color:var(--mid);font-size:12px">(${formatQuickCalcQty(c.portions,'n')} porz. × ${formatQuickCalcQty(c.gpp,'g')} g)</span></div>
+    <table class="ing-table qc-table">
+      <thead><tr><th>Ingrediente</th><th>Quantità a crudo</th><th>Unità</th></tr></thead>
+      <tbody>${r.ingredients.map(function(i){
+        return`<tr data-qc-item="${escAttr(i.itemKey)}"><td class="ing-name">${escAttr(i.name)}${i.estimatedYieldPct!=null?` <span style="font-size:11px;color:var(--mid)">resa ${escAttr(i.estimatedYieldPct)}%</span>`:''}</td><td class="qc-qty">${formatQuickCalcQty(i.operativeQty,i.unit)}</td><td>${escAttr(i.unit)}</td></tr>`;
+      }).join('')}</tbody>
+    </table>`;
+  }
+  return`<div class="card qc-panel" id="quick-calc">
+    <div class="card-label" style="display:flex;align-items:center;justify-content:space-between;gap:10px"><span><i class="ti ti-calculator"></i> Calcolo rapido</span><span style="font-size:11px;color:var(--mid);text-transform:none;letter-spacing:0">Temporaneo: la Ricetta attiva non viene modificata</span></div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px">
+      <label style="font-size:12px;color:var(--mid);display:flex;flex-direction:column;gap:4px">Porzioni
+        <input id="quick-calc-portions" type="text" inputmode="decimal" autocomplete="off" value="${escAttr(q.portions)}" oninput="onQuickCalcInput('portions',this.value)" style="${inputStyle}"></label>
+      <label style="font-size:12px;color:var(--mid);display:flex;flex-direction:column;gap:4px">G/porzione finiti
+        <input id="quick-calc-gpp" type="text" inputmode="decimal" autocomplete="off" value="${escAttr(q.gpp)}" oninput="onQuickCalcInput('gpp',this.value)" style="${inputStyle}"></label>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">${body}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px">
+      ${c.ok?`<button class="btn btn-sm" id="qc-send" style="background:var(--sage,#3d7a5c);color:#fff;border:none" onclick="sendQuickCalcToProduction()"><i class="ti ti-chef-hat"></i> Manda in Produzione</button>`:''}
+      <button class="btn btn-outline btn-sm" id="qc-close" onclick="closeQuickCalc()">Chiudi calcolo</button>
+    </div>
+  </div>`;
+}
+
 function renderProdRecipe(recipe){
   const attiveOra=activeVariants(recipe);
   if(!S.selectedVariantId&&attiveOra.length>1){
@@ -7569,6 +7713,9 @@ function renderProdRecipe(recipe){
     <button class="btn btn-lab" style="margin-top:14px" onclick="S.mode='lab';S.selectedVariantId=null;render()">Vai in LAB</button>
   </div>`;
   const tot=vv.ingredients.reduce((s,i)=>s+cnum(i.qty),0);
+  // Calcolo rapido aperto solo per QUESTA Ricetta attiva; altrimenti scartato.
+  const qcOpen=!!(S.quickCalc&&S.quickCalc.recipeId===recipe.id&&S.quickCalc.variantId===vv.id&&canSendToProduction(vv));
+  if(S.quickCalc&&!qcOpen)S.quickCalc=null;
   // Step 4: peso finito stimato con rese
   const hasYieldProd=vv.ingredients.some(i=>i.estimatedYieldPct!=null);
   const pesoFinitoStimato=hasYieldProd?Math.round(vv.ingredients.reduce((s,i)=>s+cnum(i.qty)*effectiveYield(i),0)):null;
@@ -7588,11 +7735,11 @@ function renderProdRecipe(recipe){
     <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
       <div class="scale-box">
         <div class="scale-label">Porzioni</div>
-        <input class="scale-input" type="number" value="${vv.portionsCount}" onchange="onVarPortions('${recipe.id}','${vv.id}',this.value)">
+        <div class="scale-total">${vv.portionsCount}</div>
       </div>
       <div class="scale-box">
         <div class="scale-label">${hasYieldProd?'G/Porz. finiti':'G/Porzione'}</div>
-        <input class="scale-input" type="number" value="${vv.gramsPerPortion}" onchange="onVarGpp('${recipe.id}','${vv.id}',this.value)">
+        <div class="scale-total">${vv.gramsPerPortion}</div>
       </div>
       <div class="scale-box">
         <div class="scale-label">${hasYieldProd?'Peso finito':'Peso totale'}</div>
@@ -7601,6 +7748,7 @@ function renderProdRecipe(recipe){
     </div>
     <div class="header-actions">
       ${canSendToProduction(vv)?`<button class="btn btn-sm" style="background:var(--sage,#3d7a5c);color:#fff;border:none" onclick="openMandaInProduzione('${recipe.id}','${vv.id}')" title="Crea una Sessione di Produzione"><i class="ti ti-chef-hat"></i> Manda in Produzione</button>`:''}
+      ${canSendToProduction(vv)?`<button class="btn btn-ghost btn-sm" id="btn-quick-calc" onclick="openQuickCalc('${recipe.id}','${vv.id}')" title="Calcola le quantità per un altro target senza modificare la Ricetta"><i class="ti ti-calculator"></i> Calcolo rapido</button>`:''}
       <button class="btn btn-ghost btn-sm" onclick="openFamilyManager('${vv.id}')" title="Famiglie di questa Ricetta"><i class="ti ti-tags"></i> Famiglie Ricetta</button>
       <button class="btn btn-ghost btn-sm" onclick="shareVariant('${recipe.id}','${vv.id}')" title="Condividi"><i class="ti ti-share"></i> Condividi</button>
       <button class="btn btn-ghost btn-sm" onclick="exportPDF('${recipe.id}','${vv.id}')" title="Scarica PDF"><i class="ti ti-file-type-pdf"></i> PDF</button>
@@ -7611,6 +7759,8 @@ function renderProdRecipe(recipe){
     </div>
   </div>
 
+  ${qcOpen?renderQuickCalcPanel(recipe,vv):''}
+
   <div class="card">
     <div class="card-label"><i class="ti ti-list-details"></i> Ingredienti${hasYieldProd?' · Quantità a crudo da preparare':' · Le proporzioni si mantengono'}</div>
     <table class="ing-table">
@@ -7619,10 +7769,8 @@ function renderProdRecipe(recipe){
         ${vv.ingredients.map(ing=>`
         <tr>
           <td class="ing-name">${ing.name}</td>
-          <td><input class="ing-qty-input" type="number" value="${cnum(ing.qty)||''}" onchange="onVarIngQty('${recipe.id}','${vv.id}','${ing.id}',this.value)"></td>
-          <td><select class="unit-select" onchange="onVarIngUnit('${recipe.id}','${vv.id}','${ing.id}',this.value)">
-            ${['g','ml','kg','l','n','tbsp','tsp','cl'].map(u=>`<option value="${u}" ${ing.unit===u?'selected':''}>${u}</option>`).join('')}
-          </select></td>
+          <td class="ing-qty-ro">${cnum(ing.qty)}</td>
+          <td>${ing.unit||''}</td>
           <td class="ing-pct">${tot>0?(cnum(ing.qty)/tot*100).toFixed(1):0}%</td>
         </tr>`).join('')}
       </tbody>
@@ -8396,6 +8544,7 @@ function render(){
   }
 
   stopSessionNoteDictationIfLeft(); // MS15: uscita dalla Sessione durante la dettatura della nota
+  syncQuickCalcScope(); // Calcolo rapido: target temporaneo scartato uscendo dalla Ricetta
 
   // Main content
   let mainContent='';
@@ -8427,7 +8576,7 @@ function render(){
   // MS15: render() ricostruisce #main; se si sta scrivendo la nota, cursore e
   // focus vengono ripristinati (il testo e' gia' nella bozza).
   // MS17b: stesso trattamento per la ricerca dello Storico (si filtra a ogni tasto).
-  const noteFocus=(()=>{const a=document.activeElement;return a&&(a.id==='session-note-input'||a.id==='history-search'||a.id==='prod-recipe-search')?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null;})();
+  const noteFocus=(()=>{const a=document.activeElement;return a&&(a.id==='session-note-input'||a.id==='history-search'||a.id==='prod-recipe-search'||a.id==='quick-calc-portions'||a.id==='quick-calc-gpp')?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null;})();
   if(main)main.innerHTML=mainContent+(S.showFamilyPicker?renderFamilyPicker():'')+(S.showMergePicker?renderMergePicker():'')+(S.showMergeConfirm?renderMergeConfirm():'')+(S.showSchedeFamiglie?renderSchedeFamigliePicker():'')+(S.showCondividiStaff?renderCondividiStaffModal():'')+(S.showOnboarding?renderOnboarding():'')+(S.toastAction?renderToastAction():S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:'')+renderUnitConversionModal()+renderMandaInProduzioneModal()+renderConversionPreflightModal();
 
   if(noteFocus){const ta=document.getElementById(noteFocus.id);if(ta){try{ta.focus();ta.setSelectionRange(noteFocus.s,noteFocus.e);}catch(e){}}}

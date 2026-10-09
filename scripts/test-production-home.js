@@ -127,7 +127,7 @@ const CLIENT_SRC = [
   'function renderHistorySummary(agg)', 'function renderHistoryCard(r)', 'function renderStoricoProduzioni()',
   // Home Produzione: ingresso e "Manda in Produzione" solo da Ricetta attiva
   'function syncProductionHomeLoad()', 'function R(id)', 'function canSendToProduction(vv)', 'function findRecipeVariant(recipeId,variantId)',
-  'function openMandaInProduzione(recipeId,variantId)', 'async function confirmMandaInProduzione()',
+  'function openMandaInProduzione(recipeId,variantId,target)', 'async function confirmMandaInProduzione()',
 ].map(extractFunction).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0], html.match(/var PRODUCTION_HOME_LIMIT=\d+;/)[0]]).join('\n');
 
 const NOW = new Date('2026-10-07T10:00:00.000Z');
@@ -444,8 +444,11 @@ const sha = (x) => crypto.createHash('sha256').update(strip(x)).digest('hex').sl
       'function computeScaleFactor(': '4185aa43ad6073d4', 'function effectiveYield(': '69bd0b9bd8305d41',
     };
     for (const [m, h] of Object.entries(expect)) assert.strictEqual(sha(extractFrom(html, m)), h, 'cambiato: ' + m);
-    const prod = extractFrom(html, 'function renderProdRecipe(recipe)').split('canSendToProduction(vv)').join("vv.status!=='retired'");
-    assert.strictEqual(sha(prod), 'c444fe0e296fdf74', 'renderProdRecipe: unica modifica ammessa = condizione di Manda in Produzione');
+    // renderProdRecipe e' stata sostituita INTENZIONALMENTE dal Calcolo rapido non distruttivo
+    // (vedi scripts/test-quick-calc.js): la vista non collega piu' alcun gestore che modifica la Ricetta.
+    const prod = extractFrom(html, 'function renderProdRecipe(recipe)');
+    assert.ok(!/onVarPortions|onVarGpp|onVarIngQty|onVarIngUnit/.test(prod), 'nessun gestore che modifica la Ricetta nella vista');
+    assert.ok(prod.includes("${canSendToProduction(vv)?`<button") && prod.includes('Manda in Produzione'));
     const blk = chat.slice(chat.indexOf("if (body.supabaseAction === 'startProductionSession')"), chat.indexOf('// Sprint Produzione — MS15: Note di produzione della Sessione'));
     assert.strictEqual(sha(blk), '62c3e4596d2fc9e1', 'azioni server di lifecycle invariate');
   });
