@@ -86,7 +86,7 @@ const CLIENT_SRC = [
   'function parseQuickCalcNumber(text)', 'function computeQuickCalc(recipe,vv,portionsText,gppText)', 'function formatQuickCalcQty(qty,unit)',
   'function openQuickCalc(recipeId,variantId)', 'function closeQuickCalc()', 'function onQuickCalcInput(field,value)', 'function syncQuickCalcScope()',
   'function openQuickCalcConversions()', 'function sendQuickCalcToProduction()', 'function renderQuickCalcPanel(recipe,vv)',
-  'function renderProdRecipe(recipe)',
+  'function computeRecipeWeightSummary(recipe,vv)', 'function renderProdRecipe(recipe)',
 ].map(extractFunction).concat(html.match(/var SESSION_SCALING_[A-Z_]+=\{[^}]*\};/g)).join('\n');
 
 // Ricetta attiva di riferimento: 4 porzioni x 250 g; unita' miste e una resa.

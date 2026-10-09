@@ -2972,7 +2972,8 @@ function computeSessionScaling(input){
       throw new Error('computeSessionScaling: conversion factor non valido per ingrediente "'+label+'"');
     }
 
-    var normalizedContribution=qty*conv.conversionFactorToBase*effectiveYield;
+    var rawGrams=qty*conv.conversionFactorToBase; // peso a crudo in grammi (stessa conversione)
+    var normalizedContribution=rawGrams*effectiveYield;
 
     return{
       itemKey:itemKey,
@@ -2987,11 +2988,13 @@ function computeSessionScaling(input){
       conversionOrigin:conv.conversionOrigin,
       conversionSourceType:conv.conversionSourceType,
       conversionFactId:conv.conversionFactId,
+      rawGrams:rawGrams,
       normalizedContribution:normalizedContribution,
     };
   });
 
   var baseExpectedFinishedTotal=resolved.reduce(function(sum,x){return sum+x.normalizedContribution;},0);
+  var baseRawTotal=resolved.reduce(function(sum,x){return sum+x.rawGrams;},0);
   if(!(baseExpectedFinishedTotal>0)){
     throw new Error('computeSessionScaling: baseExpectedFinishedTotal deve essere > 0');
   }
@@ -3013,6 +3016,9 @@ function computeSessionScaling(input){
       conversionOrigin:x.conversionOrigin,
       conversionSourceType:x.conversionSourceType,
       conversionFactId:x.conversionFactId,
+      // Dati diagnostici (solo lettura, NON copiati nello snapshot):
+      rawGrams:x.rawGrams,                       // peso a crudo della formulazione, in g
+      finishedGrams:x.normalizedContribution,    // contributo al peso finito teorico, in g
     };
   });
 
@@ -3033,6 +3039,7 @@ function computeSessionScaling(input){
     targetGramsPerPortion:targetGramsPerPortion,
     targetFinishedTotal:targetFinishedTotal,
     baseExpectedFinishedTotal:baseExpectedFinishedTotal,
+    baseRawTotal:baseRawTotal, // diagnostico: peso a crudo totale della formulazione, in g
     scaleFactor:scaleFactor,
     normalizationUnit:'g',
     ingredients:ingredientsOut,
@@ -7694,6 +7701,27 @@ function renderQuickCalcPanel(recipe,vv){
   </div>`;
 }
 
+// Riepilogo dei pesi della formulazione SALVATA, dal motore delle Sessioni
+// (nessuna formula propria). Il motore richiede un target: si usa quello
+// dichiarato, da cui pero' pesi a crudo/finiti non dipendono. Esito:
+// {status:'complete',raw,finished,byId:{[ingId]:{rawGrams,finishedGrams,pct}}}
+// | {status:'missing_conversions',missing} | {status:'unavailable'}.
+// pct = quota del peso totale A CRUDO.
+function computeRecipeWeightSummary(recipe,vv){
+  var p=parseFloat(vv.portionsCount),g=parseFloat(vv.gramsPerPortion);
+  if(!(isFinite(p)&&p>0&&isFinite(g)&&g>0))return{status:'unavailable'};
+  var input=buildPreparedInputDaRicettaAttiva(recipe,vv,p,g);
+  var missing=findMissingProductionConversions(input);
+  if(missing.length)return{status:'missing_conversions',missing:missing};
+  var r;
+  try{r=computeSessionScaling(input);}catch(e){return{status:'unavailable'};}
+  var byId={};
+  r.ingredients.forEach(function(i){
+    byId[i.sourceIngredientId!=null?i.sourceIngredientId:i.itemKey]={rawGrams:i.rawGrams,finishedGrams:i.finishedGrams,pct:r.baseRawTotal>0?i.rawGrams/r.baseRawTotal*100:0};
+  });
+  return{status:'complete',raw:r.baseRawTotal,finished:r.baseExpectedFinishedTotal,byId:byId};
+}
+
 function renderProdRecipe(recipe){
   const attiveOra=activeVariants(recipe);
   if(!S.selectedVariantId&&attiveOra.length>1){
@@ -7712,13 +7740,13 @@ function renderProdRecipe(recipe){
     <div style="margin-top:12px;color:var(--mid)">Nessuna Ricetta validata</div>
     <button class="btn btn-lab" style="margin-top:14px" onclick="S.mode='lab';S.selectedVariantId=null;render()">Vai in LAB</button>
   </div>`;
-  const tot=vv.ingredients.reduce((s,i)=>s+cnum(i.qty),0);
   // Calcolo rapido aperto solo per QUESTA Ricetta attiva; altrimenti scartato.
   const qcOpen=!!(S.quickCalc&&S.quickCalc.recipeId===recipe.id&&S.quickCalc.variantId===vv.id&&canSendToProduction(vv));
   if(S.quickCalc&&!qcOpen)S.quickCalc=null;
-  // Step 4: peso finito stimato con rese
   const hasYieldProd=vv.ingredients.some(i=>i.estimatedYieldPct!=null);
-  const pesoFinitoStimato=hasYieldProd?Math.round(vv.ingredients.reduce((s,i)=>s+cnum(i.qty)*effectiveYield(i),0)):null;
+  // Pesi della formulazione salvata dal motore delle Sessioni (conversioni + rese).
+  const pesi=computeRecipeWeightSummary(recipe,vv);
+  const targetDichiarato=cnum(vv.portionsCount)*cnum(vv.gramsPerPortion);
   return `
   <div class="prod-header">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
@@ -7742,8 +7770,12 @@ function renderProdRecipe(recipe){
         <div class="scale-total">${vv.gramsPerPortion}</div>
       </div>
       <div class="scale-box">
-        <div class="scale-label">${hasYieldProd?'Peso finito':'Peso totale'}</div>
-        <div class="scale-total">${hasYieldProd?pesoFinitoStimato+'':Math.round(vv.portionsCount*vv.gramsPerPortion)} g</div>
+        <div class="scale-label">Target dichiarato</div>
+        <div class="scale-total rw-declared">${formatQuickCalcQty(targetDichiarato,'g')} g</div>
+      </div>
+      <div class="scale-box">
+        <div class="scale-label">Peso finito teorico</div>
+        <div class="scale-total rw-finished">${pesi.status==='complete'?formatQuickCalcQty(pesi.finished,'g')+' g':'incompleto'}</div>
       </div>
     </div>
     <div class="header-actions">
@@ -7764,14 +7796,14 @@ function renderProdRecipe(recipe){
   <div class="card">
     <div class="card-label"><i class="ti ti-list-details"></i> Ingredienti${hasYieldProd?' · Quantità a crudo da preparare':' · Le proporzioni si mantengono'}</div>
     <table class="ing-table">
-      <thead><tr><th>Ingrediente</th><th>Quantità</th><th>Unità</th><th style="text-align:right">%</th></tr></thead>
+      <thead><tr><th>Ingrediente</th><th>Quantità</th><th>Unità</th><th style="text-align:right" title="Percentuale sul peso totale a crudo">% crudo</th></tr></thead>
       <tbody>
         ${vv.ingredients.map(ing=>`
         <tr>
           <td class="ing-name">${ing.name}</td>
           <td class="ing-qty-ro">${cnum(ing.qty)}</td>
           <td>${ing.unit||''}</td>
-          <td class="ing-pct">${tot>0?(cnum(ing.qty)/tot*100).toFixed(1):0}%</td>
+          <td class="ing-pct">${pesi.status==='complete'&&pesi.byId[ing.id]?pesi.byId[ing.id].pct.toFixed(1)+'%':'—'}</td>
         </tr>`).join('')}
       </tbody>
     </table>
@@ -7797,12 +7829,13 @@ function renderProdRecipe(recipe){
     </div>
   </div>`:''}
 
-  ${hasYieldProd?`
-  <div style="padding:10px 14px;background:var(--cream);border-radius:var(--r-md);border:1px solid var(--border);font-size:13px;color:var(--mid);margin-bottom:8px">
-    <i class="ti ti-check" style="color:var(--sage)"></i>
-    Peso finito atteso: <strong style="color:var(--dark)">${pesoFinitoStimato}g</strong>
-    <span style="margin-left:8px;font-size:12px">(${vv.portionsCount} porz. × ${Math.round(pesoFinitoStimato/vv.portionsCount)}g)</span>
-  </div>`:''}
+  <div class="rw-summary" style="padding:10px 14px;background:var(--cream);border-radius:var(--r-md);border:1px solid var(--border);font-size:13px;color:var(--mid);margin-bottom:8px">
+    ${pesi.status==='complete'
+      ?`<i class="ti ti-check" style="color:var(--sage)"></i> Peso finito teorico: <strong style="color:var(--dark)">${formatQuickCalcQty(pesi.finished,'g')} g</strong> <span style="margin-left:8px;font-size:12px">· peso a crudo ${formatQuickCalcQty(pesi.raw,'g')} g</span>`
+      :pesi.status==='missing_conversions'
+        ?`<i class="ti ti-alert-triangle"></i> Peso finito teorico non calcolabile: mancano le conversioni in grammi di ${pesi.missing.map(m=>escAttr(m.ingredientName)+' ('+escAttr(m.currentUnit)+')').join(', ')}. Percentuali non disponibili.`
+        :`<i class="ti ti-alert-triangle"></i> Peso finito teorico non disponibile.`}
+  </div>
 
   ${recipe.validatedVariants.length>1?`
   <div class="card">
