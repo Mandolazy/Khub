@@ -1432,7 +1432,10 @@ function buildValidatedVariantPayload(recipeId,vv){
     portions_count:vv.portionsCount,grams_per_portion:vv.gramsPerPortion,portion_unit:vv.portionUnit||'g',
     steps:JSON.stringify(stepsV2ToLegacyArray(structuredStepsVal)),
     steps_v2:structuredStepsVal,
-    validated_at:vv.validatedAtIso?vv.validatedAtIso:(vv.validatedAt?new Date(vv.validatedAt.split('/').reverse().join('-')).toISOString():new Date().toISOString()),
+    // LAB FIX 1.1: timestamp del DB riscritto identico; se nel DB mancava
+    // resta mancante (mai sostituito con l'ora corrente). Il calcolo dalla
+    // data vale solo per le versioni nate nel client (Rendi attiva/Valida).
+    validated_at:vv.validatedAtIso?vv.validatedAtIso:(vv.validatedAtMissingInDb===true?null:(vv.validatedAt?new Date(vv.validatedAt.split('/').reverse().join('-')).toISOString():new Date().toISOString())),
     media_url:vv.mediaUrl||null,video_url:vv.videoUrl||null,
     // D2: scriviamo SOLO active, mai piu' shared — il campo shared resta
     // nel DB come legacy non toccato da questo save, fino alla
@@ -1442,8 +1445,14 @@ function buildValidatedVariantPayload(recipeId,vv){
     intention_initial:vv.intentionInitial||null,intention_current:vv.intentionCurrent||null,
     criteria_initial:vv.criteriaInitial||null,criteria_current:vv.criteriaCurrent||null,
   };
+  // LAB FIX 1.1: qualsiasi id esistente non vuoto viene conservato (anche
+  // se corto). Un id nuovo nasce solo se manca davvero, e viene assegnato
+  // all'ingrediente in memoria: firma e id restano stabili tra i salvataggi.
+  (vv.ingredients||[]).forEach(ing=>{
+    if(ing.id==null||String(ing.id)==='')ing.id='vi'+Date.now()+Math.random().toString(36).slice(2,7);
+  });
   const ingredients=(vv.ingredients||[]).map((ing,idx)=>({
-    id:ing.id&&ing.id.length>4?ing.id:('vi'+Date.now()+Math.random().toString(36).slice(2,7)),
+    id:ing.id,
     variant_id:vv.id,
     name:ing.name,qty:parseFloat(ing.qty)||0,unit:ing.unit||'g',
     is_sub_recipe:ing.isSubRecipe||false,sub_recipe_id:ing.subRecipeId||null, // mattoncino preservato
@@ -1618,7 +1627,7 @@ async function loadFromSupabase(){
       const validatedVariants=rVariants.filter(v=>v.status==='validated'||v.status==='retired').map(v=>({
         id:v.id,name:v.name||v.label||'Ricetta',validatedAt:v.validated_at?new Date(v.validated_at).toLocaleDateString('it-IT'):'',
         // LAB FIX 1: valori grezzi del DB, riscritti identici al save
-        validatedAtIso:v.validated_at||null,persistedNote:v.note!=null?v.note:null,persistedLabel:v.label!=null?v.label:null,
+        validatedAtIso:v.validated_at||null,validatedAtMissingInDb:!v.validated_at,persistedNote:v.note!=null?v.note:null,persistedLabel:v.label!=null?v.label:null,
         originVariantId:v.origin_variant_id||null,
         portionsCount:v.portions_count||4,
         gramsPerPortion:v.grams_per_portion||200, // mantenuto per compatibilità

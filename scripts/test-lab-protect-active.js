@@ -284,6 +284,74 @@ function makeClient(handler, interceptLoad) {
     assert.ok(!saves[1].variants.some(v => v.id === 'vaC'));
   });
 
+  // ── LAB FIX 1.1: dati legacy ──
+  console.log('LAB FIX 1.1 — dati legacy (id corti, validated_at assente)');
+  const shortIds = f => { f.tables.ingredients.filter(i => i.variant_id === 'vaC').forEach((i, k) => { i.id = 'a' + k + 'x'; }); };      // id di 3 caratteri
+  const noValidatedAt = f => { f.tables.variants.find(v => v.id === 'vaC').validated_at = null; };
+  const legacyNulls = f => { const v = f.tables.variants.find(v => v.id === 'vaC'); v.portions_count = null; v.grams_per_portion = null; const z = f.tables.ingredients.find(i => i.variant_id === 'vaC' && i.name === 'Zucchero'); z.qty = null; z.unit = null; };
+  const setupWith = async (...muts) => {
+    const fake = makeFakeSupabase(); seed(fake); muts.forEach(m => m(fake)); globalThis.fetch = fake.fetch; saves = [];
+    const client = makeClient(handler); await client.loadFromSupabase();
+    return { fake, client, recipe: () => client.S.recipes.find(r => r.id === 'rC') };
+  };
+  for (const [name, muts] of [['id ingrediente di 3 caratteri', [shortIds]], ['validated_at assente', [noValidatedAt]], ['entrambe le condizioni (+ porzioni, qty e unita\' NULL)', [shortIds, noValidatedAt, legacyNulls]]]) {
+    await test('L1-3. ' + name + ': il salvataggio della bozza non rispedisce ne\' altera la Ricetta Attiva', async () => {
+      const { fake, client, recipe } = await setupWith(...muts);
+      const before = snapshotOthers(fake);
+      await new Promise(r => setTimeout(r, 5)); // l'ora corrente cambia tra caricamento e salvataggio
+      editDraft(client, v => ({ ...v, note: 'solo bozza', ingredients: v.ingredients.map(i => i.name === 'Zucchero' ? { ...i, qty: 120 } : i) }));
+      assert.strictEqual(await client.saveToSupabase(recipe()), true);
+      editDraft(client, v => ({ ...v, note: 'solo bozza 2' }));
+      assert.strictEqual(await client.saveToSupabase(recipe()), true);
+      assert.ok(saves.every(s => s.variants.every(v => v.id === 'lvC')), 'solo la bozza nel payload');
+      assert.ok(saves.every(s => s.ingredients.every(i => i.variant_id === 'lvC')));
+      assert.deepStrictEqual(snapshotOthers(fake), before);
+    });
+  }
+  await test('L4. tre cicli consecutivi carica -> salva con dati legacy: Ricette Attive identiche, tabelle stabili, nessun invio di versioni validate', async () => {
+    const { fake } = await setupWith(shortIds, noValidatedAt, legacyNulls);
+    const before = snapshotOthers(fake);
+    let afterFirst = null;
+    for (let k = 0; k < 3; k++) {
+      const c = makeClient(handler); await c.loadFromSupabase(); await new Promise(r => setTimeout(r, 5));
+      assert.strictEqual(await c.saveToSupabase(c.S.recipes.find(r => r.id === 'rC')), true);
+      if (k === 0) afterFirst = clone({ v: fake.tables.variants, i: fake.tables.ingredients });
+    }
+    assert.deepStrictEqual(snapshotOthers(fake), before);
+    assert.deepStrictEqual(clone({ v: fake.tables.variants, i: fake.tables.ingredients }), afterFirst, 'cicli 2 e 3 non cambiano nulla');
+    assert.ok(saves.every(s => s.variants.every(v => v.id === 'lvC')));
+  });
+  await test('L5. modifica esplicita (Disattiva) di una Ricetta Attiva legacy: id corti conservati, validated_at resta assente', async () => {
+    const { fake, client, recipe } = await setupWith(shortIds, noValidatedAt);
+    const r = recipe(); r.validatedVariants = r.validatedVariants.map(v => v.id === 'vaC' ? { ...v, active: false } : v);
+    assert.strictEqual(await client.saveToSupabase(r), true);
+    assert.ok(saves[0].variants.some(v => v.id === 'vaC'));
+    assert.strictEqual(dbVariant(fake, 'vaC').active, false);
+    assert.strictEqual(dbVariant(fake, 'vaC').validated_at, null);
+    assert.deepStrictEqual(dbIngs(fake, 'vaC').map(i => i.id), ['a0x', 'a1x', 'a2x']);
+    assert.strictEqual(dbIngs(fake, 'vaC')[2].sub_recipe_id, 'vaF');
+  });
+  await test('L6. ingrediente senza id: id generato una sola volta e stabile tra salvataggi e riaperture', async () => {
+    const { fake, client, recipe } = await setupWith();
+    const r = recipe(); r.validatedVariants = r.validatedVariants.map(v => v.id === 'vaC' ? { ...v, ingredients: [...v.ingredients, { name: 'Sale', qty: 1, unit: 'g' }] } : v);
+    await client.saveToSupabase(r);
+    const id1 = dbIngs(fake, 'vaC').find(i => i.name === 'Sale').id;
+    await client.saveToSupabase(r);
+    const c2 = makeClient(handler); await c2.loadFromSupabase(); await c2.saveToSupabase(c2.S.recipes.find(x => x.id === 'rC'));
+    const rows = dbIngs(fake, 'vaC').filter(i => i.name === 'Sale');
+    assert.strictEqual(rows.length, 1); assert.strictEqual(rows[0].id, id1);
+    assert.ok(!saves[1].variants.some(v => v.id === 'vaC'), 'secondo salvataggio senza modifiche: non rispedita');
+  });
+  await test('L7. nuova versione validata nata nel client: validated_at calcolato come prima (non NULL)', async () => {
+    const { fake, client, recipe } = await setupWith(noValidatedAt);
+    const r = recipe(); const v = r.labVersions[0];
+    r.validatedVariants = [...r.validatedVariants, { id: v.id, name: v.name, status: 'approved', active: false, validatedAt: '10/10/2026', portionsCount: 10, gramsPerPortion: 80, ingredients: v.ingredients.map((i, k) => ({ ...i, id: 'vi_n' + k })), steps: v.steps, stepsV2: v.stepsV2, l2Items: [] }];
+    r.labVersions = [];
+    await client.saveToSupabase(r);
+    assert.strictEqual(dbVariant(fake, 'lvC').validated_at, new Date('2026-10-10').toISOString());
+    assert.strictEqual(dbVariant(fake, 'vaC').validated_at, null);
+  });
+
   console.log('');
   console.log(passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
