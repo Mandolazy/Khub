@@ -177,9 +177,12 @@ test('khub_mvp.html: retireVariant porta active a false in archiviazione', () =>
 
 test('khub_mvp.html: saveToSupabase NON scrive piu\' il campo shared nel payload variants (protezione dati legacy pre-riconciliazione)', () => {
   const fnBody = html.slice(html.indexOf('async function saveToSupabase'), html.indexOf('async function deleteRecipe'));
+  // LAB FIX 1: la riga delle varianti validate e' costruita da buildValidatedVariantPayload
+  const vvBody = html.slice(html.indexOf('function buildValidatedVariantPayload('), html.indexOf('function computeIngredientDeletions('));
   assert.doesNotMatch(fnBody, /shared:/);
+  assert.doesNotMatch(vvBody, /shared:/);
   assert.match(fnBody, /active:v\.active===true/);
-  assert.match(fnBody, /active:vv\.active===true/);
+  assert.match(vvBody, /active:vv\.active===true/);
 });
 
 console.log('');

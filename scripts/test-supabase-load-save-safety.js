@@ -154,7 +154,7 @@ const CLIENT_SRC = [
   'function computeIngredientDeletions(knownByVariant,currentByVariant)',
   'function updateKnownIngredientIds(knownByVariant,currentByVariant,deleted)', 'function firmaContenutoBozza(v)',
   'async function loadFromSupabase()', 'function parseSteps(raw)', 'function getStructuredSteps(legacySteps,stepsV2)',
-  'function stepsV2ToLegacyArray(stepsV2)', 'function makeDefaultLab(recipeId,name)', 'async function saveToSupabase(recipe)',
+  'function stepsV2ToLegacyArray(stepsV2)', 'function makeDefaultLab(recipeId,name)', 'function buildValidatedVariantPayload(recipeId,vv)', 'async function saveToSupabase(recipe)',
 ].map(extractFunction).join('\n');
 
 // Client KHUB isolato: fetch('/api/chat') -> handler reale -> fake Supabase.
@@ -174,6 +174,7 @@ function makeClient(handler, interceptLoad) {
   const factory = new Function('fetch', 'toast', `
     var S={recipes:[],selectedId:null,families:[],variantFamilies:{},unitWeights:{},unitWeightFacts:{},productionConversionFacts:{}};
     var _knownIngredientIdsByVariant={};
+    var _persistedValidatedSig={};
     ${CLIENT_SRC}
     return {S, loadFromSupabase, saveToSupabase};
   `);

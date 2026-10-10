@@ -1411,6 +1411,48 @@ let _saveLocked=false;
 // payload corrente puo' essere cancellato (rimozione intenzionale): un id mai
 // ricevuto — es. una load incompleta — non viene mai cancellato.
 let _knownIngredientIdsByVariant={};
+// LAB FIX 1 — Protezione delle Ricette Attive. Firma (riga variants +
+// ingredienti, esattamente come verrebbero inviati) di ogni variante
+// validata/ritirata cosi' come e' persistita nel DB: impostata alla load e
+// dopo ogni save confermato. saveToSupabase invia una variante validata SOLO
+// se la sua firma e' cambiata: modificare/salvare una bozza LAB non riscrive
+// piu' le altre versioni della Scheda. Le transizioni esplicite (Rendi
+// attiva, Valida, ritiro, ...) cambiano la variante e quindi la inviano.
+let _persistedValidatedSig={};
+function buildValidatedVariantPayload(recipeId,vv){
+  const structuredStepsVal=getStructuredSteps(vv.steps,vv.stepsV2);
+  const row={
+    id:vv.id,recipe_id:recipeId,name:vv.name,
+    // Campi letti dal DB e riscritti identici (mai piu' note:'' / label:name
+    // / validated_at ricostruito dalla sola data): una variante che nasce nel
+    // client (Rendi attiva/Valida) non li ha e mantiene i valori di prima.
+    label:vv.persistedLabel!=null?vv.persistedLabel:vv.name,
+    note:vv.persistedNote!=null?vv.persistedNote:'',
+    status:vv.status==='retired'?'retired':'validated', // simmetria con la lettura: 'retired' deve sopravvivere al save
+    portions_count:vv.portionsCount,grams_per_portion:vv.gramsPerPortion,portion_unit:vv.portionUnit||'g',
+    steps:JSON.stringify(stepsV2ToLegacyArray(structuredStepsVal)),
+    steps_v2:structuredStepsVal,
+    validated_at:vv.validatedAtIso?vv.validatedAtIso:(vv.validatedAt?new Date(vv.validatedAt.split('/').reverse().join('-')).toISOString():new Date().toISOString()),
+    media_url:vv.mediaUrl||null,video_url:vv.videoUrl||null,
+    // D2: scriviamo SOLO active, mai piu' shared — il campo shared resta
+    // nel DB come legacy non toccato da questo save, fino alla
+    // riconciliazione active<-shared (preparata, non ancora eseguita).
+    active:vv.active===true,
+    origin_variant_id:vv.originVariantId||null, // D3: sopravvive alle transizioni di lifecycle
+    intention_initial:vv.intentionInitial||null,intention_current:vv.intentionCurrent||null,
+    criteria_initial:vv.criteriaInitial||null,criteria_current:vv.criteriaCurrent||null,
+  };
+  const ingredients=(vv.ingredients||[]).map((ing,idx)=>({
+    id:ing.id&&ing.id.length>4?ing.id:('vi'+Date.now()+Math.random().toString(36).slice(2,7)),
+    variant_id:vv.id,
+    name:ing.name,qty:parseFloat(ing.qty)||0,unit:ing.unit||'g',
+    is_sub_recipe:ing.isSubRecipe||false,sub_recipe_id:ing.subRecipeId||null, // mattoncino preservato
+    sort_order:idx,
+    estimated_yield_pct:ing.estimatedYieldPct!==undefined&&ing.estimatedYieldPct!==null?ing.estimatedYieldPct:null,
+    measured_yield_pct:ing.measuredYieldPct!==undefined&&ing.measuredYieldPct!==null?ing.measuredYieldPct:null,
+  }));
+  return{row,ingredients,sig:JSON.stringify({row,ingredients})};
+}
 function buildKnownIngredientIds(ingredientRows){
   const known={};
   (ingredientRows||[]).forEach(i=>{
@@ -1575,6 +1617,8 @@ async function loadFromSupabase(){
       }));
       const validatedVariants=rVariants.filter(v=>v.status==='validated'||v.status==='retired').map(v=>({
         id:v.id,name:v.name||v.label||'Ricetta',validatedAt:v.validated_at?new Date(v.validated_at).toLocaleDateString('it-IT'):'',
+        // LAB FIX 1: valori grezzi del DB, riscritti identici al save
+        validatedAtIso:v.validated_at||null,persistedNote:v.note!=null?v.note:null,persistedLabel:v.label!=null?v.label:null,
         originVariantId:v.origin_variant_id||null,
         portionsCount:v.portions_count||4,
         gramsPerPortion:v.grams_per_portion||200, // mantenuto per compatibilità
@@ -1582,6 +1626,7 @@ async function loadFromSupabase(){
         portionUnit:v.portion_unit||'g',           // Step 1: unità porzione
         ingredients:(data.ingredients||[]).filter(i=>i.variant_id===v.id).sort((a,b)=>a.sort_order-b.sort_order).map(i=>({
           id:i.id,name:i.name,qty:parseFloat(i.qty)||0,unit:i.unit||'g',
+          isSubRecipe:i.is_sub_recipe||false,subRecipeId:i.sub_recipe_id||null, // LAB FIX 1: mattoncino letto anche per le validate
           // Bugfix rese: stessa normalizzazione del mapping Bozze LAB sopra
           // (parseFloat, mai una seconda logica) — vedi commento lì.
           estimatedYieldPct:i.estimated_yield_pct!=null?parseFloat(i.estimated_yield_pct):null, // Step 1: resa stimata
@@ -1612,6 +1657,8 @@ async function loadFromSupabase(){
         notes:r.notes||'',
       };
     });
+    _persistedValidatedSig={};
+    S.recipes.forEach(r=>(r.validatedVariants||[]).forEach(vv=>{_persistedValidatedSig[vv.id]=buildValidatedVariantPayload(r.id,vv).sig;}));
     if(S.recipes.length>0&&!S.selectedId)S.selectedId=S.recipes[0].id;
     // Carica famiglie
     try{
@@ -1807,35 +1854,15 @@ async function saveToSupabase(recipe){
       });
       pushL2(v.l2Items,v.id);
     });
+    const sentValidatedSig={};
     recipe.validatedVariants.forEach(vv=>{
-      const structuredStepsVal=getStructuredSteps(vv.steps,vv.stepsV2);
-      allVariants.push({
-        id:vv.id,recipe_id:recipe.id,name:vv.name,label:vv.name,note:'',
-        status:vv.status==='retired'?'retired':'validated', // simmetria con la lettura: 'retired' deve sopravvivere al save
-        portions_count:vv.portionsCount,grams_per_portion:vv.gramsPerPortion,portion_unit:vv.portionUnit||'g',
-        steps:JSON.stringify(stepsV2ToLegacyArray(structuredStepsVal)),
-        steps_v2:structuredStepsVal,
-        validated_at:vv.validatedAt?new Date(vv.validatedAt.split('/').reverse().join('-')).toISOString():new Date().toISOString(),
-        media_url:vv.mediaUrl||null,video_url:vv.videoUrl||null,
-        // D2: scriviamo SOLO active, mai piu' shared — il campo shared resta
-        // nel DB come legacy non toccato da questo save, fino alla
-        // riconciliazione active<-shared (preparata, non ancora eseguita).
-        active:vv.active===true,
-        origin_variant_id:vv.originVariantId||null, // D3: sopravvive alle transizioni di lifecycle
-        intention_initial:vv.intentionInitial||null,intention_current:vv.intentionCurrent||null,
-        criteria_initial:vv.criteriaInitial||null,criteria_current:vv.criteriaCurrent||null,
-      });
-      (vv.ingredients||[]).forEach((ing,idx)=>{
-        allIngredients.push({
-          id:ing.id&&ing.id.length>4?ing.id:('vi'+Date.now()+Math.random().toString(36).slice(2,7)),
-          variant_id:vv.id,
-          name:ing.name,qty:parseFloat(ing.qty)||0,unit:ing.unit||'g',
-          is_sub_recipe:false,sub_recipe_id:null,
-          sort_order:idx,
-          estimated_yield_pct:ing.estimatedYieldPct!==undefined&&ing.estimatedYieldPct!==null?ing.estimatedYieldPct:null,
-          measured_yield_pct:ing.measuredYieldPct!==undefined&&ing.measuredYieldPct!==null?ing.measuredYieldPct:null,
-        });
-      });
+      const p=buildValidatedVariantPayload(recipe.id,vv);
+      // LAB FIX 1: variante validata invariata rispetto al DB -> non inviata
+      if(_persistedValidatedSig[vv.id]!==p.sig){
+        allVariants.push(p.row);
+        p.ingredients.forEach(i=>allIngredients.push(i));
+        sentValidatedSig[vv.id]=p.sig;
+      }
       pushL2(vv.l2Items,vv.id);
     });
     const allL3Items=(recipe.l3Items||[]).map(l3=>({
@@ -1858,6 +1885,7 @@ async function saveToSupabase(recipe){
     // cancella); le cancellazioni si danno per fatte solo a save confermato.
     const salvataggioConfermato=saveRes.ok&&saveResult&&saveResult.ok===true;
     updateKnownIngredientIds(_knownIngredientIdsByVariant,currentIngredientIds,salvataggioConfermato?deletedIngredients:[]);
+    if(salvataggioConfermato)Object.assign(_persistedValidatedSig,sentValidatedSig);
     if(saveResult&&saveResult.ok===false){
       console.error('[Supabase] errori di salvataggio:',saveResult.errors);
       toast('Alcuni dati potrebbero non essere stati salvati. Controlla la connessione.','ti-alert-circle');
