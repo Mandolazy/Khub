@@ -120,7 +120,7 @@ const CLIENT_SRC = [
   'function tornaAlloStoricoProduzioni()', 'function openHistorySession(sessionId)', 'function onHistoryQueryInput(value)',
   'function setHistoryPreset(preset)', 'function onHistoryDateInput(field,value)', 'function resetHistoryFilters()',
   'function formatHistoryWhen(iso)', 'function historyVariantAddsInfo(recipeName,variantName)', // MS17b.1
-  'function renderHistorySummary(agg)', 'function renderHistoryCard(r)', 'function renderStoricoProduzioni()',
+  'function renderHistoryCount(count)', 'function renderHistoryCard(r)', 'function renderStoricoProduzioni()',
   'function goToNewProductionSession(sessionId)', 'function isHighlightedProductionSession(id)', 'function revealProductionHighlight()',
 ].map(extractFunction).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0], html.match(/var PRODUCTION_HOME_LIMIT=\d+;/)[0]]).join('\n');
 
@@ -275,32 +275,28 @@ function makeClient(handler) {
     assert.deepStrictEqual(cardIds(c), ['today', 'd01']);
   });
 
-  await test('12-13. riepilogo reattivo ai filtri; confronto solo sull\'insieme confrontabile; copertura', async () => {
+  await test('12-13. FIX 4: solo conteggio reattivo ai filtri, nessun aggregato di pesi', async () => {
     freshDb(dataset());
     const c = makeClient(handler);
     await openStorico(c);
     c.api.setHistoryPreset('month'); // today(5000→4720) d03(3000→3150) d01(2000, nessuna resa)
-    const t = vis(c.last.html);
+    const h = c.last.html, t = vis(h);
     assert.ok(t.includes('3 produzioni'));
-    assert.ok(t.includes('Previsto 10 kg'));
-    assert.ok(t.includes('Effettivo* 7,87 kg'));
-    assert.ok(t.includes('Scostamento* −130 g −1,6% su 8 kg previsti confrontabili'), 'confronto sul solo insieme confrontabile, dichiarato');
-    assert.ok(t.includes('* Resa effettiva registrata in 2 produzioni su 3. Lo scostamento considera solo le produzioni con resa registrata.'));
-    assert.ok(!t.includes('−2,13 kg'), 'mai 10 kg previsti contro 7,87 kg effettivi');
+    assert.ok(!/Previsto|Effettivo|Resa effettiva registrata|previsti confrontabili/.test(t), 'nessun riepilogo aggregato');
+    assert.ok(!t.includes('10 kg') && !t.includes('7,87 kg') && !t.includes('−130 g'), 'nessun totale di pesi fra produzioni diverse');
+    assert.ok(!h.includes('ms17-kpi') && !h.includes('ms17-coverage'));
     c.api.setHistoryPreset('today');
     const t2 = vis(c.last.html);
-    assert.ok(t2.includes('1 produzione') && t2.includes('Resa effettiva registrata in tutte le produzioni.'));
-    assert.ok(t2.includes('Scostamento −280 g −5,6%') && !t2.includes('*'), 'copertura completa: nessun asterisco');
+    assert.ok(t2.includes('1 produzione') && !t2.includes('1 produzioni'));
+    assert.ok(t2.includes('Prevista 5 kg → Effettiva 4,72 kg'), 'pesi della singola Sessione invariati');
   });
 
-  await test('14-15. nessuna resa effettiva: messaggio chiaro, nessuno scostamento (mai 0)', async () => {
+  await test('14-15. nessuna resa effettiva: nessuno scostamento (mai 0)', async () => {
     freshDb([dbSession({ id: 'a', target: 2000 }), dbSession({ id: 'b', target: 1000, completedAt: '2026-10-06T10:00:00.000Z' })]);
     const c = makeClient(handler);
     await openStorico(c);
     const h = c.last.html, t = vis(h);
-    assert.ok(t.includes('Effettivo Non disponibile') && t.includes('Scostamento —'));
-    assert.ok(t.includes('Nessuna resa effettiva registrata: scostamento non calcolabile.'));
-    assert.ok(!h.includes('ms17-summary-deviation'));
+    assert.ok(t.includes('2 produzioni') && !t.includes('Effettivo') && !t.includes('Scostamento'));
     assert.ok(!/0 g · 0,0%|±0| 0 g /.test(t));
     assert.strictEqual((t.match(/Effettiva Non registrata/g) || []).length, 2, 'card senza scostamento');
     assert.ok(!h.includes('ms17-card-deviation'));
@@ -433,30 +429,28 @@ function makeClient(handler) {
     assert.ok(!card('none').includes('Ricetta:'));
   });
 
-  await test('MS17b.1-3/4. resa effettiva mancante: card "Non registrata" senza scostamento; riepilogo "Non disponibile" e "—"', async () => {
+  await test('MS17b.1-3/4. resa effettiva mancante: card "Non registrata" senza scostamento; nessun riepilogo', async () => {
     freshDb([dbSession({ id: 'n', target: 10000 })]);
     const c = makeClient(handler);
     await openStorico(c);
     const t = vis(c.last.html);
     assert.ok(t.includes('Prevista 10 kg → Effettiva Non registrata'));
     assert.ok(!c.last.html.includes('ms17-card-deviation'));
-    assert.ok(t.includes('Previsto 10 kg') && t.includes('Effettivo Non disponibile') && t.includes('Scostamento —'));
+    assert.ok(t.includes('1 produzione') && !t.includes('Previsto') && !t.includes('Effettivo'));
   });
 
-  await test('MS17b.1-5/6. aggregati invariati rispetto al motore MS17a; copertura parziale dichiarata', async () => {
+  await test('MS17b.1-5/6 + FIX 4. aggregati ancora calcolati dal motore MS17a ma non mostrati', async () => {
     freshDb(dataset());
     const c = makeClient(handler);
     await openStorico(c);
     c.api.setHistoryPreset('month');
     const recs = c.api.selectHistoryRecords(c.S.productionSessions, { query: '', period: c.api.historyPeriodFromFilters(c.S.historyFilters, NOW) }).records;
     const a = c.api.aggregateHistoryRecords(recs);
+    assert.strictEqual(a.count, 3);
+    assert.strictEqual(a.aggregateDeviation, a.totalActualComparable - a.totalExpectedComparable, 'motore invariato');
     const t = vis(c.last.html);
-    assert.ok(t.includes('Previsto ' + c.api.formatHistoryQty(a.totalExpected)));
-    assert.ok(t.includes('Effettivo* ' + c.api.formatHistoryQty(a.totalActual)));
-    assert.ok(t.includes('Scostamento* ' + c.api.formatHistorySigned(a.aggregateDeviation) + ' ' + c.api.formatHistoryPct(a.aggregateDeviationPct)));
-    assert.ok(t.includes('su ' + c.api.formatHistoryQty(a.totalExpectedComparable) + ' previsti confrontabili'));
-    assert.strictEqual(a.aggregateDeviation, a.totalActualComparable - a.totalExpectedComparable, 'scostamento sul solo insieme confrontabile');
-    assert.ok(t.includes('Resa effettiva registrata in ' + a.coverage.withActual + ' produzioni su ' + a.coverage.total));
+    assert.ok(t.includes(a.count + ' produzioni'));
+    assert.ok(!t.includes(c.api.formatHistoryQty(a.totalExpected)) && !t.includes(c.api.formatHistoryQty(a.totalActual)), 'totali non mostrati');
   });
 
   await test('MS17b.1-7/8/9. completed_at in evidenza, started_at e durata (anche anomala) sempre presenti; anno se diverso', async () => {
@@ -487,12 +481,12 @@ function makeClient(handler) {
     assert.deepStrictEqual(cardIds(c), ['today', 'd01', 'sep30', 'old']);
   });
 
-  await test('MS17b.1-13. responsive: indicatori e card si impilano sotto 640px, testi lunghi vanno a capo', async () => {
+  await test('MS17b.1-13. responsive: card si impilano sotto 640px, testi lunghi vanno a capo', async () => {
     const css = html.match(/\/\* MS17b\.1[\s\S]*?@media \(max-width:640px\)\{([\s\S]*?)\n\}/);
     assert.ok(css, 'blocco CSS MS17b.1 con media query');
-    assert.ok(/\.ms17-kpis\{grid-template-columns:1fr;/.test(css[1]));
+    assert.ok(!/\.ms17-kpi/.test(css[0]), 'CSS indicatori rimosso (FIX 4)');
     assert.ok(/\.ms17-card-grid\{grid-template-columns:1fr;/.test(css[1]));
-    assert.ok(/\.ms17-card-name\{[^}]*overflow-wrap:anywhere/.test(css[0]) && /\.ms17-kpi-value\{[^}]*overflow-wrap:anywhere/.test(css[0]));
+    assert.ok(/\.ms17-card-name\{[^}]*overflow-wrap:anywhere/.test(css[0]));
   });
 
 

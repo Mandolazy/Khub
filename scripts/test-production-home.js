@@ -124,7 +124,7 @@ const CLIENT_SRC = [
   'function tornaAlloStoricoProduzioni()', 'function openHistorySession(sessionId)', 'function onHistoryQueryInput(value)',
   'function setHistoryPreset(preset)', 'function onHistoryDateInput(field,value)', 'function resetHistoryFilters()',
   'function formatHistoryWhen(iso)', 'function historyVariantAddsInfo(recipeName,variantName)', // MS17b.1
-  'function renderHistorySummary(agg)', 'function renderHistoryCard(r)', 'function renderStoricoProduzioni()',
+  'function renderHistoryCount(count)', 'function renderHistoryCard(r)', 'function renderStoricoProduzioni()',
   // Home Produzione: ingresso e "Manda in Produzione" solo da Ricetta attiva
   'function syncProductionHomeLoad()', 'function R(id)', 'function canSendToProduction(vv)', 'function findRecipeVariant(recipeId,variantId)',
   'function openMandaInProduzione(recipeId,variantId,target)', 'async function confirmMandaInProduzione()',
@@ -437,7 +437,8 @@ const sha = (x) => crypto.createHash('sha256').update(strip(x)).digest('hex').sl
       'function buildHistoryRecord(sess)': '618865987cac2168', 'function historyMatchesQuery(record,query)': '779fba1d40f8f3e0',
       'function historyMatchesPeriod(record,period)': 'ab0399db9b230a23', 'function selectHistoryRecords(sessions,filters)': '67360bfe5b7174bf',
       'function aggregateHistoryRecords(records)': '35bcb68933bb2812', 'function groupHistoryByPreparation(records)': 'cbf3a262b9abd594',
-      'function renderStoricoProduzioni()': 'a2fe37f4f5feb017', 'function renderHistorySummary(agg)': 'bcaaf726cdce2688',
+      // FIX 4: riepilogo aggregato rimosso dallo Storico (solo conteggio)
+      'function renderStoricoProduzioni()': '4fea137f75ac1d5c', 'function renderHistoryCount(count)': '0ba29da4e8144370',
       'function renderHistoryCard(r)': '63d9a2ad82f2b6ff', 'function historyPeriodFromFilters(filters,now)': '212600a2326fe511',
       // Calcolo Produzione
       'function onVarPortions(recipeId,varId,val)': 'e9611d9a3b9b0279', 'function onVarGpp(recipeId,varId,val)': 'aca83356c53d81e0',

@@ -692,15 +692,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
 .pg-badge-pending{background:var(--dpop-carta-toccata,#eee);color:var(--dpop-inchiostro-testo);}
 .pg-badge-in-progress{background:var(--sage-light);color:var(--sage-dark);}
 .pg-badge-completed{background:var(--dpop-inchiostro-testo,#333);color:#fff;}
-/* MS17b.1 — Storico Produzioni: riepilogo a indicatori e card compatte */
+/* MS17b.1 — Storico Produzioni: conteggio e card compatte */
 .ms17-label{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--dpop-grigio-dato);}
 .ms17-summary-head{font-size:15px;font-weight:600;color:var(--dpop-inchiostro-testo);}
-.ms17-kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;}
-.ms17-kpi{border:1px solid var(--dpop-filetto-riga);border-radius:var(--r-md,10px);padding:10px 12px;min-width:0;}
-.ms17-kpi-value{font-size:20px;font-weight:600;color:var(--dpop-inchiostro-testo);line-height:1.25;margin-top:2px;overflow-wrap:anywhere;}
-.ms17-kpi-value-muted{font-size:15px;font-weight:500;color:var(--dpop-grigio-dato);}
-.ms17-kpi-sub{font-size:11px;color:var(--dpop-grigio-dato);margin-top:2px;}
-.ms17-note{font-size:11px;color:var(--dpop-grigio-dato);line-height:1.45;}
 .ms17-history-card{padding:12px 14px;gap:8px;}
 .ms17-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
 .ms17-card-name{font-size:15px;font-weight:600;color:var(--dpop-inchiostro-testo);overflow-wrap:anywhere;}
@@ -726,10 +720,6 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
 .ph-back,.ph-history{color:var(--dpop-inchiostro-testo);background:var(--white,#fff);border-color:var(--dpop-filetto-riga);}
 .ms17-back{color:var(--dpop-inchiostro-testo);background:var(--white,#fff);border-color:var(--dpop-filetto-riga);}
 @media (max-width:640px){
-  .ms17-kpis{grid-template-columns:1fr;gap:6px;}
-  .ms17-kpi{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:8px 12px;}
-  .ms17-kpi-body{text-align:right;}
-  .ms17-kpi-value{font-size:17px;margin-top:0;}
   .ms17-card-grid{grid-template-columns:1fr;align-items:start;}
   .ms17-open{justify-self:stretch;}
 }
@@ -4651,33 +4641,12 @@ function historyVariantAddsInfo(recipeName,variantName){
   return!!n(variantName)&&n(variantName)!==n(recipeName);
 }
 
-// Riepilogo a tre indicatori. Previsto = tutte le produzioni filtrate;
-// Effettivo = resa registrata; Scostamento = SOLO l'insieme confrontabile
-// (MS17a). Con copertura parziale l'asterisco e la nota lo dichiarano.
-function renderHistorySummary(agg){
-  var nessuna=agg.actualCount===0;
-  var parziale=!nessuna&&agg.coverage.withActual<agg.coverage.total;
-  var star=parziale?'*':'';
-  var kpi=function(label,value,sub,muted,cls){
-    return'<div class="ms17-kpi'+(cls?' '+cls:'')+'"><div class="ms17-label">'+label+'</div><div class="ms17-kpi-body"><div class="ms17-kpi-value'+(muted?' ms17-kpi-value-muted':'')+'">'+value+'</div>'+(sub?'<div class="ms17-kpi-sub">'+sub+'</div>':'')+'</div></div>';
-  };
-  var scost=agg.aggregateDeviation!=null
-    ?formatHistorySigned(agg.aggregateDeviation)+(agg.aggregateDeviationPct!=null?'<div class="ms17-kpi-sub" style="font-size:13px">'+formatHistoryPct(agg.aggregateDeviationPct)+'</div>':'')
-    :'—';
-  var nota=nessuna
-    ?'Nessuna resa effettiva registrata: scostamento non calcolabile.'
-    :parziale
-      ?'* Resa effettiva registrata in '+agg.coverage.withActual+' produzion'+(agg.coverage.withActual===1?'e':'i')+' su '+agg.coverage.total+'. Lo scostamento considera solo le produzioni con resa registrata.'
-      :'Resa effettiva registrata in tutte le produzioni.';
-  return'<div class="pg-card ms17-summary" style="gap:10px">'
-    +'<div class="ms17-summary-head ms17-summary-count">'+agg.count+(agg.count===1?' produzione':' produzioni')+'</div>'
-    +'<div class="ms17-kpis">'
-      +kpi('Previsto',formatHistoryQty(agg.totalExpected),'',false,'ms17-kpi-expected')
-      +kpi('Effettivo'+star,nessuna?'Non disponibile':formatHistoryQty(agg.totalActual),'',nessuna,nessuna?'ms17-kpi-actual ms17-no-actual':'ms17-kpi-actual')
-      +kpi('Scostamento'+star,scost,parziale?'su '+formatHistoryQty(agg.totalExpectedComparable)+' previsti confrontabili':'',agg.aggregateDeviation==null,agg.aggregateDeviation!=null?'ms17-kpi-deviation ms17-summary-deviation':'ms17-kpi-deviation')
-    +'</div>'
-    +'<div class="ms17-note ms17-coverage">'+nota+'</div>'
-  +'</div>';
+// FIX 4: lo Storico mostra solo il conteggio delle produzioni trovate.
+// Nessun aggregato di pesi: sommare preparazioni diverse non e'
+// significativo. Gli aggregati restano nel motore MS17a
+// (aggregateHistoryRecords) per analisi future, ma non sono mostrati.
+function renderHistoryCount(count){
+  return'<div class="ms17-summary-head ms17-summary-count">'+count+(count===1?' produzione':' produzioni')+'</div>';
 }
 
 function renderHistoryCard(r){
@@ -4752,7 +4721,7 @@ function renderStoricoProduzioni(){
   if(!res.records.length){
     return wrap(`<div class="prod-empty ms17-empty-filters">Nessuna produzione trovata con questi filtri.</div><div>${reset}</div>`);
   }
-  return wrap(renderHistorySummary(aggregateHistoryRecords(res.records))
+  return wrap(renderHistoryCount(res.records.length)
     +(filtriAttivi?`<div>${reset}</div>`:'')
     +'<div class="pg-list" style="padding:0;gap:10px">'+res.records.map(renderHistoryCard).join('')+'</div>');
 }
