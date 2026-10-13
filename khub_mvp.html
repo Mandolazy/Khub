@@ -3436,16 +3436,24 @@ function findMissingProductionConversions(preparedInput){
 // ══════════════════════════════════════════════════════════
 
 var DECLARED_YIELD_UNIT_MAX_LENGTH=40;
-// Alias riconosciuti come unita' di massa/volume per la resa dichiarata.
-// Qualunque altro testo e' un'unita' contabile (pz, porzioni, teglia 30x40,
-// vasetti, ...), comprese le unita' personalizzate.
-var DECLARED_YIELD_UNIT_ALIASES={
-  g:['g','gr','grammo','grammi'],
-  kg:['kg','chilo','chili','kilo','chilogrammo','chilogrammi'],
-  ml:['ml','millilitro','millilitri'],
-  cl:['cl','centilitro','centilitri'],
-  l:['l','lt','litro','litri'],
+// Unita' di misura riconosciute per la resa dichiarata, con le sole
+// equivalenze metriche esatte (mai fattori medi o stimati). factor = grammi
+// (massa) o millilitri (volume) per 1 unita'. hg e dl esistono solo qui: le
+// tabelle del motore di Produzione restano invariate. Qualunque altro testo
+// e' un'unita' contabile (pz, porzioni, teglia 30x40, vasetti, ...), comprese
+// le unita' personalizzate, che non ricevono mai conversioni.
+var DECLARED_YIELD_MEASURE_UNITS={
+  g:{kind:'mass',factor:1,aliases:['g','gr','grammo','grammi']},
+  hg:{kind:'mass',factor:100,aliases:['hg','etto','etti','ettogrammo','ettogrammi']},
+  kg:{kind:'mass',factor:1000,aliases:['kg','chilo','chili','kilo','chilogrammo','chilogrammi','kilogrammo','kilogrammi']},
+  ml:{kind:'volume',factor:1,aliases:['ml','millilitro','millilitri','cc']},
+  cl:{kind:'volume',factor:10,aliases:['cl','centilitro','centilitri']},
+  dl:{kind:'volume',factor:100,aliases:['dl','decilitro','decilitri']},
+  l:{kind:'volume',factor:1000,aliases:['l','lt','litro','litri']},
 };
+// Unita' di misura non metriche: rifiutate (nessuna conversione inventata,
+// nessun trattamento come pezzi).
+var DECLARED_YIELD_UNSUPPORTED_UNITS=['oz','lb','lbs'];
 
 // Numero da input utente: accetta number o stringa con virgola o punto
 // decimale ("2,5", "30"). Rifiuta separatori delle migliaia ambigui
@@ -3471,19 +3479,27 @@ function normalizeDeclaredYield(qty,unit){
   if(!isFinite(n)||n<=0)return{ok:false,error:'invalid_qty'};
   if(unitText==='')return{ok:false,error:'missing_unit'};
   if(unitText.length>DECLARED_YIELD_UNIT_MAX_LENGTH)return{ok:false,error:'unit_too_long'};
-  return{ok:true,value:{qty:n,unit:unitText}};
+  var cls=classifyYieldUnit(unitText);
+  if(cls.kind==='unsupported')return{ok:false,error:'unsupported_unit'};
+  // Unita' di misura salvate nella forma standard ("KG." -> "kg");
+  // unita' personalizzate salvate come scritte dallo chef.
+  return{ok:true,value:{qty:n,unit:cls.kind==='count'?unitText:cls.unit}};
 }
 
-// Classe dell'unita' di resa: massa (g/kg), volume (ml/cl/l) o contabile.
+// Classe dell'unita' di resa: massa (g/hg/kg), volume (ml/cl/dl/l),
+// non supportata (oz/lb) o contabile (qualunque altro testo).
 function classifyYieldUnit(unit){
-  var u=(typeof unit==='string'?unit:'').trim().toLowerCase().replace(/\.$/,'');
-  for(var canon in DECLARED_YIELD_UNIT_ALIASES){
-    if(!Object.prototype.hasOwnProperty.call(DECLARED_YIELD_UNIT_ALIASES,canon))continue;
-    if(DECLARED_YIELD_UNIT_ALIASES[canon].indexOf(u)===-1)continue;
-    if(sessionScalingUnitFamily(canon)==='mass')return{kind:'mass',unit:canon,toGrams:SESSION_SCALING_MASS_TO_GRAMS[canon]};
-    return{kind:'volume',unit:canon,toMl:SESSION_SCALING_VOLUME_TO_ML[canon]};
+  var text=typeof unit==='string'?unit.replace(/\s+/g,' ').trim():'';
+  var u=text.toLowerCase().replace(/\.$/,'');
+  if(DECLARED_YIELD_UNSUPPORTED_UNITS.indexOf(u)!==-1)return{kind:'unsupported',unit:text};
+  for(var canon in DECLARED_YIELD_MEASURE_UNITS){
+    if(!Object.prototype.hasOwnProperty.call(DECLARED_YIELD_MEASURE_UNITS,canon))continue;
+    var m=DECLARED_YIELD_MEASURE_UNITS[canon];
+    if(m.aliases.indexOf(u)===-1)continue;
+    if(m.kind==='mass')return{kind:'mass',unit:canon,toGrams:m.factor};
+    return{kind:'volume',unit:canon,toMl:m.factor};
   }
-  return{kind:'count',unit:typeof unit==='string'?unit.trim():''};
+  return{kind:'count',unit:text};
 }
 
 // Peso a crudo e finito teorico della formulazione, con le STESSE regole del
@@ -3538,6 +3554,7 @@ function computeFormulationWeights(ingredients,resolveFact){
 function deriveYieldPerUnit(weights,declared){
   if(!declared||typeof declared.qty!=='number'||!(declared.qty>0))return null;
   var cls=classifyYieldUnit(declared.unit);
+  if(cls.kind==='unsupported')return{status:'unsupported_unit',kind:'unsupported'};
   if(!weights||weights.status!=='complete')return{status:'incomplete',kind:cls.kind};
   if(cls.kind==='count'){
     return{status:'complete',kind:'count',unit:declared.unit,rawPerUnit:weights.raw/declared.qty,finishedPerUnit:weights.finished/declared.qty};
@@ -3592,16 +3609,17 @@ function convertIngredientQty(qty,fromUnit,toUnit,ingredientName,resolveFact){
   return{ok:true,qty:n*a.gramsPerUnit/b.gramsPerUnit,usedFacts:usedFacts};
 }
 
-// Forma canonica di una quantita' per la persistenza (da usare SOLO nel
-// punto di salvataggio, mai nei calcoli): le prime 15 cifre significative,
-// cioe' la precisione decimale che un numero JavaScript (IEEE 754 double)
-// rappresenta in modo garantito. Non e' un limite di decimali: 0,000123456 e
-// 12345,6789 restano identici; elimina solo i residui binari (es.
-// 7,000000000000001 -> 7), cosi' andata e ritorno ripetuti non accumulano
-// deriva. Idempotente.
-function canonicalQty(x){
-  if(typeof x!=='number'||!isFinite(x))return x;
-  return Number(x.toPrecision(15));
+// Visualizzazione ordinaria di una quantita' (solo testo da leggere: i campi
+// modificabili mostrano sempre il valore completo). Al massimo 2 decimali,
+// senza zeri finali inutili e senza separatore delle migliaia. Un valore
+// diverso da zero che con 2 decimali diventerebbe 0 viene mostrato con 2
+// cifre significative (0,0042), mai come 0. Non modifica il valore.
+function formatQtyDisplay(value){
+  var n=typeof value==='string'?parseLocaleNumber(value):value;
+  if(typeof n!=='number'||!isFinite(n))return'—';
+  if(n===0)return'0';
+  var opts=Math.abs(n)<0.005?{maximumSignificantDigits:2,useGrouping:false}:{maximumFractionDigits:2,useGrouping:false};
+  return n.toLocaleString('it-IT',opts);
 }
 
 async function confirmMandaInProduzione(){

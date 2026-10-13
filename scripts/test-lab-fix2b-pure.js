@@ -40,10 +40,11 @@ const SRC = [
   'function parseLocaleNumber(value)', 'function normalizeDeclaredYield(qty,unit)', 'function classifyYieldUnit(unit)',
   'function computeFormulationWeights(ingredients,resolveFact)', 'function deriveYieldPerUnit(weights,declared)',
   'function ingredientGramsPerUnit(unit,ingredientName,resolver)', 'function convertIngredientQty(qty,fromUnit,toUnit,ingredientName,resolveFact)',
-  'function canonicalQty(x)',
+  'function formatQtyDisplay(value)',
 ].map(extractFunction).concat(html.match(/var SESSION_SCALING_[A-Z_]+=\{[^}]*\};/g), [
   extractVar(/var DECLARED_YIELD_UNIT_MAX_LENGTH=\d+;/),
-  extractVar(/var DECLARED_YIELD_UNIT_ALIASES=\{[\s\S]*?\n\};/),
+  extractVar(/var DECLARED_YIELD_MEASURE_UNITS=\{[\s\S]*?\n\};/),
+  extractVar(/var DECLARED_YIELD_UNSUPPORTED_UNITS=\[[^\]]*\];/),
 ]).join('\n');
 
 // Stato sintetico delle conversioni (stesse strutture caricate da loadFromSupabase).
@@ -64,11 +65,14 @@ function makeS() {
 }
 const S = makeS();
 const api = new Function('S', SRC + `; return { parseLocaleNumber, normalizeDeclaredYield, classifyYieldUnit, computeFormulationWeights,
-  deriveYieldPerUnit, convertIngredientQty, canonicalQty, buildPreparedInputDaRicettaAttiva, computeSessionScaling };`)(S);
+  deriveYieldPerUnit, convertIngredientQty, formatQtyDisplay, buildPreparedInputDaRicettaAttiva, computeSessionScaling,
+  SESSION_SCALING_MASS_TO_GRAMS, SESSION_SCALING_VOLUME_TO_ML, DECLARED_YIELD_MEASURE_UNITS };`)(S);
 
 const deepFreeze = o => { if (o && typeof o === 'object' && !Object.isFrozen(o)) { Object.freeze(o); Object.values(o).forEach(deepFreeze); } return o; };
 const ing = (id, name, qty, unit, y = null, extra = {}) => ({ id, name, qty, unit, estimatedYieldPct: y, ...extra });
 const near = (a, b, eps = 1e-9) => Math.abs(a - b) <= eps;
+// Scarto relativo al massimo di 4 unita' sull'ultima cifra binaria (ulp).
+const withinUlps = (a, b) => Math.abs(a - b) <= 4 * Number.EPSILON * Math.abs(b);
 const BISCOTTI = [ing('a', 'Farina', 500, 'g', 70), ing('b', 'Burro', 0.25, 'kg', 70), ing('c', 'Zucchero', 150, 'g', 70)];
 
 console.log('I1 — pesi della formulazione');
@@ -191,6 +195,39 @@ test('Y4. normalizeDeclaredYield: validi, non dichiarata, rifiuti', () => {
   assert.strictEqual(err(30, 5), 'invalid_unit');
 });
 
+test('Y5. equivalenze metriche esatte, unita\' non metriche rifiutate, personalizzate senza conversioni', () => {
+  const cls = u => api.classifyYieldUnit(u);
+  // stesse equivalenze del motore per le unita' in comune
+  Object.keys(api.SESSION_SCALING_MASS_TO_GRAMS).forEach(u => assert.strictEqual(api.DECLARED_YIELD_MEASURE_UNITS[u].factor, api.SESSION_SCALING_MASS_TO_GRAMS[u], u));
+  Object.keys(api.SESSION_SCALING_VOLUME_TO_ML).forEach(u => assert.strictEqual(api.DECLARED_YIELD_MEASURE_UNITS[u].factor, api.SESSION_SCALING_VOLUME_TO_ML[u], u));
+  [['hg', 100], ['Etto', 100], ['etti', 100], ['ettogrammi', 100], ['kilogrammi', 1000], ['Kilogrammo', 1000], ['chilogrammi', 1000]]
+    .forEach(([u, g]) => { assert.strictEqual(cls(u).kind, 'mass', u); assert.strictEqual(cls(u).toGrams, g, u); });
+  [['dl', 100], ['decilitri', 100], ['Decilitro', 100], ['cc', 1], ['CC.', 1]]
+    .forEach(([u, ml]) => { assert.strictEqual(cls(u).kind, 'volume', u); assert.strictEqual(cls(u).toMl, ml, u); });
+  // unita' non metriche: rifiutate, mai trattate come pezzi
+  ['oz', 'OZ.', 'lb', 'lbs'].forEach(u => {
+    assert.strictEqual(cls(u).kind, 'unsupported', u);
+    assert.strictEqual(api.normalizeDeclaredYield(10, u).error, 'unsupported_unit', u);
+  });
+  assert.deepStrictEqual(api.deriveYieldPerUnit(api.computeFormulationWeights(BISCOTTI), { qty: 10, unit: 'oz' }), { status: 'unsupported_unit', kind: 'unsupported' });
+  // unita' di misura salvate in forma standard, personalizzate come scritte
+  assert.deepStrictEqual(api.normalizeDeclaredYield('6', 'Etti').value, { qty: 6, unit: 'hg' });
+  assert.deepStrictEqual(api.normalizeDeclaredYield('2', 'KG.').value, { qty: 2, unit: 'kg' });
+  assert.deepStrictEqual(api.normalizeDeclaredYield('3', 'Decilitri').value, { qty: 3, unit: 'dl' });
+  assert.deepStrictEqual(api.normalizeDeclaredYield('4', ' Vaschette  da 500 g ').value, { qty: 4, unit: 'Vaschette da 500 g' });
+  assert.deepStrictEqual(api.normalizeDeclaredYield('2', 'Teglia 30x40').value, { qty: 2, unit: 'Teglia 30x40' });
+  // calcoli: hg con l'equivalenza esatta; personalizzata senza alcuna conversione
+  const w = api.computeFormulationWeights(BISCOTTI);
+  const hg = api.deriveYieldPerUnit(w, api.normalizeDeclaredYield(6, 'hg').value);
+  assert.strictEqual(hg.kind, 'mass'); assert.strictEqual(hg.declaredGrams, 600); assert.ok(near(hg.deltaGrams, -30));
+  const dl = api.deriveYieldPerUnit(w, api.normalizeDeclaredYield(5, 'dl').value);
+  assert.strictEqual(dl.kind, 'volume'); assert.strictEqual(dl.declaredMl, 500);
+  const vasch = api.deriveYieldPerUnit(w, api.normalizeDeclaredYield(4, 'vaschette da 500 g').value);
+  assert.strictEqual(vasch.kind, 'count');
+  assert.ok(!('declaredGrams' in vasch) && !('declaredMl' in vasch), 'nessun peso ricavato dal testo dell\'unita\' personalizzata');
+  assert.ok(near(vasch.finishedPerUnit, 157.5));
+});
+
 console.log('I1 — conversioni reversibili');
 const conv = (q, a, b, name) => api.convertIngredientQty(q, a, b, name);
 
@@ -213,7 +250,7 @@ test('C2. pezzi <-> g con la stessa fact, in entrambi i versi; peso di riferimen
   const c = conv(7, 'n', 'g', 'Uova confermate');
   assert.ok(near(c.qty, 387.59, 1e-9));
   assert.deepStrictEqual(c.usedFacts, [{ sourceType: 'chef_confirmed', factId: 'icU' }]);
-  assert.strictEqual(api.canonicalQty(conv(c.qty, 'g', 'n', 'Uova confermate').qty), 7);
+  assert.ok(withinUlps(conv(c.qty, 'g', 'n', 'Uova confermate').qty, 7));
 });
 
 test('C3. ml / l / tbsp / tsp <-> g solo con fact dell\'ingrediente', () => {
@@ -248,30 +285,91 @@ test('C6. input non validi e stessa unita\'', () => {
 
 console.log('I1 — precisione: andata e ritorno ripetuti');
 
-test('R1. 1000 andate e ritorni g <-> kg e n <-> g: con canonicalQty al salvataggio nessuna deriva', () => {
-  const values = [0.37, 3, 1234, 387.59, 0.001, 98765.4321];
-  values.forEach(v0 => {
-    let v = v0;
-    for (let k = 0; k < 1000; k++) v = api.canonicalQty(conv(api.canonicalQty(conv(v, 'g', 'kg', 'X').qty), 'kg', 'g', 'X').qty);
-    assert.strictEqual(v, v0, `g/kg ${v0} -> ${v}`);
+test('R1. precisione originale conservata: nessun valore arrotondato o troncato', () => {
+  assert.strictEqual(api.normalizeDeclaredYield('0,123456789012345', 'pz').value.qty, 0.123456789012345);
+  assert.strictEqual(api.normalizeDeclaredYield('12345,678901234', 'g').value.qty, 12345.678901234);
+  assert.strictEqual(conv('0,123456789012345', 'pz', 'pz', 'X').qty, 0.123456789012345);
+  const w = api.computeFormulationWeights([ing('a', 'Farina', 1 / 3, 'kg'), ing('b', 'Sale', 0.1 + 0.2, 'g', 33.3333)]);
+  assert.strictEqual(w.byId.a.rawGrams, (1 / 3) * 1000);
+  assert.strictEqual(w.byId.b.rawGrams, 0.1 + 0.2, 'nessuna pulizia dei residui binari nei calcoli');
+  assert.strictEqual(w.byId.b.finishedGrams, (0.1 + 0.2) * (33.3333 / 100));
+  const y = api.deriveYieldPerUnit(w, { qty: 7, unit: 'pz' });
+  assert.strictEqual(y.rawPerUnit, w.raw / 7);
+});
+
+test('R2. 1000 andate e ritorni concatenati g<->kg, n<->g, ml<->g: scarto entro 4 ulp, non cresce', () => {
+  const cases = [[387.59, 'g', 'kg', 'X'], [0.37, 'g', 'kg', 'X'], [98765.4321, 'g', 'kg', 'X'], [7, 'n', 'g', 'Uova confermate'], [3, 'n', 'g', 'Uova'], [250, 'ml', 'g', 'Latte'], [0.001, 'ml', 'g', 'Latte'], [13, 'tbsp', 'g', 'Zucchero']];
+  cases.forEach(([v0, a, b, name]) => {
+    let v = v0, after10 = null;
+    for (let k = 0; k < 1000; k++) { v = conv(conv(v, a, b, name).qty, b, a, name).qty; if (k === 9) after10 = v; }
+    assert.ok(withinUlps(v, v0), `${name} ${a}<->${b}: ${v0} -> ${v}`);
+    assert.ok(Math.abs(v - v0) <= Math.abs(after10 - v0) + 2 * Number.EPSILON * v0, `${name}: lo scarto cresce dopo 10 cicli`);
   });
-  let n = 7;
-  for (let k = 0; k < 1000; k++) n = api.canonicalQty(conv(api.canonicalQty(conv(n, 'n', 'g', 'Uova confermate').qty), 'g', 'n', 'Uova confermate').qty);
-  assert.strictEqual(n, 7);
 });
 
-test('R2. senza canonicalQty la deriva resta sotto 1e-12 relativo (solo residui binari)', () => {
-  let v = 387.59, n = 7;
-  for (let k = 0; k < 1000; k++) { v = conv(conv(v, 'g', 'kg', 'X').qty, 'kg', 'g', 'X').qty; n = conv(conv(n, 'n', 'g', 'Uova confermate').qty, 'g', 'n', 'Uova confermate').qty; }
-  assert.ok(Math.abs(v - 387.59) / 387.59 < 1e-12, String(v));
-  assert.ok(Math.abs(n - 7) / 7 < 1e-12, String(n));
+test('R3. salvataggio e ricarica a precisione piena: nessuna perdita (JSON -> numeric -> parseFloat)', () => {
+  const values = [conv(7, 'n', 'g', 'Uova confermate').qty, conv(1, 'g', 'ml', 'Latte').qty, 0.1 + 0.2, 1 / 3, 1e-9, 123456.789012345, conv(3, 'n', 'ml', 'Uova confermate').qty];
+  values.forEach(v => {
+    assert.strictEqual(parseFloat(JSON.parse(JSON.stringify({ qty: v })).qty.toString()), v, String(v));
+    assert.strictEqual(parseFloat(String(v)), v, String(v));
+  });
 });
 
-test('R3. canonicalQty: idempotente, non tronca decimali significativi', () => {
-  [0.000123456, 12345.6789, 0.37, 1 / 3, 1e-9, 123456789012345].forEach(x => { const c = api.canonicalQty(x); assert.strictEqual(api.canonicalQty(c), c); assert.ok(Math.abs(c - x) / Math.abs(x) < 1e-14); });
-  assert.strictEqual(api.canonicalQty(7.000000000000001), 7);
-  assert.strictEqual(api.canonicalQty(0.1 + 0.2), 0.3);
-  assert.strictEqual(api.canonicalQty(0.000123456), 0.000123456);
+test('R4. canonicalQty eliminata: nessun arrotondamento automatico disponibile nel codice', () => {
+  assert.ok(!/canonicalQty/.test(html), 'canonicalQty non deve esistere in khub_mvp.html');
+  assert.ok(!/toPrecision\(/.test(html.slice(html.indexOf('LAB FIX 2B — I1'), html.indexOf('async function confirmMandaInProduzione'))), 'nessun toPrecision nelle funzioni I1');
+});
+
+console.log('I1 — quantita\' molto piccole (C5)');
+
+test('S1. quantita\' minime convertite: mai zero, anche dopo 1000 andate e ritorni', () => {
+  [[0.0004, 'g', 'kg', 'X'], [1e-9, 'kg', 'g', 'X'], [1e-7, 'g', 'n', 'Uova'], [1e-6, 'ml', 'l', 'Acqua'], [1e-9, 'ml', 'g', 'Latte'], [5e-324, 'kg', 'g', 'X']].forEach(([q, a, b, name]) => {
+    const r = conv(q, a, b, name);
+    assert.ok(r.ok && r.qty > 0, `${q} ${a}->${b} = ${r.qty}`);
+    const back = conv(r.qty, b, a, name).qty;
+    assert.ok(back > 0, `ritorno ${back}`);
+  });
+  let v = 1e-9;
+  for (let k = 0; k < 1000; k++) v = conv(conv(v, 'g', 'kg', 'X').qty, 'kg', 'g', 'X').qty;
+  assert.ok(v > 0 && withinUlps(v, 1e-9), String(v));
+  const w = api.computeFormulationWeights([ing('a', 'Zafferano', 0.0001, 'g'), ing('b', 'Lievito', 0.000002, 'kg', 50)]);
+  assert.ok(w.byId.a.rawGrams === 0.0001 && w.byId.b.rawGrams > 0 && w.byId.b.finishedGrams > 0);
+});
+
+test('S2. resa dichiarata 0,0000001 accettata e usata senza azzeramenti', () => {
+  const d = api.normalizeDeclaredYield('0,0000001', 'pz');
+  assert.deepStrictEqual(d, { ok: true, value: { qty: 1e-7, unit: 'pz' } });
+  const y = api.deriveYieldPerUnit(api.computeFormulationWeights(BISCOTTI), d.value);
+  assert.ok(isFinite(y.rawPerUnit) && y.rawPerUnit > 0 && near(y.rawPerUnit / 9e9, 1, 1e-12));
+  assert.strictEqual(api.normalizeDeclaredYield('0,0000001', 'kg').value.qty, 1e-7);
+});
+
+console.log('I1 — visualizzazione (C4)');
+
+test('F1. massimo 2 decimali, zeri finali eliminati, nessun separatore delle migliaia', () => {
+  const f = api.formatQtyDisplay;
+  [[2.5, '2,5'], [2.50, '2,5'], [3, '3'], [3.0001, '3'], [0.333333, '0,33'], [387.59, '387,59'], [1.999, '2'], [1234.5, '1234,5'],
+   [12345678, '12345678'], [1000000.25, '1000000,25'], [0.01, '0,01'], [0.005, '0,01'], [0.1 + 0.2, '0,3'], [-2.456, '-2,46'], [0, '0'], [-0, '0'],
+   ['0.30000000000000004', '0,3'], ['2,50', '2,5'], [null, '—'], [undefined, '—'], [NaN, '—'], [Infinity, '—'], ['abc', '—']]
+    .forEach(([v, out]) => assert.strictEqual(f(v), out, `${v} -> ${f(v)}`));
+});
+
+test('F2. valori che con 2 decimali diventerebbero zero: precisione sufficiente, mai "0"', () => {
+  const f = api.formatQtyDisplay;
+  [[0.0042, '0,0042'], [0.00426, '0,0043'], [0.004, '0,004'], [0.0049999, '0,005'], [0.001, '0,001'], [1e-9, '0,000000001'], [-0.0042, '-0,0042']]
+    .forEach(([v, out]) => assert.strictEqual(f(v), out, `${v} -> ${f(v)}`));
+  for (let e = -12; e <= 2; e += 0.25) {
+    const v = Math.pow(10, e);
+    const s = f(v);
+    assert.ok(s !== '0' && parseFloat(s.replace(',', '.')) > 0, `${v} -> ${s}`);
+    assert.ok(!/e/i.test(s), `notazione esponenziale: ${s}`);
+  }
+});
+
+test('F3. la visualizzazione non modifica il valore', () => {
+  const ingr = deepFreeze({ qty: 0.30000000000000004 });
+  assert.strictEqual(api.formatQtyDisplay(ingr.qty), '0,3');
+  assert.strictEqual(ingr.qty, 0.30000000000000004);
 });
 
 console.log('I1 — nessuna mutazione degli input');
