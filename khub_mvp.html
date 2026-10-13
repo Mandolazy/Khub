@@ -3424,6 +3424,186 @@ function findMissingProductionConversions(preparedInput){
   return missing;
 }
 
+// ══════════════════════════════════════════════════════════
+// LAB FIX 2B — I1: funzioni pure per resa dichiarata, pesi della
+// formulazione e conversioni reversibili. Nessuna e' ancora collegata
+// all'interfaccia o ai salvataggi. Non leggono S.recipes, non mutano
+// l'input, non persistono nulla e non arrotondano: l'arrotondamento resta
+// solo in visualizzazione. Riusano le primitive del motore di Produzione
+// (resolveSessionScalingConversionToGrams, resolveKnownProductionConversionFact,
+// tabelle SESSION_SCALING_*) senza modificarle e senza mai costruire un
+// target di Produzione.
+// ══════════════════════════════════════════════════════════
+
+var DECLARED_YIELD_UNIT_MAX_LENGTH=40;
+// Alias riconosciuti come unita' di massa/volume per la resa dichiarata.
+// Qualunque altro testo e' un'unita' contabile (pz, porzioni, teglia 30x40,
+// vasetti, ...), comprese le unita' personalizzate.
+var DECLARED_YIELD_UNIT_ALIASES={
+  g:['g','gr','grammo','grammi'],
+  kg:['kg','chilo','chili','kilo','chilogrammo','chilogrammi'],
+  ml:['ml','millilitro','millilitri'],
+  cl:['cl','centilitro','centilitri'],
+  l:['l','lt','litro','litri'],
+};
+
+// Numero da input utente: accetta number o stringa con virgola o punto
+// decimale ("2,5", "30"). Rifiuta separatori delle migliaia ambigui
+// ("1.234,5"), testo, vuoto, infinito: in quei casi restituisce NaN.
+function parseLocaleNumber(value){
+  if(typeof value==='number')return isFinite(value)?value:NaN;
+  if(typeof value!=='string')return NaN;
+  var s=value.trim();
+  if(!/^[+-]?(\d+([.,]\d*)?|[.,]\d+)$/.test(s))return NaN;
+  return Number(s.replace(',','.'));
+}
+
+// Resa dichiarata: {ok:true,value:null} se non dichiarata (quantita' e unita'
+// vuote), {ok:true,value:{qty,unit}} se valida, {ok:false,error} altrimenti.
+// Mai un valore predefinito.
+function normalizeDeclaredYield(qty,unit){
+  if(unit!=null&&typeof unit!=='string')return{ok:false,error:'invalid_unit'};
+  var unitText=unit==null?'':unit.replace(/\s+/g,' ').trim();
+  var qtyEmpty=qty==null||(typeof qty==='string'&&qty.trim()==='');
+  if(qtyEmpty&&unitText==='')return{ok:true,value:null};
+  if(qtyEmpty)return{ok:false,error:'missing_qty'};
+  var n=parseLocaleNumber(qty);
+  if(!isFinite(n)||n<=0)return{ok:false,error:'invalid_qty'};
+  if(unitText==='')return{ok:false,error:'missing_unit'};
+  if(unitText.length>DECLARED_YIELD_UNIT_MAX_LENGTH)return{ok:false,error:'unit_too_long'};
+  return{ok:true,value:{qty:n,unit:unitText}};
+}
+
+// Classe dell'unita' di resa: massa (g/kg), volume (ml/cl/l) o contabile.
+function classifyYieldUnit(unit){
+  var u=(typeof unit==='string'?unit:'').trim().toLowerCase().replace(/\.$/,'');
+  for(var canon in DECLARED_YIELD_UNIT_ALIASES){
+    if(!Object.prototype.hasOwnProperty.call(DECLARED_YIELD_UNIT_ALIASES,canon))continue;
+    if(DECLARED_YIELD_UNIT_ALIASES[canon].indexOf(u)===-1)continue;
+    if(sessionScalingUnitFamily(canon)==='mass')return{kind:'mass',unit:canon,toGrams:SESSION_SCALING_MASS_TO_GRAMS[canon]};
+    return{kind:'volume',unit:canon,toMl:SESSION_SCALING_VOLUME_TO_ML[canon]};
+  }
+  return{kind:'count',unit:typeof unit==='string'?unit.trim():''};
+}
+
+// Peso a crudo e finito teorico della formulazione, con le STESSE regole del
+// motore di Produzione (lettura qty come buildPreparedInputDaRicettaAttiva,
+// conversioni via resolveSessionScalingConversionToGrams, resa come in
+// computeSessionScaling: null = 100%, 0 ammesso, negativa/non numerica non
+// valida) ma senza target e senza fattore di scala.
+// resolveFact(nomeNormalizzato,unita') -> conversion fact o null; predefinito
+// resolveKnownProductionConversionFact (fact confermate + pesi di riferimento,
+// questi ultimi marcati 'reference_data').
+// Esito: {status:'empty'} | {status:'invalid',invalid,missing}
+//   | {status:'incomplete',missing:[{id,name,unit,askUnit}]}
+//   | {status:'complete',raw,finished,byId,referenceDataUsed}
+function computeFormulationWeights(ingredients,resolveFact){
+  var list=Array.isArray(ingredients)?ingredients:[];
+  if(!list.length)return{status:'empty'};
+  var resolver=typeof resolveFact==='function'?resolveFact:resolveKnownProductionConversionFact;
+  var missing=[],invalid=[],referenceDataUsed=[],byId={},raw=0,finished=0;
+  list.forEach(function(ing,idx){
+    if(!ing||typeof ing!=='object'){invalid.push({index:idx,name:'#'+idx,reason:'invalid_ingredient'});return;}
+    var key=ing.id!=null?ing.id:idx;
+    var name=ing.name!=null?ing.name:'';
+    var qty=cnum(ing.qty);
+    if(qty<0){invalid.push({id:key,name:name,reason:'negative_qty'});return;}
+    if(typeof ing.unit!=='string'||!ing.unit){invalid.push({id:key,name:name,reason:'missing_unit'});return;}
+    var yieldPct=ing.estimatedYieldPct!=null?ing.estimatedYieldPct:null;
+    var effectiveYieldValue=1;
+    if(yieldPct!==null){
+      if(typeof yieldPct!=='number'||!isFinite(yieldPct)||yieldPct<0){invalid.push({id:key,name:name,reason:'invalid_yield'});return;}
+      effectiveYieldValue=yieldPct/100;
+    }
+    var fact=sessionScalingUnitFamily(ing.unit)==='mass'?null:(resolver(normalizeIngredientName(name),ing.unit)||null);
+    var conv=resolveSessionScalingConversionToGrams(ing.unit,fact);
+    if(conv.error==='missing_conversion'){missing.push({id:key,name:name,unit:ing.unit,askUnit:chooseConversionAskUnit(ing.unit)});return;}
+    if(conv.error){invalid.push({id:key,name:name,reason:conv.error});return;}
+    var rawGrams=qty*conv.conversionFactorToBase;
+    var finishedGrams=rawGrams*effectiveYieldValue;
+    byId[key]={rawGrams:rawGrams,finishedGrams:finishedGrams,conversionOrigin:conv.conversionOrigin,conversionSourceType:conv.conversionSourceType};
+    if(conv.conversionSourceType==='reference_data')referenceDataUsed.push({id:key,name:name,unit:ing.unit});
+    raw+=rawGrams;
+    finished+=finishedGrams;
+  });
+  if(invalid.length)return{status:'invalid',invalid:invalid,missing:missing};
+  if(missing.length)return{status:'incomplete',missing:missing};
+  return{status:'complete',raw:raw,finished:finished,byId:byId,referenceDataUsed:referenceDataUsed};
+}
+
+// Valori per unita' di resa, derivati e mai salvati. declared = valore di
+// normalizeDeclaredYield. Contabile: crudo e finito per unita'. Massa:
+// confronto tra resa dichiarata e finito teorico. Volume: nessun confronto
+// (servirebbe una conversione che non esiste).
+function deriveYieldPerUnit(weights,declared){
+  if(!declared||typeof declared.qty!=='number'||!(declared.qty>0))return null;
+  var cls=classifyYieldUnit(declared.unit);
+  if(!weights||weights.status!=='complete')return{status:'incomplete',kind:cls.kind};
+  if(cls.kind==='count'){
+    return{status:'complete',kind:'count',unit:declared.unit,rawPerUnit:weights.raw/declared.qty,finishedPerUnit:weights.finished/declared.qty};
+  }
+  if(cls.kind==='mass'){
+    var declaredGrams=declared.qty*cls.toGrams;
+    return{status:'complete',kind:'mass',declaredGrams:declaredGrams,rawGrams:weights.raw,finishedGrams:weights.finished,deltaGrams:declaredGrams-weights.finished};
+  }
+  return{status:'complete',kind:'volume',declaredMl:declared.qty*cls.toMl,rawGrams:weights.raw,finishedGrams:weights.finished};
+}
+
+// Grammi per 1 unita' di `unit` per un ingrediente: massa generica, oppure
+// una conversion fact X->g (mai una fact inversa, mai un valore generico).
+function ingredientGramsPerUnit(unit,ingredientName,resolver){
+  var fact=sessionScalingUnitFamily(unit)==='mass'?null:(resolver(normalizeIngredientName(ingredientName),unit)||null);
+  var conv=resolveSessionScalingConversionToGrams(unit,fact);
+  if(conv.error)return{error:conv.error,unit:unit,askUnit:chooseConversionAskUnit(unit)};
+  return{gramsPerUnit:conv.conversionFactorToBase,origin:conv.conversionOrigin,sourceType:conv.conversionSourceType,factId:conv.conversionFactId};
+}
+
+// Conversione della quantita' di un ingrediente tra due unita', senza
+// arrotondamenti. Stessa famiglia (g<->kg, ml<->cl<->l): fattore fisso.
+// Altrimenti passa dai grammi con le fact X->g dell'ingrediente: andata
+// qty x fattore, ritorno qty / fattore (la stessa fact, quindi reversibile).
+// Fact mancante: {ok:false,error:'missing_conversion',needs:[{unit,askUnit}]},
+// mai un cambio della sola etichetta. usedFacts riporta le fact usate, con
+// sourceType ('reference_data' = peso di riferimento non confermato).
+function convertIngredientQty(qty,fromUnit,toUnit,ingredientName,resolveFact){
+  var n=parseLocaleNumber(qty);
+  if(!isFinite(n)||n<0)return{ok:false,error:'invalid_qty'};
+  if(typeof fromUnit!=='string'||!fromUnit||typeof toUnit!=='string'||!toUnit)return{ok:false,error:'invalid_unit'};
+  if(fromUnit===toUnit)return{ok:true,qty:n,usedFacts:[]};
+  var famFrom=sessionScalingUnitFamily(fromUnit),famTo=sessionScalingUnitFamily(toUnit);
+  if(famFrom!=null&&famFrom===famTo){
+    var table=sessionScalingGenericFamilyTable(famFrom);
+    return{ok:true,qty:n*table[fromUnit]/table[toUnit],usedFacts:[]};
+  }
+  var resolver=typeof resolveFact==='function'?resolveFact:resolveKnownProductionConversionFact;
+  var a=ingredientGramsPerUnit(fromUnit,ingredientName,resolver);
+  var b=ingredientGramsPerUnit(toUnit,ingredientName,resolver);
+  var needs=[];
+  [a,b].forEach(function(x){
+    if(x.error==='missing_conversion')needs.push({unit:x.unit,askUnit:x.askUnit});
+  });
+  if(a.error&&a.error!=='missing_conversion')return{ok:false,error:a.error,unit:fromUnit};
+  if(b.error&&b.error!=='missing_conversion')return{ok:false,error:b.error,unit:toUnit};
+  if(needs.length)return{ok:false,error:'missing_conversion',needs:needs};
+  var usedFacts=[];
+  [a,b].forEach(function(x){
+    if(x.origin==='ingredient_conversion_fact')usedFacts.push({sourceType:x.sourceType,factId:x.factId});
+  });
+  return{ok:true,qty:n*a.gramsPerUnit/b.gramsPerUnit,usedFacts:usedFacts};
+}
+
+// Forma canonica di una quantita' per la persistenza (da usare SOLO nel
+// punto di salvataggio, mai nei calcoli): le prime 15 cifre significative,
+// cioe' la precisione decimale che un numero JavaScript (IEEE 754 double)
+// rappresenta in modo garantito. Non e' un limite di decimali: 0,000123456 e
+// 12345,6789 restano identici; elimina solo i residui binari (es.
+// 7,000000000000001 -> 7), cosi' andata e ritorno ripetuti non accumulano
+// deriva. Idempotente.
+function canonicalQty(x){
+  if(typeof x!=='number'||!isFinite(x))return x;
+  return Number(x.toPrecision(15));
+}
+
 async function confirmMandaInProduzione(){
   var p=S.pendingMandaInProduzione;
   if(!p||p.loading)return;
