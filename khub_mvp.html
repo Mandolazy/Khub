@@ -1420,6 +1420,47 @@ let _knownIngredientIdsByVariant={};
 // se la sua firma e' cambiata: modificare/salvare una bozza LAB non riscrive
 // piu' le altre versioni della Scheda. Le transizioni esplicite (Rendi
 // attiva, Valida, ritiro, ...) cambiano la variante e quindi la inviano.
+// ══ LAB FIX 2B — I4: persistenza della resa dichiarata ══
+// variants.declared_yield_qty / declared_yield_unit appartengono alla singola
+// versione della Ricetta, indipendenti dall'obiettivo di Produzione
+// (portions_count, grams_per_portion). In memoria: declaredYieldQty /
+// declaredYieldUnit con il valore GREZZO del DB (numero o stringa numerica,
+// testo dell'unita' come scritto), riscritto identico: nessuna
+// normalizzazione, nessuna correzione dei dati storici non validi, nessuna
+// conversione. Se le colonne non arrivano al caricamento (DB senza la
+// migrazione 0011) i campi restano assenti e non vengono mai inviati, cosi'
+// il salvataggio non fallisce e non azzera nulla.
+function declaredYieldFromRow(row){
+  if(!row||(!('declared_yield_qty' in row)&&!('declared_yield_unit' in row)))return{};
+  return{
+    declaredYieldQty:row.declared_yield_qty!==undefined?row.declared_yield_qty:null,
+    declaredYieldUnit:row.declared_yield_unit!==undefined?row.declared_yield_unit:null,
+  };
+}
+function copyDeclaredYield(src){
+  if(!src||(src.declaredYieldQty===undefined&&src.declaredYieldUnit===undefined))return{};
+  return{
+    declaredYieldQty:src.declaredYieldQty!==undefined?src.declaredYieldQty:null,
+    declaredYieldUnit:src.declaredYieldUnit!==undefined?src.declaredYieldUnit:null,
+  };
+}
+function declaredYieldPayload(v){
+  var c=copyDeclaredYield(v);
+  if(!('declaredYieldQty' in c))return{};
+  return{declared_yield_qty:c.declaredYieldQty,declared_yield_unit:c.declaredYieldUnit};
+}
+// Stato della resa dichiarata di una versione, per chi la legge (I5):
+// {status:'absent'} | {status:'valid',value:{qty,unit}} |
+// {status:'invalid',error,raw:{qty,unit}}. Il dato salvato non cambia.
+function declaredYieldState(v){
+  var q=v?v.declaredYieldQty:undefined,u=v?v.declaredYieldUnit:undefined;
+  if(q==null&&u==null)return{status:'absent'};
+  var r=normalizeDeclaredYield(q,u);
+  if(r.ok&&r.value===null)return{status:'absent'};
+  if(r.ok)return{status:'valid',value:r.value};
+  return{status:'invalid',error:r.error,raw:{qty:q,unit:u}};
+}
+
 let _persistedValidatedSig={};
 function buildValidatedVariantPayload(recipeId,vv){
   const structuredStepsVal=getStructuredSteps(vv.steps,vv.stepsV2);
@@ -1446,6 +1487,7 @@ function buildValidatedVariantPayload(recipeId,vv){
     origin_variant_id:vv.originVariantId||null, // D3: sopravvive alle transizioni di lifecycle
     intention_initial:vv.intentionInitial||null,intention_current:vv.intentionCurrent||null,
     criteria_initial:vv.criteriaInitial||null,criteria_current:vv.criteriaCurrent||null,
+    ...declaredYieldPayload(vv), // I4: valore grezzo riscritto identico, solo se noto
   };
   // LAB FIX 1.1: qualsiasi id esistente non vuoto viene conservato (anche
   // se corto). Un id nuovo nasce solo se manca davvero, e viene assegnato
@@ -1603,6 +1645,7 @@ async function loadFromSupabase(){
         gramsPerPortion:v.grams_per_portion||200, // mantenuto per compatibilità
         portionSize:v.grams_per_portion||200,      // Step 1: nuovo nome semantico
         portionUnit:v.portion_unit||'g',           // Step 1: unità porzione
+        ...declaredYieldFromRow(v),                // I4: resa dichiarata, valore grezzo
         ingredients:(data.ingredients||[]).filter(i=>i.variant_id===v.id).sort((a,b)=>a.sort_order-b.sort_order).map(i=>({
           id:i.id,name:i.name,qty:parseFloat(i.qty)||0,unit:i.unit||'g',
           isSubRecipe:i.is_sub_recipe||false,subRecipeId:i.sub_recipe_id||null,
@@ -1635,6 +1678,7 @@ async function loadFromSupabase(){
         gramsPerPortion:v.grams_per_portion||200, // mantenuto per compatibilità
         portionSize:v.grams_per_portion||200,      // Step 1: nuovo nome semantico
         portionUnit:v.portion_unit||'g',           // Step 1: unità porzione
+        ...declaredYieldFromRow(v),                // I4: resa dichiarata, valore grezzo
         ingredients:(data.ingredients||[]).filter(i=>i.variant_id===v.id).sort((a,b)=>a.sort_order-b.sort_order).map(i=>({
           id:i.id,name:i.name,qty:parseFloat(i.qty)||0,unit:i.unit||'g',
           isSubRecipe:i.is_sub_recipe||false,subRecipeId:i.sub_recipe_id||null, // LAB FIX 1: mattoncino letto anche per le validate
@@ -1852,6 +1896,7 @@ async function saveToSupabase(recipe){
         active:v.active===true,
         intention_initial:v.intentionInitial||null,intention_current:v.intentionCurrent||null,
         criteria_initial:v.criteriaInitial||null,criteria_current:v.criteriaCurrent||null,
+        ...declaredYieldPayload(v), // I4: valore grezzo riscritto identico, solo se noto
       });
       (v.ingredients||[]).forEach((ing,idx)=>{
         allIngredients.push({
@@ -2260,6 +2305,7 @@ function creaBozzaDaSorgente(recipeId,attiva){
     mediaUrl:null,videoUrl:null,active:false,
     originVariantId:attiva?attiva.id:null, // memoria certa: da quale Ricetta attiva è nata (o esplicitamente nessuna)
   };
+  Object.assign(nuovaBozza,copyDeclaredYield(attiva)); // I4: la resa della Ricetta di partenza
   upRec(recipeId,function(r){
     return Object.assign({},r,{labVersions:[nuovaBozza],currentLabIdx:0});
   });
@@ -2312,6 +2358,7 @@ function duplicaVersioneLAB(recipeId){
     active:false,
     originVariantId:(v.originVariantId!==undefined?v.originVariantId:null), // stessa origine della bozza da cui si continua a esplorare
   };
+  Object.assign(newV,copyDeclaredYield(v)); // I4
   upRec(recipeId,function(r){
     var newVersions=[...r.labVersions,newV];
     return Object.assign({},r,{labVersions:newVersions,currentLabIdx:newVersions.length-1});
@@ -2348,6 +2395,7 @@ async function creaSchedaDaLab(recipeId){
     stepsV2:getStructuredSteps(v.steps,v.stepsV2).map(s=>({...s})),
     mediaUrl:null,videoUrl:null,active:false,
     l2Items:[],intentionInitial:null,intentionCurrent:null,criteriaInitial:null,criteriaCurrent:null,m1ReadingText:null,
+    ...copyDeclaredYield(v), // I4: eredita la resa dichiarata come le rese degli ingredienti
   };
   const newRecipe={
     id:newId,name:nomeNuova,category:recipe.category,department:recipe.department||'Cucina',
@@ -2425,6 +2473,7 @@ function rendiAttiva(recipeId){
     l2Items:v.l2Items||[], // PSL: L2 segue la Ricetta, mai copiato in una nuova identita'
     intentionInitial:v.intentionInitial||null,intentionCurrent:v.intentionCurrent||null,
     criteriaInitial:v.criteriaInitial||null,criteriaCurrent:v.criteriaCurrent||null,
+    ...copyDeclaredYield(v), // I4: stesso variant.id, stessa resa dichiarata
   };
 
   S.view='ricetta-madre-v2'; // la bozza ha concluso il ciclo: si torna alla Scheda
@@ -2474,6 +2523,7 @@ function onValidate(){
     l2Items:v.l2Items||[], // PSL: L2 segue la Ricetta, mai copiato in una nuova identita'
     intentionInitial:v.intentionInitial||null,intentionCurrent:v.intentionCurrent||null,
     criteriaInitial:v.criteriaInitial||null,criteriaCurrent:v.criteriaCurrent||null,
+    ...copyDeclaredYield(v), // I4: stesso variant.id, stessa resa dichiarata
   };
   // Step 5: registra evento in cronologia
   addHistory(nv.id,'approvata',name);

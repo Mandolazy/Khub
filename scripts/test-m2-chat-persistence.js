@@ -129,7 +129,8 @@ const CLIENT_SRC = [
   'function startDictation(opts)', 'function stopDictation()', 'function toggleRecording(recipeId)', 'function toggleDictationM2()',
   'function upRec(id,fn)', 'function addHistory(variantId,event,label)', 'function activeVariants(recipe)',
   'function getStructuredSteps(legacySteps,stepsV2)', 'function creaBozzaDaSorgente(recipeId,attiva)',
-  'function duplicaVersioneLAB(recipeId)', 'function rendiAttiva(recipeId)', 'function retireVariant(recipeId,variantId)',
+  // LAB FIX 2B I4: resa dichiarata (caricamento, salvataggio, copie)
+  'function declaredYieldFromRow(row)', 'function copyDeclaredYield(src)', 'function declaredYieldPayload(v)', 'function duplicaVersioneLAB(recipeId)', 'function rendiAttiva(recipeId)', 'function retireVariant(recipeId,variantId)',
 ].map(extractFunction).join('\n');
 
 const M2_OK = (prosa) => prosa + '\n===M2_UPDATE===\n{"l2_updates":[],"l2_new":[],"l3_candidates":[],"intention_change":null,"criteria_change":null}';

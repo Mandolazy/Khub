@@ -1,9 +1,10 @@
 /*
  * Test — LAB FIX 2A: compatibilita' del codice ATTUALE con le colonne
  * variants.declared_yield_qty / declared_yield_unit (migrazione 0011).
- * Il codice di oggi non le conosce: deve continuare a funzionare quando le
- * colonne esistono (NULL o gia' valorizzate), senza leggerle in memoria,
- * senza riscriverle e senza alterare i dati legacy.
+ * Scritto per il codice precedente a LAB FIX 2B, che non le conosceva;
+ * aggiornato in I4 (che le legge e le riscrive identiche): con le colonne
+ * presenti, NULL o gia' valorizzate, i dati legacy e la resa dichiarata
+ * restano intatti; senza colonne nulla viene letto o inviato.
  *
  * Codice REALE: handler di api/chat.js contro un finto PostgREST in memoria
  * con semantica di upsert merge-duplicates (aggiorna solo le colonne del
@@ -148,7 +149,8 @@ const CLIENT_SRC = [
   'function computeIngredientDeletions(knownByVariant,currentByVariant)',
   'function updateKnownIngredientIds(knownByVariant,currentByVariant,deleted)', 'function firmaContenutoBozza(v)',
   'async function loadFromSupabase()', 'function parseSteps(raw)', 'function getStructuredSteps(legacySteps,stepsV2)',
-  'function stepsV2ToLegacyArray(stepsV2)', 'function makeDefaultLab(recipeId,name)', 'function buildValidatedVariantPayload(recipeId,vv)', 'async function saveToSupabase(recipe)',
+  // LAB FIX 2B I4: resa dichiarata (caricamento, salvataggio, copie)
+  'function declaredYieldFromRow(row)', 'function copyDeclaredYield(src)', 'function declaredYieldPayload(v)', 'function stepsV2ToLegacyArray(stepsV2)', 'function makeDefaultLab(recipeId,name)', 'function buildValidatedVariantPayload(recipeId,vv)', 'async function saveToSupabase(recipe)',
 ].map(extractFunction).join('\n');
 
 // Client KHUB isolato: fetch('/api/chat') -> handler reale -> fake Supabase.
@@ -201,21 +203,31 @@ const legacy = f => clone(f.tables.variants.map(({ declared_yield_qty, declared_
 
   console.log('LAB FIX 2A — codice attuale con le colonne declared_yield_* presenti');
 
-  await test('1. la load produce lo stesso stato in memoria con e senza le nuove colonne', async () => {
+  // Da LAB FIX 2B I4 il codice legge e riscrive la resa dichiarata: le
+  // verifiche 1 e 2 controllano che con le colonne cambi SOLO quella, e che
+  // senza colonne (DB senza 0011) nulla venga letto o inviato.
+  await test('1. la load produce lo stesso stato in memoria con e senza le nuove colonne (a parte la resa dichiarata)', async () => {
     const a = await setup(); const b = await setup(withDeclaredYield);
-    const strip = r => JSON.parse(JSON.stringify(r, (k, v) => (k === 'id' && typeof v === 'string' && v.startsWith('lv_') ? '<gen>' : v)));
+    const strip = r => JSON.parse(JSON.stringify(r, (k, v) => (k === 'id' && typeof v === 'string' && v.startsWith('lv_') ? '<gen>' : (k === 'declaredYieldQty' || k === 'declaredYieldUnit') ? undefined : v)));
     assert.deepStrictEqual(strip(b.client.S.recipes), strip(a.client.S.recipes));
-    assert.ok(!JSON.stringify(b.client.S.recipes).includes('declared_yield'), 'nessun campo nuovo in memoria');
+    assert.ok(!JSON.stringify(a.client.S.recipes).includes('declaredYield'), 'senza colonne: nessun campo in memoria');
+    const lab = b.recipe().labVersions[0], att = b.recipe().validatedVariants.find(v => v.id === 'vaC');
+    assert.deepStrictEqual([lab.declaredYieldQty, lab.declaredYieldUnit, att.declaredYieldQty, att.declaredYieldUnit], [30, 'pz', 10, 'porzioni']);
   });
 
-  await test('2. salvare una bozza: resa dichiarata intatta su bozza, Ricetta Attiva e ritirata; nessuna colonna nuova nel payload', async () => {
+  await test('2. salvare una bozza: resa dichiarata intatta su bozza, Ricetta Attiva e ritirata; nel payload solo la resa della bozza, identica', async () => {
     const { fake, client, recipe } = await setup(withDeclaredYield);
     const y0 = yieldCols(fake);
     editDraft(client, v => ({ ...v, portionsCount: 12, ingredients: v.ingredients.map(i => i.name === 'Zucchero' ? { ...i, qty: 120 } : i) }));
     assert.strictEqual(await client.saveToSupabase(recipe()), true);
     assert.deepStrictEqual(yieldCols(fake), y0);
-    assert.ok(!JSON.stringify(saves).includes('declared_yield'));
+    assert.deepStrictEqual(saves[0].variants.map(v => [v.id, v.declared_yield_qty, v.declared_yield_unit]), [['lvC', 30, 'pz']]);
     assert.strictEqual(dbVariant(fake, 'lvC').portions_count, 12, 'la modifica legacy viene salvata come prima');
+    // DB senza colonne (0011 non applicata): nessuna colonna nel payload
+    const old = await setup(); globalThis.fetch = old.fake.fetch; saves = [];
+    editDraft(old.client, v => ({ ...v, note: 'x' }));
+    assert.strictEqual(await old.client.saveToSupabase(old.recipe()), true);
+    assert.ok(!JSON.stringify(saves).includes('declared_yield'));
   });
 
   await test('3. operazione esplicita su una Ricetta Attiva (Disattiva): resa dichiarata intatta', async () => {

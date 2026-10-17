@@ -172,7 +172,8 @@ const SRC = [
   'function computeIngredientDeletions(knownByVariant,currentByVariant)',
   'function updateKnownIngredientIds(knownByVariant,currentByVariant,deleted)', 'function firmaContenutoBozza(v)',
   'async function loadFromSupabase()', 'function parseSteps(raw)', 'function getStructuredSteps(legacySteps,stepsV2)',
-  'function stepsV2ToLegacyArray(stepsV2)', 'function makeDefaultLab(recipeId,name)', 'function buildValidatedVariantPayload(recipeId,vv)', 'async function saveToSupabase(recipe)',
+  // LAB FIX 2B I4: resa dichiarata (caricamento, salvataggio, copie)
+  'function declaredYieldFromRow(row)', 'function copyDeclaredYield(src)', 'function declaredYieldPayload(v)', 'function stepsV2ToLegacyArray(stepsV2)', 'function makeDefaultLab(recipeId,name)', 'function buildValidatedVariantPayload(recipeId,vv)', 'async function saveToSupabase(recipe)',
 ].map(extractFunction).concat(html.match(/var SESSION_SCALING_[A-Z_]+=\{[^}]*\};/g), [html.match(/const UNITS = \[[^\]]*\];/)[0]]).join('\n');
 
 function makeClient(fetchImpl) {
@@ -405,7 +406,10 @@ function makeClient(fetchImpl) {
       'function onVarIngUnit(recipeId,varId,ingId,val)': 'bd2537533a1563d7',
       'async function loadFromSupabase()': '41eb85ed926af59c', 'async function saveToSupabase(recipe)': '42a1765ea7f27644',
     };
-    for (const [m, h] of Object.entries(expect)) assert.strictEqual(sha(extractFunction(m)), h, 'cambiato: ' + m);
+    // LAB FIX 2B I4 aggiunge a load/save SOLO righe della resa dichiarata:
+    // tolte quelle righe, le due funzioni sono identiche a main.
+    const withoutI4 = (m, code) => /loadFromSupabase|saveToSupabase/.test(m) ? code.split('\n').filter(l => !/declaredYield/.test(l)).join('\n') : code;
+    for (const [m, h] of Object.entries(expect)) assert.strictEqual(sha(withoutI4(m, extractFunction(m))), h, 'cambiato: ' + m);
   });
 
   await test('T14. vista LAB: il menu delle unita\' usa onIngUnit; nessun fattore generico o arrotondamento nel nuovo codice', async () => {
