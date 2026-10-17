@@ -1608,7 +1608,7 @@ function firmaContenutoBozza(v){
     i.estimatedYieldPct!=null?String(i.estimatedYieldPct):'',
     i.measuredYieldPct!=null?String(i.measuredYieldPct):''
   ].join(SEP_CAMPO)).join(SEP_ING); // ordine preservato, nessun sort: l'ordine è contenuto
-  return [
+  const blocchi=[
     v.name||'',
     String(v.portionsCount??''),
     String(v.gramsPerPortion??''),
@@ -1617,7 +1617,19 @@ function firmaContenutoBozza(v){
     ingredienti,
     v.mediaUrl||'',
     v.videoUrl||''
-  ].join(SEP_BLOCCO);
+  ];
+  // LAB FIX 2B I5: la resa dichiarata entra nella firma SOLO se presente, cosi'
+  // la firma delle bozze senza resa resta identica (nessun aggiornamento
+  // spurio di contenuto_modificato_il). Quantita' confrontata come numero:
+  // 30, "30" e "30.0" danno la stessa firma.
+  const rq=v.declaredYieldQty,ru=v.declaredYieldUnit;
+  const rqTesto=rq==null?'':String(rq).trim();
+  const ruTesto=ru==null?'':String(ru);
+  if(rqTesto!==''||ruTesto!==''){
+    const rqNum=rqTesto===''?NaN:Number(rqTesto);
+    blocchi.push('resa'+SEP_CAMPO+(isFinite(rqNum)?String(rqNum):rqTesto)+SEP_CAMPO+ruTesto);
+  }
+  return blocchi.join(SEP_BLOCCO);
 }
 
 async function loadFromSupabase(){

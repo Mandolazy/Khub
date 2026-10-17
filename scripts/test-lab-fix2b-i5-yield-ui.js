@@ -352,15 +352,16 @@ const box = (h, cls) => { const m = h.match(new RegExp('class="' + cls + '"[^>]*
     assert.deepStrictEqual(box(panel(c), 'lab-w-finished')[1], '630 g', 'il finito teorico non e\' l\'obiettivo (50 x 200)');
   });
 
-  await test('U11. il salvataggio parte anche se contenuto_hash non include la resa', async () => {
+  await test('U11. cambiare la sola resa cambia contenuto_hash e il salvataggio lo invia', async () => {
     const c = await setup({ draftYield: [30, 'bignè'] });
-    const hashBefore = (() => { const s = new Function('v', extractFunction('function firmaContenutoBozza(v)') + ';return firmaContenutoBozza(v);'); return s(lab(c)); })();
+    const firma = new Function('v', extractFunction('function firmaContenutoBozza(v)') + ';return firmaContenutoBozza(v);');
+    const hashBefore = firma(lab(c));
     c.onLabDeclaredYield('rB', 'qty', '32');
-    const hashAfter = new Function('v', extractFunction('function firmaContenutoBozza(v)') + ';return firmaContenutoBozza(v);')(lab(c));
-    assert.strictEqual(hashAfter, hashBefore, 'contenuto_hash invariato (non include la resa)');
+    assert.notStrictEqual(firma(lab(c)), hashBefore, 'la firma include la resa');
     assert.deepStrictEqual(c.log.autosaves, ['rB']);
     assert.strictEqual(await save(c), true);
     assert.strictEqual(dbVariant(fake, 'lvB').declared_yield_qty, 32);
+    assert.strictEqual(dbVariant(fake, 'lvB').contenuto_hash, firma(lab(c)));
   });
 
   await test('U12. vista LAB: pannello al posto della vecchia "Stima peso finito", % ingredienti dai grammi, nessuna somma di unita\' diverse', async () => {
@@ -371,6 +372,74 @@ const box = (h, cls) => { const m = h.match(new RegExp('class="' + cls + '"[^>]*
     assert.ok(lab.includes("pesiLab.byId[ing.id].rawGrams/pesiLab.raw*100"));
     assert.ok(/id="lab-production-target"/.test(lab), 'Obiettivo di Produzione separato e invariato');
   });
+
+  // ── Firma del contenuto e data di ultima modifica (trigger di Supabase) ──
+  const firma = new Function('v', extractFunction('function firmaContenutoBozza(v)') + ';return firmaContenutoBozza(v);');
+  // Firma calcolata con la funzione di main (d6afca7) per questa bozza sintetica.
+  const BASE = { name: 'Bignè TEST', portionsCount: 30, gramsPerPortion: 21, portionUnit: 'g', steps: ['Impastare', 'Cuocere'], mediaUrl: null, videoUrl: null,
+    ingredients: [{ name: 'Farina', qty: 500, unit: 'g', isSubRecipe: false, subRecipeId: null, estimatedYieldPct: 70, measuredYieldPct: null },
+      { name: 'Burro', qty: 0.25, unit: 'kg', isSubRecipe: false, subRecipeId: null, estimatedYieldPct: 70, measuredYieldPct: null }] };
+  const FIRMA_MAIN = 'Bignè TEST\u000330\u000321\u0003g\u0003Impastare\u0001Cuocere\u0003Farina\u0001500\u0001g\u00010\u0001\u000170\u0001\u0002Burro\u00010.25\u0001kg\u00010\u0001\u000170\u0001\u0003\u0003';
+
+  await test('U13. firma: identica a main senza resa; cambia aggiungendo, modificando o rimuovendo la resa; 30 = "30" = "30.0"', async () => {
+    const f = (q, u) => firma({ ...BASE, ...(q === undefined && u === undefined ? {} : { declaredYieldQty: q, declaredYieldUnit: u }) });
+    assert.strictEqual(f(), FIRMA_MAIN, 'campi assenti');
+    assert.strictEqual(f(null, null), FIRMA_MAIN, 'resa null');
+    assert.strictEqual(f('', ''), FIRMA_MAIN, 'resa vuota');
+    const r30 = f(30, 'bignè');
+    assert.notStrictEqual(r30, FIRMA_MAIN, 'aggiungere la resa cambia la firma');
+    assert.notStrictEqual(f(32, 'bignè'), r30, 'modificare la quantita\'');
+    assert.notStrictEqual(f(30, 'vasetti'), r30, 'modificare l\'unita\'');
+    assert.notStrictEqual(f(30, null), r30, 'togliere l\'unita\' (dato non valido) cambia la firma');
+    assert.strictEqual(f(null, null), FIRMA_MAIN, 'rimuovere la resa torna alla firma senza resa');
+    for (const q of ['30', ' 30 ', '30.0', '3e1', 30.0]) assert.strictEqual(f(q, 'bignè'), r30, JSON.stringify(q));
+    assert.strictEqual(f('0.333333333333333333', 'teglie'), f(0.3333333333333333, 'teglie'), 'stesso valore numerico, nessun falso aggiornamento');
+    assert.notStrictEqual(f(2.5, 'pz'), f(2.6, 'pz'));
+  });
+
+  await test('U14. trigger simulato (data aggiornata solo se la firma cambia): solo la resa modificata aggiorna data e posizione; nessun falso aggiornamento; Attive non reinviate', async () => {
+    await setup({ draftYield: ['30', 'bignè'] });
+    // Trigger di Supabase: contenuto_modificato_il = now() quando NEW.contenuto_hash IS DISTINCT FROM OLD.contenuto_hash
+    let tick = 0;
+    const realFetch = fake.fetch;
+    const withTrigger = async (url, opts) => {
+      const before = Object.fromEntries(fake.tables.variants.map(v => [v.id, v.contenuto_hash]));
+      const r = await realFetch(url, opts);
+      fake.tables.variants.forEach(v => { if (v.contenuto_hash !== before[v.id]) v.contenuto_modificato_il = '2026-10-17T10:00:' + String(++tick).padStart(2, '0') + 'Z'; });
+      return r;
+    };
+    globalThis.fetch = withTrigger;
+    const c0 = makeClient(clientFetch); await c0.loadFromSupabase(); await c0.saveToSupabase(rec(c0)); // prima firma salvata
+    const d0 = dbVariant(fake, 'lvB').contenuto_modificato_il;
+    const activeBefore = { v: dbVariant(fake, 'vaB'), i: ingContent(fake, 'vaB') };
+    // 3 cicli senza modifiche (resa "30" come stringa dal DB): nessun aggiornamento falso
+    for (let k = 0; k < 3; k++) { const c = makeClient(clientFetch); await c.loadFromSupabase(); await c.saveToSupabase(rec(c)); }
+    assert.strictEqual(dbVariant(fake, 'lvB').contenuto_modificato_il, d0, 'formato "30" vs 30: nessun falso aggiornamento');
+    // riconfermare 30 come numero: nessun salvataggio necessario, firma uguale
+    const c1 = makeClient(clientFetch); await c1.loadFromSupabase();
+    c1.onLabDeclaredYield('rB', 'qty', '30');
+    await c1.saveToSupabase(rec(c1));
+    assert.strictEqual(dbVariant(fake, 'lvB').contenuto_modificato_il, d0);
+    // modificare SOLO la resa: data aggiornata
+    c1.onLabDeclaredYield('rB', 'qty', '32');
+    saves = [];
+    await c1.saveToSupabase(rec(c1));
+    const d1 = dbVariant(fake, 'lvB').contenuto_modificato_il;
+    assert.ok(d1 && d1 !== d0, 'la data si aggiorna');
+    assert.deepStrictEqual(saves[0].variants.map(v => v.id), ['lvB'], 'Ricetta Attiva non reinviata');
+    assert.deepStrictEqual({ v: dbVariant(fake, 'vaB'), i: ingContent(fake, 'vaB') }, activeBefore);
+    assert.deepStrictEqual(ingContent(fake, 'lvB'), [['Farina', 500, 'g', 70], ['Burro', 0.25, 'kg', 70], ['Zucchero', 150, 'g', 70]], 'ingredienti invariati');
+    // rimuovere la resa: data aggiornata di nuovo
+    c1.onLabDeclaredYield('rB', 'qty', ''); c1.onLabDeclaredYield('rB', 'unit', '');
+    await c1.saveToSupabase(rec(c1));
+    assert.notStrictEqual(dbVariant(fake, 'lvB').contenuto_modificato_il, d1);
+    // il caricamento riporta la data aggiornata: ordinamento del LAB globale per contenutoModificatoIl
+    const c2 = makeClient(clientFetch); await c2.loadFromSupabase();
+    assert.strictEqual(lab(c2).contenutoModificatoIl, dbVariant(fake, 'lvB').contenuto_modificato_il);
+    assert.ok(!('contenuto_hash' in buildRowKeys(c2)), 'la firma non entra nel payload delle Ricette Attive');
+    globalThis.fetch = realFetch;
+  });
+  function buildRowKeys(c) { return c.buildValidatedVariantPayload('rB', rec(c).validatedVariants[0]).row; }
 
   console.log('');
   console.log(passed + ' passed, ' + failed + ' failed');
