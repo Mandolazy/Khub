@@ -973,6 +973,8 @@ const S = {
     'fetta di pane':30,'fette di pane':30,
   },
   pendingUnitConversion: null, // {recipeId, ingId, ingName, newUnit} — conversione n→g in attesa del peso medio
+  pendingLabConversion: null, // LAB FIX 2B I3: fattore dell'ingrediente in attesa di conferma nel LAB
+  labUnitAnchors: {},         // LAB FIX 2B I3: valore originale delle conversioni (solo memoria, mai salvato)
   // Sprint Produzione — Micro-Step 9: {nomeIngredienteNormalizzato:{id,sourceType}}
   // — provenance (id/sourceType) della fact n→g vincente per nome, popolata
   // in parallelo a unitWeights da loadFromSupabase (stessi dati gia'
@@ -2624,37 +2626,119 @@ function setLabProductionTarget(recipeId,field,rawValue){
 function onLabTargetPortions(recipeId,val){setLabProductionTarget(recipeId,'portions',val);}
 function onLabTargetGpp(recipeId,val){setLabProductionTarget(recipeId,'gpp',val);}
 
+// LAB FIX 2B — I3: cambio unita' di un ingrediente nel LAB con conversione
+// reversibile. La quantita' viene sempre convertita (mai un cambio della
+// sola etichetta), senza arrotondamenti, con le sole equivalenze metriche
+// esatte (g<->kg, ml<->cl<->l) o con fattori dell'ingrediente CONFERMATI
+// dallo chef (pezzi, volume, cucchiai -> g). I pesi di riferimento non
+// confermati non vengono applicati: sono solo proposti nella finestra di
+// conferma. Un fattore confermato viene salvato (ingredient_conversions) e
+// riusato in entrambi i versi. Nessun fattore generico (es. cucchiaio=15).
+//
+// Valore originale: ogni conversione parte dalla quantita' da cui e'
+// partita la catena di conversioni ("ancora", solo in memoria, mai
+// salvata), finche' lo chef non modifica a mano la quantita'. Tornare
+// all'unita' di partenza restituisce esattamente il valore originale.
+function labUnitAnchorKey(recipeId,labVersionId,ingId){return recipeId+'|'+labVersionId+'|'+ingId;}
+
+// Fact dell'ingrediente utilizzabili nel LAB: solo confermate, mai
+// 'reference_data' (stessa fonte unica usata da Produzione, senza copie).
+function resolveConfirmedLabConversionFact(normalizedName,unit){
+  var fact=resolveKnownProductionConversionFact(normalizedName,unit);
+  return fact&&fact.sourceType!=='reference_data'?fact:null;
+}
+// Peso di riferimento da proporre (mai applicato senza conferma), o null.
+function referenceConversionProposal(normalizedName,unit){
+  var fact=resolveKnownProductionConversionFact(normalizedName,unit);
+  return fact&&fact.sourceType==='reference_data'?fact.factor:null;
+}
+
+// Conversione pura dell'ingrediente verso toUnit, a partire dall'ancora se
+// e' ancora valida (la quantita' attuale e' esattamente quella prodotta
+// dall'ultima conversione). Non muta nulla. Esito di convertIngredientQty,
+// con in piu' l'ancora da conservare.
+function computeLabUnitConversion(ing,toUnit,anchor,resolveFact){
+  var base={qty:ing.qty,unit:ing.unit};
+  if(anchor&&anchor.convertedUnit===ing.unit&&Object.is(anchor.convertedQty,ing.qty))base={qty:anchor.qty,unit:anchor.unit};
+  var r=convertIngredientQty(base.qty,base.unit,toUnit,ing.name,resolveFact||resolveConfirmedLabConversionFact);
+  if(!r.ok)return r;
+  return{ok:true,qty:r.qty,usedFacts:r.usedFacts,anchor:{qty:base.qty,unit:base.unit,convertedQty:r.qty,convertedUnit:toUnit}};
+}
+
 function onIngUnit(recipeId,ingId,val){
-  // Caso speciale: n → g (conversione con peso medio)
   var recipe=R(recipeId);var v=curLab(recipe);
   var ing=v&&v.ingredients.find(function(i){return i.id===ingId;});
-  if(ing&&ing.unit==='n'&&val==='g'){
-    var name=normalizeIngredientName(ing.name);
-    var pesoNoto=S.unitWeights[name];
-    if(pesoNoto){
-      // Peso noto: converti subito
-      upLab(recipeId,function(v){
-        return Object.assign({},v,{ingredients:v.ingredients.map(function(i){
-          if(i.id!==ingId)return i;
-          return Object.assign({},i,{unit:'g',qty:Math.round(cnum(i.qty)*pesoNoto*10)/10});
-        })});
-      });
-    } else {
-      // Peso non noto: mostra modale per chiedere il peso medio
-      S.pendingUnitConversion={recipeId:recipeId,ingId:ingId,ingName:ing.name,qty:ing.qty,newUnit:'g'};
-      render();
-    }
+  if(!ing)return;
+  if(ing.unit===val)return;
+  if(UNITS.indexOf(val)===-1){toast('Unità non disponibile.','ti-alert-circle');return;}
+  var key=labUnitAnchorKey(recipeId,v.id,ingId);
+  var res=computeLabUnitConversion(ing,val,S.labUnitAnchors[key]);
+  if(res.ok){
+    S.labUnitAnchors[key]=res.anchor;
+    upLab(recipeId,function(lv){
+      return Object.assign({},lv,{ingredients:lv.ingredients.map(function(i){
+        return i.id===ingId?Object.assign({},i,{unit:val,qty:res.qty}):i;
+      })});
+    });
     return;
   }
-  // Conversione normale
-  upLab(recipeId,function(v){
-    return Object.assign({},v,{ingredients:v.ingredients.map(function(i){
-      if(i.id!==ingId)return i;
-      var oldUnit=i.unit;var newUnit=val;
-      var newQty=sameGroup(oldUnit,newUnit)?convertQty(i.qty,oldUnit,newUnit):i.qty;
-      return Object.assign({},i,{unit:newUnit,qty:newQty});
-    })});
-  });
+  if(res.error==='missing_conversion'){
+    // Un fattore alla volta: dopo la conferma la conversione riparte e,
+    // se ne manca un altro (es. pezzi -> ml), lo chiede.
+    var need=res.needs[0];
+    var normName=normalizeIngredientName(ing.name);
+    var proposal=referenceConversionProposal(normName,need.askUnit);
+    S.pendingLabConversion={recipeId:recipeId,labVersionId:v.id,ingId:ingId,ingName:ing.name,
+      fromUnit:ing.unit,toUnit:val,askUnit:need.askUnit,
+      value:proposal!=null?String(proposal):'',isReference:proposal!=null,loading:false,error:null};
+    render();
+    return;
+  }
+  // toast() ridisegna: il menu torna all'unita' attuale, nulla cambia.
+  toast('Conversione non possibile per questo ingrediente.','ti-alert-circle');
+}
+
+// Conferma del fattore richiesto (grammi per 1 askUnit): salvato come nuova
+// fact 'chef_confirmed', reso subito disponibile (stessa struttura di stato
+// del preflight di Produzione), poi la conversione riparte. Se il
+// salvataggio fallisce non si converte nulla.
+async function confirmLabConversion(rawValue){
+  var p=S.pendingLabConversion;
+  if(!p||p.loading)return;
+  var factor=parseLocaleNumber(rawValue!=null?rawValue:p.value);
+  if(!isFinite(factor)||factor<=0){
+    p.value=rawValue!=null?String(rawValue):p.value;
+    p.error='Inserisci un peso valido (maggiore di zero).';render();return;
+  }
+  p.value=String(rawValue!=null?rawValue:p.value);
+  p.loading=true;p.error=null;render();
+  var normName=normalizeIngredientName(p.ingName);
+  var conv=await saveIngredientConversion(normName,p.askUnit,'g',factor,'chef_confirmed');
+  if(conv){
+    // Salvata: disponibile subito, anche se nel frattempo la finestra e'
+    // stata chiusa (il dato e' gia' nel database).
+    if(p.askUnit==='n'){
+      S.unitWeights[normName]=conv.factor;
+      S.unitWeightFacts[normName]={id:conv.id,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null};
+    }else{
+      S.productionConversionFacts[normName+'|'+p.askUnit+'|g']={id:conv.id,factor:conv.factor,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null,confirmedAt:conv.confirmed_at};
+    }
+  }
+  if(S.pendingLabConversion!==p)return; // annullata nel frattempo: nessuna conversione
+  if(!conv){
+    p.loading=false;
+    p.error='Errore nel salvataggio della conversione. Riprova.';
+    render();return;
+  }
+  S.pendingLabConversion=null;
+  var v=curLab(R(p.recipeId));
+  if(!v||v.id!==p.labVersionId){render();return;}
+  onIngUnit(p.recipeId,p.ingId,p.toUnit);
+  if(!S.pendingLabConversion)render();
+}
+function cancelLabConversion(){
+  S.pendingLabConversion=null;
+  render();
 }
 
 // Conferma conversione n→g dopo che l'utente ha inserito il peso medio
@@ -8338,6 +8422,46 @@ function renderUnitConversionModal(){
   </div>`;
 }
 
+// LAB FIX 2B — I3: finestra di conferma del fattore di un ingrediente.
+function labConversionQuestion(p){
+  var nome=escAttr(p.ingName);
+  if(p.askUnit==='n')return'Quanto pesa in media 1 pezzo di <strong>'+nome+'</strong>?';
+  if(p.askUnit==='tbsp')return'Quanti grammi pesa 1 cucchiaio (tbsp) di <strong>'+nome+'</strong>?';
+  if(p.askUnit==='tsp')return'Quanti grammi pesa 1 cucchiaino (tsp) di <strong>'+nome+'</strong>?';
+  return'Quanti grammi pesa 1 '+escAttr(p.askUnit)+' di <strong>'+nome+'</strong>?';
+}
+function renderLabConversionModal(){
+  var p=S.pendingLabConversion;
+  if(!p)return'';
+  return`
+  <div id="lab-conversion-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200;display:flex;align-items:center;justify-content:center;padding:24px">
+    <div style="background:var(--white);border-radius:var(--r-lg);padding:24px;width:100%;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
+      <div style="font-size:16px;font-weight:700;color:var(--dark);margin-bottom:6px">Conversione da confermare</div>
+      <div style="font-size:13px;color:var(--mid);margin-bottom:6px">Da ${escAttr(p.fromUnit)} a ${escAttr(p.toUnit)}: serve un dato di questo ingrediente.</div>
+      <div style="font-size:14px;color:var(--dark);margin-bottom:14px">${labConversionQuestion(p)}</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:${p.isReference?'8':'16'}px">
+        <input id="lab-conv-input" type="text" inputmode="decimal" autocomplete="off" placeholder="es. 55" value="${escAttr(p.value)}" ${p.loading?'disabled':''}
+          style="flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:16px;color:var(--dark);outline:none"
+          onkeydown="if(event.key==='Enter'){confirmLabConversion(document.getElementById('lab-conv-input').value)}">
+        <span style="font-size:14px;color:var(--mid);font-weight:500">g</span>
+      </div>
+      ${p.isReference?`<div style="font-size:12px;color:var(--mid);margin-bottom:16px">Valore di riferimento indicativo, non ancora confermato: verificalo prima di confermare.</div>`:''}
+      ${p.error?`<div style="font-size:13px;color:#c0392b;margin-bottom:14px">${escAttr(p.error)}</div>`:''}
+      <div style="display:flex;gap:8px">
+        <button id="lab-conv-confirm" onclick="confirmLabConversion(document.getElementById('lab-conv-input').value)" ${p.loading?'disabled':''}
+          style="flex:1;padding:10px;background:var(--lab);color:white;border:none;border-radius:var(--r-md);font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;opacity:${p.loading?'0.7':'1'}">
+          ${p.loading?'Salvataggio…':'Conferma e converti'}
+        </button>
+        <button id="lab-conv-cancel" onclick="cancelLabConversion()" ${p.loading?'disabled':''}
+          style="padding:10px 16px;background:transparent;color:var(--mid);border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:14px;cursor:pointer">
+          Annulla
+        </button>
+      </div>
+      <div style="font-size:11px;color:var(--light);margin-top:12px;text-align:center">Il dato verrà salvato e riusato, anche nel verso inverso.</div>
+    </div>
+  </div>`;
+}
+
 function renderToastAction(){
   var ta=S.toastAction;if(!ta)return "";
   var btns=ta.actions.map(function(a,i){
@@ -8870,7 +8994,7 @@ function render(){
   // focus vengono ripristinati (il testo e' gia' nella bozza).
   // MS17b: stesso trattamento per la ricerca dello Storico (si filtra a ogni tasto).
   const noteFocus=(()=>{const a=document.activeElement;return a&&(a.id==='session-note-input'||a.id==='history-search'||a.id==='prod-recipe-search'||a.id==='quick-calc-portions'||a.id==='quick-calc-gpp')?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null;})();
-  if(main)main.innerHTML=mainContent+(S.showFamilyPicker?renderFamilyPicker():'')+(S.showMergePicker?renderMergePicker():'')+(S.showMergeConfirm?renderMergeConfirm():'')+(S.showSchedeFamiglie?renderSchedeFamigliePicker():'')+(S.showCondividiStaff?renderCondividiStaffModal():'')+(S.showOnboarding?renderOnboarding():'')+(S.toastAction?renderToastAction():S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:'')+renderUnitConversionModal()+renderMandaInProduzioneModal()+renderConversionPreflightModal();
+  if(main)main.innerHTML=mainContent+(S.showFamilyPicker?renderFamilyPicker():'')+(S.showMergePicker?renderMergePicker():'')+(S.showMergeConfirm?renderMergeConfirm():'')+(S.showSchedeFamiglie?renderSchedeFamigliePicker():'')+(S.showCondividiStaff?renderCondividiStaffModal():'')+(S.showOnboarding?renderOnboarding():'')+(S.toastAction?renderToastAction():S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:'')+renderUnitConversionModal()+renderLabConversionModal()+renderMandaInProduzioneModal()+renderConversionPreflightModal();
 
   if(noteFocus){const ta=document.getElementById(noteFocus.id);if(ta){try{ta.focus();ta.setSelectionRange(noteFocus.s,noteFocus.e);}catch(e){}}}
 
