@@ -975,6 +975,7 @@ const S = {
   pendingUnitConversion: null, // {recipeId, ingId, ingName, newUnit} — conversione n→g in attesa del peso medio
   pendingLabConversion: null, // LAB FIX 2B I3: fattore dell'ingrediente in attesa di conferma nel LAB
   labUnitAnchors: {},         // LAB FIX 2B I3: valore originale delle conversioni (solo memoria, mai salvato)
+  labYieldInput: {},          // LAB FIX 2B I5: resa dichiarata in corso di inserimento non ancora valida (solo memoria)
   // Sprint Produzione — Micro-Step 9: {nomeIngredienteNormalizzato:{id,sourceType}}
   // — provenance (id/sourceType) della fact n→g vincente per nome, popolata
   // in parallelo a unitWeights da loadFromSupabase (stessi dati gia'
@@ -2788,6 +2789,52 @@ async function confirmLabConversion(rawValue){
 }
 function cancelLabConversion(){
   S.pendingLabConversion=null;
+  render();
+}
+
+// LAB FIX 2B — I5: resa dichiarata della bozza (quantita' + unita'),
+// indipendente dall'Obiettivo di Produzione e dagli ingredienti. Si salva
+// solo una resa valida o vuota (= non dichiarata); un inserimento non valido
+// resta in memoria con il suo messaggio, senza toccare il dato salvato. Una
+// quantita' non modificata resta il valore grezzo salvato (nessuna perdita
+// di precisione). Le unita' di misura riconosciute si salvano in forma
+// standard, quelle personalizzate come scritte; nessuna conversione.
+function declaredYieldInputText(raw){return raw==null?'':String(raw);}
+function declaredYieldErrorMessage(error){
+  if(error==='missing_qty')return'Inserisci la quantità della resa.';
+  if(error==='invalid_qty')return'La quantità della resa deve essere un numero maggiore di zero.';
+  if(error==='missing_unit')return"Inserisci l'unità della resa (es. pz, bignè, vasetti, kg).";
+  if(error==='unit_too_long')return'Unità troppo lunga (massimo '+DECLARED_YIELD_UNIT_MAX_LENGTH+' caratteri).';
+  if(error==='unsupported_unit')return"Unità non supportata: usa g, kg, ml, l oppure un'unità a pezzi.";
+  return'Resa non valida.';
+}
+function onLabDeclaredYield(recipeId,field,value){
+  if(field!=='qty'&&field!=='unit')return;
+  var v=curLab(R(recipeId));if(!v)return;
+  var pending=S.labYieldInput[v.id];
+  var next={
+    qty:pending?pending.qty:declaredYieldInputText(v.declaredYieldQty),
+    unit:pending?pending.unit:declaredYieldInputText(v.declaredYieldUnit),
+  };
+  next[field]=value==null?'':String(value);
+  var res=normalizeDeclaredYield(next.qty,next.unit);
+  if(!res.ok){
+    S.labYieldInput[v.id]={qty:next.qty,unit:next.unit,error:declaredYieldErrorMessage(res.error)};
+    render();return;
+  }
+  delete S.labYieldInput[v.id];
+  var qty=null,unit=null;
+  if(res.value){
+    var savedText=declaredYieldInputText(v.declaredYieldQty).trim();
+    qty=(savedText!==''&&savedText===next.qty.trim())?v.declaredYieldQty:res.value.qty;
+    unit=res.value.unit;
+  }
+  if(Object.is(qty,v.declaredYieldQty)&&unit===v.declaredYieldUnit){render();return;}
+  upLab(recipeId,function(lv){return Object.assign({},lv,{declaredYieldQty:qty,declaredYieldUnit:unit});});
+}
+function discardLabDeclaredYieldInput(recipeId){
+  var v=curLab(R(recipeId));if(!v)return;
+  delete S.labYieldInput[v.id];
   render();
 }
 
@@ -6642,6 +6689,64 @@ async function runPrimoConsulto(recipeId){
 // Stessa famiglia visiva di M1/M2 (card-label + btn-lab/btn-outline btn-sm):
 // e' una capacita' specialistica della sezione Ingredienti, non un modulo
 // MichelinAI separato — vive dentro la card Ingredienti, non accanto a M2.
+// LAB FIX 2B — I5: resa dichiarata e pesi della formulazione (funzioni
+// pure di I1). Totali in grammi con conversioni e rese degli ingredienti;
+// conversioni mancanti = stato incompleto, mai un totale inventato; valori
+// per unita' solo con una resa a pezzi valida. Distinto dall'Obiettivo di
+// Produzione. Solo visualizzazione: nessun dato viene modificato.
+var LAB_WEIGHT_INVALID_REASONS={negative_qty:'quantità negativa',missing_unit:'unità mancante',invalid_yield:'resa % non valida',invalid_ingredient:'ingrediente non valido'};
+function labGrams(x){return formatQtyDisplay(x)+' g';}
+function renderLabWeightsPanel(recipe,v,w){
+  w=w||computeFormulationWeights(v.ingredients);
+  var pending=S.labYieldInput[v.id];
+  var state=declaredYieldState(v);
+  var qtyText=pending?pending.qty:declaredYieldInputText(v.declaredYieldQty);
+  var unitText=pending?pending.unit:declaredYieldInputText(v.declaredYieldUnit);
+  var inputStyle='padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:14px;color:var(--dark);background:var(--white);outline:none';
+  var avviso='';
+  if(pending)avviso=`<div class="lab-yield-error" style="font-size:12px;color:#c0392b;margin-top:6px"><i class="ti ti-alert-circle"></i> ${escAttr(pending.error)} Non ancora salvata. <button onclick="discardLabDeclaredYieldInput('${recipe.id}')" style="background:none;border:none;color:var(--mid);text-decoration:underline;cursor:pointer;font-size:12px;padding:0">Ripristina</button></div>`;
+  else if(state.status==='invalid')avviso=`<div class="lab-yield-error" style="font-size:12px;color:#c0392b;margin-top:6px"><i class="ti ti-alert-circle"></i> La resa salvata non è valida: ${escAttr(declaredYieldErrorMessage(state.error))}</div>`;
+
+  var stato='',crudoTot='—',finitoTot='—';
+  if(w.status==='complete'){crudoTot=labGrams(w.raw);finitoTot=labGrams(w.finished);}
+  else if(w.status==='empty')stato='Aggiungi ingredienti per calcolare i pesi.';
+  else if(w.status==='incomplete')stato='Pesi incompleti: manca la conversione in grammi per '+w.missing.map(function(m){return escAttr(m.name)+' ('+escAttr(m.unit)+')';}).join(', ')+'.';
+  else if(w.status==='invalid')stato='Pesi non calcolabili: '+w.invalid.map(function(x){return escAttr(x.name||'ingrediente')+' ('+escAttr(LAB_WEIGHT_INVALID_REASONS[x.reason]||'conversione non valida')+')';}).join(', ')+'.';
+
+  var unitaLabel='unità di resa',crudoUnit='—',finitoUnit='—',notaUnit='';
+  if(state.status==='valid'){
+    var per=deriveYieldPerUnit(w,state.value);
+    unitaLabel=escAttr(state.value.unit);
+    if(per&&per.status==='complete'&&per.kind==='count'){crudoUnit=labGrams(per.rawPerUnit);finitoUnit=labGrams(per.finishedPerUnit);}
+    else if(per&&per.status==='complete'&&per.kind==='mass')notaUnit='Resa in peso: '+labGrams(per.declaredGrams)+' dichiarati; differenza dal finito teorico '+(per.deltaGrams>0?'+':'')+labGrams(per.deltaGrams)+'.';
+    else if(per&&per.status==='complete'&&per.kind==='volume')notaUnit='Resa in volume: confronto con i pesi non disponibile senza una conversione.';
+    else notaUnit='Valori per unità disponibili quando i pesi sono completi.';
+  }else if(state.status==='absent')notaUnit='Indica la resa per calcolare i pesi per unità.';
+  else notaUnit='Valori per unità non calcolabili: resa non valida.';
+
+  var box=function(label,valore,cls){return`<div class="${cls}" style="flex:1;min-width:130px;background:var(--cream);border:1px solid var(--border);border-radius:var(--r-md);padding:8px 10px"><div style="font-size:11px;color:var(--mid)">${label}</div><div style="font-family:'DM Mono',monospace;font-size:15px;color:var(--dark);margin-top:2px">${valore}</div></div>`;};
+  return`<div id="lab-yield-weights" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+    <div class="card-label" style="margin-bottom:4px"><i class="ti ti-scale"></i> Resa e pesi della formulazione</div>
+    <div style="font-size:12px;color:var(--light);margin-bottom:10px">Quanto produce questa Ricetta. Non modifica gli ingredienti e non dipende dall'Obiettivo di Produzione.</div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span style="font-size:13px;color:var(--dark);font-weight:600">Resa dichiarata</span>
+      <input id="lab-yield-qty" type="text" inputmode="decimal" autocomplete="off" placeholder="es. 30" value="${escAttr(qtyText)}" onchange="onLabDeclaredYield('${recipe.id}','qty',this.value)" style="${inputStyle};width:90px">
+      <input id="lab-yield-unit" type="text" list="lab-yield-units" maxlength="${DECLARED_YIELD_UNIT_MAX_LENGTH}" autocomplete="off" placeholder="es. bignè" value="${escAttr(unitText)}" onchange="onLabDeclaredYield('${recipe.id}','unit',this.value)" style="${inputStyle};width:150px">
+      <datalist id="lab-yield-units">${['pz','porzioni','bignè','vasetti','filoni','teglie','g','kg','ml','l'].map(function(u){return'<option value="'+u+'">';}).join('')}</datalist>
+    </div>
+    ${avviso}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+      ${box('Peso a crudo totale',crudoTot,'lab-w-raw')}
+      ${box('Peso finito teorico',finitoTot,'lab-w-finished')}
+      ${box('Crudo per '+unitaLabel,crudoUnit,'lab-w-raw-unit')}
+      ${box('Finito per '+unitaLabel,finitoUnit,'lab-w-finished-unit')}
+    </div>
+    ${stato?`<div class="lab-w-status" style="font-size:12px;color:var(--orange-accessible,#b45309);margin-top:8px"><i class="ti ti-alert-triangle"></i> ${stato}</div>`:''}
+    ${notaUnit?`<div class="lab-w-note" style="font-size:12px;color:var(--mid);margin-top:6px">${notaUnit}</div>`:''}
+    ${w.status==='complete'&&w.referenceDataUsed.length?`<div class="lab-w-ref" style="font-size:12px;color:var(--mid);margin-top:6px"><i class="ti ti-info-circle"></i> Include pesi di riferimento non confermati: ${w.referenceDataUsed.map(function(x){return escAttr(x.name);}).join(', ')}.</div>`:''}
+  </div>`;
+}
+
 function renderYieldAnalysisPanel(recipe,v){
   const isLoading=S.yieldAnalysisLoading;
   const analysis=S.yieldAnalysis&&S.yieldAnalysis.recipeId===recipe.id?S.yieldAnalysis:null;
@@ -7546,7 +7651,8 @@ function renderPreview(){
 
 function renderLabRecipe(recipe){
   const v=curLab(recipe);if(!v)return'';
-  const tot=v.ingredients.reduce((s,i)=>s+cnum(i.qty),0);
+  // LAB FIX 2B I5: pesi in grammi (conversioni + rese), mai somme di unita' diverse
+  const pesiLab=computeFormulationWeights(v.ingredients);
   const sectionsOpen=ensureLabSectionsOpen(recipe,v);
   return `
   <div class="lab-header">
@@ -7659,7 +7765,7 @@ function renderLabRecipe(recipe){
           <td>${isBrick?'<i class="ti ti-brick" style="color:var(--sage-dark);margin-right:5px" title="Mattoncino: questo ingrediente è un\'altra Scheda"></i>':''}<input class="ing-qty-input" style="width:100%;min-width:100px" value="${ing.name}" onchange="onIngName('${recipe.id}','${ing.id}',this.value)"></td>
           <td><input class="ing-qty-input" type="number" value="${ing.qty}" onchange="onIngQty('${recipe.id}','${ing.id}',this.value)"></td>
           <td><select class="ing-unit-select" onchange="onIngUnit('${recipe.id}','${ing.id}',this.value)">${UNITS.map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}</select></td>
-          <td class="ing-pct">${tot>0?(cnum(ing.qty)/tot*100).toFixed(1):0}%</td>
+          <td class="ing-pct">${pesiLab.status==='complete'&&pesiLab.raw>0&&pesiLab.byId[ing.id]?(pesiLab.byId[ing.id].rawGrams/pesiLab.raw*100).toFixed(1)+'%':'—'}</td>
           <td style="text-align:right"><input type="number" min="0" max="500" placeholder="—"
             value="${ing.estimatedYieldPct!=null?ing.estimatedYieldPct:''}"
             onchange="onIngYield('${recipe.id}','${ing.id}',this.value)"
@@ -7731,19 +7837,7 @@ function renderLabRecipe(recipe){
       <button class="btn btn-outline btn-sm" onclick="toggleAddIngMode()" title="${S.addIngMode==='mattoncino'?'Torna a ingrediente normale':'Usa una Scheda come ingrediente'}" style="${S.addIngMode==='mattoncino'?'background:var(--sage-light);border-color:var(--sage);color:var(--sage-dark)':''}"><i class="ti ti-brick"></i></button>
       <button class="btn btn-outline btn-sm" onclick="addIngredient('${recipe.id}')"><i class="ti ti-plus"></i> Aggiungi</button>
     </div>
-    ${(()=>{
-      // Riepilogo peso finito stimato — visibile solo se almeno un ingrediente ha resa definita
-      const hasYield=v.ingredients.some(i=>i.estimatedYieldPct!=null);
-      if(!hasYield)return'';
-      const pesoFinitoTot=v.ingredients.reduce((s,i)=>s+cnum(i.qty)*effectiveYield(i),0);
-      const gppStimati=v.portionsCount>0?Math.round(pesoFinitoTot/v.portionsCount):0;
-      return `<div style="margin-top:10px;padding:10px 12px;background:var(--cream);border-radius:var(--r-md);border:1px solid var(--border);font-size:12px;color:var(--mid);display:flex;gap:16px;flex-wrap:wrap">
-        <span><i class="ti ti-calculator" style="color:var(--sage)"></i> <strong style="color:var(--dark)">Stima peso finito</strong></span>
-        <span>Totale: <strong style="color:var(--dark)">${Math.round(pesoFinitoTot)}g</strong></span>
-        <span>Porzioni: <strong style="color:var(--dark)">${v.portionsCount}</strong></span>
-        <span>G/porzione finiti: <strong style="color:var(--sage)">${gppStimati}g</strong></span>
-      </div>`;
-    })()}
+    ${renderLabWeightsPanel(recipe,v,pesiLab)}
     ${renderYieldAnalysisPanel(recipe,v)}
   </div>
 
