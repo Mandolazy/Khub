@@ -2587,27 +2587,42 @@ function addIngredient(recipeId){
 function onIngQty(recipeId,ingId,val){
   upLab(recipeId,v=>({...v,ingredients:v.ingredients.map(i=>i.id===ingId?{...i,qty:parseFloat(val)||0}:i)}));
 }
-function scaleLabPortions(recipeId,newVal){
-  newVal=parseFloat(newVal);if(!newVal)return;
-  var recipe=R(recipeId);if(!recipe)return;
-  var v=curLab(recipe);if(!v)return;
-  var ratio=newVal/(v.portionsCount||1);
-  upLab(recipeId,function(lv){
-    return Object.assign({},lv,{portionsCount:newVal,
-      ingredients:lv.ingredients.map(function(i){return Object.assign({},i,{qty:Math.round(i.qty*ratio*100)/100});})});
-  });
+// LAB FIX 2B — I2: Obiettivo di Produzione della bozza LAB.
+// Porzioni e G/porzione (portions_count, grams_per_portion) sono SOLO
+// l'obiettivo di Produzione, distinto dalla resa dichiarata della Ricetta.
+// Cambiarli non tocca mai gli ingredienti: nessuno scaling, nessun
+// arrotondamento, nessun ricalcolo. Il ridimensionamento della formulazione
+// sara' un'anteprima separata (FIX 2D). Un valore non valido viene rifiutato
+// senza modificare nulla.
+var LAB_TARGET_PORTIONS_MAX=2147483647; // portions_count e' integer in Postgres
+
+// {ok:true,value} | {ok:false,error}. Porzioni: intero > 0 (la colonna e'
+// integer: un decimale farebbe fallire l'intero salvataggio). G/porzione:
+// numero finito > 0, a precisione piena.
+function validateLabProductionTarget(field,value){
+  var n=parseLocaleNumber(value);
+  if(field==='portions'){
+    if(!isFinite(n)||n<=0||!Number.isInteger(n)||n>LAB_TARGET_PORTIONS_MAX)return{ok:false,error:'Porzioni: inserisci un numero intero maggiore di zero.'};
+    return{ok:true,value:n};
+  }
+  if(field==='gpp'){
+    if(!isFinite(n)||n<=0)return{ok:false,error:'G/porzione: inserisci un numero maggiore di zero.'};
+    return{ok:true,value:n};
+  }
+  return{ok:false,error:'Campo non valido.'};
 }
 
-function scaleLabGpp(recipeId,newVal){
-  newVal=parseFloat(newVal);if(!newVal)return;
-  var recipe=R(recipeId);if(!recipe)return;
-  var v=curLab(recipe);if(!v)return;
-  var ratio=newVal/(v.gramsPerPortion||1);
-  upLab(recipeId,function(lv){
-    return Object.assign({},lv,{gramsPerPortion:newVal,
-      ingredients:lv.ingredients.map(function(i){return Object.assign({},i,{qty:Math.round(i.qty*ratio*100)/100});})});
-  });
+function setLabProductionTarget(recipeId,field,rawValue){
+  var v=curLab(R(recipeId));if(!v)return;
+  var res=validateLabProductionTarget(field,rawValue);
+  // toast() ridisegna: il campo torna al valore salvato
+  if(!res.ok){toast(res.error,'ti-alert-circle');return;}
+  var key=field==='portions'?'portionsCount':'gramsPerPortion';
+  if(v[key]===res.value)return;
+  upLab(recipeId,function(lv){var out=Object.assign({},lv);out[key]=res.value;return out;});
 }
+function onLabTargetPortions(recipeId,val){setLabProductionTarget(recipeId,'portions',val);}
+function onLabTargetGpp(recipeId,val){setLabProductionTarget(recipeId,'gpp',val);}
 
 function onIngUnit(recipeId,ingId,val){
   // Caso speciale: n → g (conversione con peso medio)
@@ -7420,18 +7435,21 @@ function renderLabRecipe(recipe){
       </div>
 
     </div>
-    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
-      <div class="scale-box">
-        <div class="scale-label">Porzioni</div>
-        <input class="scale-input" type="number" value="${v.portionsCount}" onchange="scaleLabPortions('${recipe.id}',this.value)">
-      </div>
-      <div class="scale-box">
-        <div class="scale-label">G/Porzione</div>
-        <input class="scale-input" type="number" value="${v.gramsPerPortion}" onchange="scaleLabGpp('${recipe.id}',this.value)">
-      </div>
-      <div class="scale-box">
-        <div class="scale-label">Peso totale</div>
-        <div class="scale-total">${Math.round(v.portionsCount*v.gramsPerPortion)} g</div>
+    <div id="lab-production-target" style="margin-top:16px">
+      <div class="scale-label" style="margin-bottom:6px" title="Quanto produrre: non modifica gli ingredienti della Ricetta">Obiettivo di Produzione · non modifica gli ingredienti</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div class="scale-box">
+          <div class="scale-label">Porzioni</div>
+          <input class="scale-input" type="number" min="1" step="1" value="${v.portionsCount}" onchange="onLabTargetPortions('${recipe.id}',this.value)">
+        </div>
+        <div class="scale-box">
+          <div class="scale-label">G/porzione finiti</div>
+          <input class="scale-input" type="number" min="0" step="any" value="${v.gramsPerPortion}" onchange="onLabTargetGpp('${recipe.id}',this.value)">
+        </div>
+        <div class="scale-box">
+          <div class="scale-label">Totale finito</div>
+          <div class="scale-total">${formatQtyDisplay(cnum(v.portionsCount)*cnum(v.gramsPerPortion))} g</div>
+        </div>
       </div>
     </div>
     <div class="header-actions">
