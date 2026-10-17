@@ -6724,6 +6724,9 @@ function renderLabWeightsPanel(recipe,v,w){
   }else if(state.status==='absent')notaUnit='Indica la resa per calcolare i pesi per unità.';
   else notaUnit='Valori per unità non calcolabili: resa non valida.';
 
+  // Valori medi di riferimento non confermati: i risultati sono stime
+  var stima=w.status==='complete'&&w.referenceDataUsed.length>0;
+  var lbl=function(t,valore){return stima&&valore!=='—'?t+' (stima)':t;};
   var box=function(label,valore,cls){return`<div class="${cls}" style="flex:1;min-width:130px;background:var(--cream);border:1px solid var(--border);border-radius:var(--r-md);padding:8px 10px"><div style="font-size:11px;color:var(--mid)">${label}</div><div style="font-family:'DM Mono',monospace;font-size:15px;color:var(--dark);margin-top:2px">${valore}</div></div>`;};
   return`<div id="lab-yield-weights" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
     <div class="card-label" style="margin-bottom:4px"><i class="ti ti-scale"></i> Resa e pesi della formulazione</div>
@@ -6736,14 +6739,14 @@ function renderLabWeightsPanel(recipe,v,w){
     </div>
     ${avviso}
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-      ${box('Peso a crudo totale',crudoTot,'lab-w-raw')}
-      ${box('Peso finito teorico',finitoTot,'lab-w-finished')}
-      ${box('Crudo per '+unitaLabel,crudoUnit,'lab-w-raw-unit')}
-      ${box('Finito per '+unitaLabel,finitoUnit,'lab-w-finished-unit')}
+      ${box(lbl('Peso a crudo totale',crudoTot),crudoTot,'lab-w-raw')}
+      ${box(lbl('Peso finito teorico',finitoTot),finitoTot,'lab-w-finished')}
+      ${box(lbl('Crudo per '+unitaLabel,crudoUnit),crudoUnit,'lab-w-raw-unit')}
+      ${box(lbl('Finito per '+unitaLabel,finitoUnit),finitoUnit,'lab-w-finished-unit')}
     </div>
     ${stato?`<div class="lab-w-status" style="font-size:12px;color:var(--orange-accessible,#b45309);margin-top:8px"><i class="ti ti-alert-triangle"></i> ${stato}</div>`:''}
     ${notaUnit?`<div class="lab-w-note" style="font-size:12px;color:var(--mid);margin-top:6px">${notaUnit}</div>`:''}
-    ${w.status==='complete'&&w.referenceDataUsed.length?`<div class="lab-w-ref" style="font-size:12px;color:var(--mid);margin-top:6px"><i class="ti ti-info-circle"></i> Include pesi di riferimento non confermati: ${w.referenceDataUsed.map(function(x){return escAttr(x.name);}).join(', ')}.</div>`:''}
+    ${stima?`<div class="lab-w-ref" style="font-size:12px;color:var(--mid);margin-top:6px"><i class="ti ti-info-circle"></i> Stima: usa pesi medi non confermati per ${w.referenceDataUsed.map(function(x){return escAttr(x.name);}).join(', ')}.</div>`:''}
   </div>`;
 }
 

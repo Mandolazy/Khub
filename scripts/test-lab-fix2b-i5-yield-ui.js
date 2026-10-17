@@ -300,8 +300,16 @@ const box = (h, cls) => { const m = h.match(new RegExp('class="' + cls + '"[^>]*
     const c2 = makeClient(clientFetch, { uova: 55 }); await c2.loadFromSupabase();
     lab(c2).ingredients.push({ id: 'u1', name: 'Uova', qty: 2, unit: 'n', estimatedYieldPct: null });
     h = c2.renderLabWeightsPanel(rec(c2), lab(c2));
-    assert.deepStrictEqual(box(h, 'lab-w-raw')[1], '1010 g', '900 + 2 x 55 (kg convertiti, non sommati come g)');
-    assert.ok(/Include pesi di riferimento non confermati: Uova/.test(text(h)));
+    assert.deepStrictEqual(box(h, 'lab-w-raw'), ['Peso a crudo totale (stima)', '1010 g'], '900 + 2 x 55 (kg convertiti, non sommati come g)');
+    assert.deepStrictEqual(box(h, 'lab-w-finished'), ['Peso finito teorico (stima)', '740 g']);
+    assert.deepStrictEqual(box(h, 'lab-w-finished-unit'), ['Finito per bignè (stima)', '24,67 g']);
+    assert.ok(/Stima: usa pesi medi non confermati per Uova\./.test(text(h)));
+    // con pesi tutti confermati (o solo g/kg) nessuna indicazione di stima
+    const hOk = panel(c);
+    assert.ok(!/stima/i.test(text(hOk)), 'nessuna stima senza pesi di riferimento');
+    // stato incompleto: nessuna stima mostrata sui valori assenti
+    lab(c2).ingredients.push({ id: 'p2', name: 'Panna', qty: 1, unit: 'ml', estimatedYieldPct: null });
+    assert.ok(!/stima/i.test(text(c2.renderLabWeightsPanel(rec(c2), lab(c2)))));
   });
 
   await test('U8. quantita\' positive molto piccole mai mostrate come zero', async () => {
