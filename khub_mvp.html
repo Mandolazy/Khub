@@ -976,6 +976,7 @@ const S = {
   pendingLabConversion: null, // LAB FIX 2B I3: fattore dell'ingrediente in attesa di conferma nel LAB
   labUnitAnchors: {},         // LAB FIX 2B I3: valore originale delle conversioni (solo memoria, mai salvato)
   labYieldInput: {},          // LAB FIX 2B I5: resa dichiarata in corso di inserimento non ancora valida (solo memoria)
+  activeYieldEdit: null,      // LAB FIX 2B I6: correzione della resa di una Ricetta Attiva in corso (solo memoria)
   // Sprint Produzione — Micro-Step 9: {nomeIngredienteNormalizzato:{id,sourceType}}
   // — provenance (id/sourceType) della fact n→g vincente per nome, popolata
   // in parallelo a unitWeights da loadFromSupabase (stessi dati gia'
@@ -2848,6 +2849,141 @@ function discardLabDeclaredYieldInput(recipeId){
   var v=curLab(R(recipeId));if(!v)return;
   delete S.labYieldInput[v.id];
   render();
+}
+
+// LAB FIX 2B — I6: correzione della resa dichiarata di una Ricetta Attiva,
+// dal Contenuto della Scheda. Nessuna nuova bozza, nessuna modifica della
+// formulazione: dopo una conferma esplicita, l'azione server dedicata
+// updateDeclaredYield aggiorna SOLO declared_yield_qty/declared_yield_unit di
+// quella Ricetta (mai il salvataggio completo). La memoria si aggiorna solo
+// dopo l'esito positivo, con i valori restituiti dal DB, senza autosave; la
+// firma di LAB FIX 1 viene riallineata solo se la versione era gia'
+// sincronizzata, cosi' nessun reinvio parte e nessuna modifica in sospeso
+// viene nascosta.
+function findActiveVariant(recipeId,variantId){
+  var r=R(recipeId);
+  var vv=r&&(r.validatedVariants||[]).find(function(x){return x.id===variantId;});
+  return vv&&vv.status!=='retired'&&vv.active===true?vv:null;
+}
+function declaredYieldLabel(qty,unit){return formatQtyDisplay(qty)+' '+unit;}
+function openActiveYieldEdit(recipeId,variantId){
+  var vv=findActiveVariant(recipeId,variantId);if(!vv)return;
+  S.activeYieldEdit={recipeId:recipeId,variantId:variantId,step:'edit',
+    qty:declaredYieldInputText(vv.declaredYieldQty),unit:declaredYieldInputText(vv.declaredYieldUnit),value:null,error:null,loading:false};
+  render();
+}
+function onActiveYieldField(field,value){
+  var e=S.activeYieldEdit;
+  if(!e||e.loading||(field!=='qty'&&field!=='unit'))return;
+  e[field]=value==null?'':String(value);
+}
+function reviewActiveYieldEdit(qtyRaw,unitRaw){
+  var e=S.activeYieldEdit;if(!e||e.loading)return;
+  if(qtyRaw!=null)e.qty=String(qtyRaw);
+  if(unitRaw!=null)e.unit=String(unitRaw);
+  var vv=findActiveVariant(e.recipeId,e.variantId);
+  if(!vv){e.error='Questa Ricetta non è più attiva.';render();return;}
+  var res=normalizeDeclaredYield(e.qty,e.unit);
+  if(!res.ok){e.error=declaredYieldErrorMessage(res.error);render();return;}
+  if(res.value===null){e.error='Inserisci quantità e unità della resa.';render();return;}
+  var cur=declaredYieldState(vv);
+  if(cur.status==='valid'&&cur.value.qty===res.value.qty&&cur.value.unit===res.value.unit){
+    e.error='La resa indicata è uguale a quella attuale.';render();return;
+  }
+  e.value=res.value;e.step='confirm';e.error=null;
+  render();
+}
+function backActiveYieldEdit(){
+  var e=S.activeYieldEdit;if(!e||e.loading)return;
+  e.step='edit';e.error=null;render();
+}
+function cancelActiveYieldEdit(){
+  if(S.activeYieldEdit&&S.activeYieldEdit.loading)return;
+  S.activeYieldEdit=null;render();
+}
+async function confirmActiveYieldEdit(){
+  var e=S.activeYieldEdit;
+  if(!e||e.step!=='confirm'||e.loading||!e.value)return;
+  var vvOld=findActiveVariant(e.recipeId,e.variantId);
+  if(!vvOld){e.error='Questa Ricetta non è più attiva: correzione non salvata.';render();return;}
+  e.loading=true;e.error=null;render();
+  var data=null;
+  try{
+    var r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      supabaseAction:'updateDeclaredYield',recipeId:e.recipeId,variantId:e.variantId,qty:e.value.qty,unit:e.value.unit})});
+    data=await r.json().catch(function(){return null;});
+    if(!r.ok)data={error:'HTTP '+r.status,code:'db'};
+  }catch(err){data={error:String(err),code:'network'};}
+  if(S.activeYieldEdit!==e)return;
+  var row=data&&data.ok===true&&data.row&&data.row.id===e.variantId&&data.row.recipe_id===e.recipeId?data.row:null;
+  if(!row){
+    var code=data&&data.code;
+    e.loading=false;
+    e.error=code==='not_active'?'Questa Ricetta non è più attiva: la correzione non è stata salvata.'
+      :code==='not_found'||code==='recipe_mismatch'?'Ricetta non trovata: la correzione non è stata salvata.'
+      :code==='invalid'?'Resa non valida: la correzione non è stata salvata.'
+      :'Errore nel salvataggio: la resa non è stata modificata. Riprova.';
+    render();return;
+  }
+  // Allineamento della memoria con il DB, senza autosave (nessun salvataggio completo).
+  var eraSincronizzata=_persistedValidatedSig[vvOld.id]===buildValidatedVariantPayload(e.recipeId,vvOld).sig;
+  var vvNew=Object.assign({},vvOld,{declaredYieldQty:row.declared_yield_qty,declaredYieldUnit:row.declared_yield_unit});
+  S.recipes=S.recipes.map(function(rr){
+    if(rr.id!==e.recipeId)return rr;
+    return Object.assign({},rr,{validatedVariants:rr.validatedVariants.map(function(x){return x.id===vvNew.id?vvNew:x;})});
+  });
+  if(eraSincronizzata)_persistedValidatedSig[vvNew.id]=buildValidatedVariantPayload(e.recipeId,vvNew).sig;
+  S.activeYieldEdit=null;
+  toast('Resa corretta: '+declaredYieldLabel(e.value.qty,e.value.unit),'ti-circle-check');
+}
+
+// Sezione "Resa dichiarata" nel Contenuto di una Ricetta Attiva: resa
+// attuale, pesi per unita' (stesse funzioni di I1/I5) e correzione con
+// conferma esplicita.
+function renderActiveYieldSection(recipe,v){
+  var e=S.activeYieldEdit&&S.activeYieldEdit.variantId===v.id&&S.activeYieldEdit.recipeId===recipe.id?S.activeYieldEdit:null;
+  var st=declaredYieldState(v);
+  var attuale=st.status==='valid'?escAttr(declaredYieldLabel(st.value.qty,st.value.unit))
+    :st.status==='absent'?'non dichiarata'
+    :'non valida ('+escAttr(declaredYieldInputText(v.declaredYieldQty))+' '+escAttr(declaredYieldInputText(v.declaredYieldUnit))+')';
+  var w=computeFormulationWeights(v.ingredients||[]);
+  var stima=w.status==='complete'&&w.referenceDataUsed.length>0?' (stima)':'';
+  var pesi='';
+  if(w.status==='complete'){
+    pesi='Crudo totale '+labGrams(w.raw)+' · finito teorico '+labGrams(w.finished)+stima;
+    if(st.status==='valid'){
+      var per=deriveYieldPerUnit(w,st.value);
+      if(per&&per.status==='complete'&&per.kind==='count')pesi+=' · per '+escAttr(st.value.unit)+': '+labGrams(per.rawPerUnit)+' crudi, '+labGrams(per.finishedPerUnit)+' finiti'+stima;
+    }
+  }else if(w.status==='incomplete')pesi='Pesi incompleti: mancano conversioni in grammi.';
+  var inputStyle='padding:6px 9px;border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:13px;color:var(--dark);background:var(--white);outline:none';
+  var corpo;
+  if(!e){
+    corpo=`<button class="si-riga-btn active-yield-open" onclick="openActiveYieldEdit('${recipe.id}','${v.id}')">Correggi resa</button>`;
+  }else if(e.step==='edit'){
+    corpo=`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:6px">
+        <input id="active-yield-qty-${v.id}" type="text" inputmode="decimal" autocomplete="off" placeholder="es. 32" value="${escAttr(e.qty)}" oninput="onActiveYieldField('qty',this.value)" style="${inputStyle};width:80px">
+        <input id="active-yield-unit-${v.id}" type="text" maxlength="${DECLARED_YIELD_UNIT_MAX_LENGTH}" autocomplete="off" placeholder="es. bignè" value="${escAttr(e.unit)}" oninput="onActiveYieldField('unit',this.value)" style="${inputStyle};width:140px">
+        <button class="si-riga-btn active-yield-review" onclick="reviewActiveYieldEdit(document.getElementById('active-yield-qty-${v.id}').value,document.getElementById('active-yield-unit-${v.id}').value)">Continua</button>
+        <button class="si-riga-btn" onclick="cancelActiveYieldEdit()">Annulla</button>
+      </div>`;
+  }else{
+    corpo=`<div class="active-yield-confirm" style="margin-top:6px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--white)">
+        <div style="font-size:13px;color:var(--dpop-inchiostro-testo)">Correggere la resa da <strong>${attuale}</strong> a <strong>${escAttr(declaredYieldLabel(e.value.qty,e.value.unit))}</strong>?</div>
+        <div style="font-size:12px;color:var(--dpop-grigio-dato);margin-top:2px">Cambia solo la resa di questa Ricetta attiva: ingredienti, quantità e procedimento restano invariati.</div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <button class="si-riga-btn active-yield-confirm-btn" onclick="confirmActiveYieldEdit()" ${e.loading?'disabled':''}>${e.loading?'Salvataggio…':'Conferma correzione'}</button>
+          <button class="si-riga-btn" onclick="backActiveYieldEdit()" ${e.loading?'disabled':''}>Indietro</button>
+        </div>
+      </div>`;
+  }
+  return`<div class="active-yield" style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+    <div style="font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--dpop-grigio-dato);margin-bottom:4px">Resa dichiarata</div>
+    <div class="active-yield-current" style="font-size:13px;color:var(--dpop-inchiostro-testo)">${attuale}</div>
+    ${pesi?`<div class="active-yield-weights" style="font-size:12px;color:var(--dpop-grigio-dato);margin-top:2px">${pesi}</div>`:''}
+    ${corpo}
+    ${e&&e.error?`<div class="active-yield-error" style="font-size:12px;color:#c0392b;margin-top:6px"><i class="ti ti-alert-circle"></i> ${escAttr(e.error)}</div>`:''}
+  </div>`;
 }
 
 // Conferma conversione n→g dopo che l'utente ha inserito il peso medio
@@ -7347,7 +7483,7 @@ function renderRicettaMadreV2(recipe){
           <button class="si-riga-btn" onclick="S.rmv2AttivaEspansa['${v.id}']=!S.rmv2AttivaEspansa['${v.id}'];render()">${espansa?'Chiudi':'Contenuto'}</button>
           <button class="si-riga-btn" onclick="toggleActiveV2('${recipe.id}','${v.id}',true)" title="Disattiva per la produzione">Disattiva</button>
         </div>
-        ${espansa?`<div class="si-riga-dettaglio">${renderContenutoVariante(v)}</div>`:''}
+        ${espansa?`<div class="si-riga-dettaglio">${renderContenutoVariante(v)}${renderActiveYieldSection(recipe,v)}</div>`:''}
       </div>`;
     }).join('')}`:'';
 

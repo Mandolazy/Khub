@@ -809,6 +809,49 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // LAB FIX 2B — I6: correzione della resa dichiarata di una Ricetta Attiva.
+    // PATCH mirata e condizionata: aggiorna SOLO declared_yield_qty e
+    // declared_yield_unit della riga identificata da id E recipe_id, e solo se
+    // e' una Ricetta Attiva (status=validated, active=true). Mai il salvataggio
+    // completo della versione: ingredienti, passaggi, altre colonne e altre
+    // versioni non vengono toccati. Successo solo con esattamente una riga
+    // aggiornata; altrimenti si distingue il motivo rileggendo la riga.
+    if (body.supabaseAction === 'updateDeclaredYield') {
+      const variantId = typeof body.variantId === 'string' ? body.variantId : '';
+      const recipeId = typeof body.recipeId === 'string' ? body.recipeId : '';
+      const qty = body.qty;
+      const unit = typeof body.unit === 'string' ? body.unit.replace(/\s+/g, ' ').trim() : '';
+      const unitLower = unit.toLowerCase().replace(/\.$/, '');
+      if (!variantId || !recipeId) {
+        return res.status(200).json({ error: 'updateDeclaredYield: Ricetta non identificata', code: 'invalid' });
+      }
+      if (typeof qty !== 'number' || !isFinite(qty) || qty <= 0 || !unit || unit.length > 40 || ['oz', 'lb', 'lbs'].includes(unitLower)) {
+        return res.status(200).json({ error: 'updateDeclaredYield: resa non valida', code: 'invalid' });
+      }
+      const cols = 'id,recipe_id,status,active,declared_yield_qty,declared_yield_unit';
+      const filter = 'id=eq.' + encodeURIComponent(variantId) + '&recipe_id=eq.' + encodeURIComponent(recipeId) + '&status=eq.validated&active=eq.true';
+      const pr = await fetch(SB + '/rest/v1/variants?' + filter + '&select=' + cols, {
+        method: 'PATCH', headers: { ...SH_READ, 'Prefer': 'return=representation' },
+        body: JSON.stringify({ declared_yield_qty: qty, declared_yield_unit: unit })
+      });
+      if (!pr.ok) {
+        const detail = await pr.text().catch(() => '');
+        console.error('Supabase error [variants declared_yield]:', pr.status, detail);
+        return res.status(200).json({ error: detail || ('HTTP ' + pr.status), code: 'db', status: pr.status });
+      }
+      const rows = await pr.json().catch(() => null);
+      if (Array.isArray(rows) && rows.length === 1) return res.status(200).json({ ok: true, row: rows[0] });
+      if (!Array.isArray(rows) || rows.length > 1) {
+        return res.status(200).json({ error: 'updateDeclaredYield: righe aggiornate ' + (Array.isArray(rows) ? rows.length : '?') + ' (attesa 1)', code: 'db' });
+      }
+      const rr = await fetch(SB + '/rest/v1/variants?id=eq.' + encodeURIComponent(variantId) + '&select=id,recipe_id,status,active', { headers: SH_READ });
+      const found = rr.ok ? await rr.json().catch(() => null) : null;
+      if (!Array.isArray(found)) return res.status(200).json({ error: 'updateDeclaredYield: nessuna riga aggiornata', code: 'db' });
+      if (found.length === 0) return res.status(200).json({ error: 'updateDeclaredYield: Ricetta non trovata', code: 'not_found' });
+      if (found[0].recipe_id !== recipeId) return res.status(200).json({ error: 'updateDeclaredYield: la Ricetta non appartiene a questa Scheda', code: 'recipe_mismatch' });
+      return res.status(200).json({ error: 'updateDeclaredYield: la Ricetta non e\' attiva', code: 'not_active', status: found[0].status, active: found[0].active });
+    }
+
     if (body.supabaseAction === 'update') {
       const ru = await sbPost(body.table, body.data);
       return res.status(200).json(ru);
