@@ -8446,6 +8446,7 @@ function renderLabConversionModal(){
         <span style="font-size:14px;color:var(--mid);font-weight:500">g</span>
       </div>
       ${p.isReference?`<div style="font-size:12px;color:var(--mid);margin-bottom:16px">Valore di riferimento indicativo, non ancora confermato: verificalo prima di confermare.</div>`:''}
+      <div id="lab-conv-shared-note" style="font-size:12px;color:var(--mid);margin-bottom:16px">Questo valore medio sarà utilizzato anche nelle altre ricette che contengono lo stesso ingrediente.</div>
       ${p.error?`<div style="font-size:13px;color:#c0392b;margin-bottom:14px">${escAttr(p.error)}</div>`:''}
       <div style="display:flex;gap:8px">
         <button id="lab-conv-confirm" onclick="confirmLabConversion(document.getElementById('lab-conv-input').value)" ${p.loading?'disabled':''}

@@ -227,6 +227,7 @@ function makeClient(fetchImpl) {
     assert.strictEqual(p.value, '55'); assert.strictEqual(p.isReference, true);
     assert.deepStrictEqual([ingOf(c, 'Uova').qty, ingOf(c, 'Uova').unit], [3, 'n'], 'nulla cambia prima della conferma');
     assert.ok(/Valore di riferimento indicativo/.test(c.renderLabConversionModal()));
+    assert.ok(c.renderLabConversionModal().includes('Questo valore medio sarà utilizzato anche nelle altre ricette che contengono lo stesso ingrediente.'), 'avviso di condivisione tra ricette');
     await c.confirmLabConversion('55');
     assert.deepStrictEqual([ingOf(c, 'Uova').qty, ingOf(c, 'Uova').unit], [165, 'g']);
     const row = fake.tables.ingredient_conversions.find(r => r.ingredient_name === 'uova');
@@ -300,6 +301,7 @@ function makeClient(fetchImpl) {
     assert.strictEqual(c.S.pendingLabConversion.askUnit, 'tbsp');
     assert.strictEqual(c.S.pendingLabConversion.value, '', 'nessuna proposta generica');
     assert.ok(/cucchiaio \(tbsp\)/.test(c.renderLabConversionModal()));
+    assert.ok(c.renderLabConversionModal().includes('Questo valore medio sarà utilizzato anche nelle altre ricette che contengono lo stesso ingrediente.'), 'avviso anche senza proposta di riferimento');
     assert.deepStrictEqual([ingOf(c, 'Zucchero').qty, ingOf(c, 'Zucchero').unit], [2, 'tbsp'], 'mai 30 g (15 g generici)');
     await c.confirmLabConversion('12,5');
     assert.deepStrictEqual([ingOf(c, 'Zucchero').qty, ingOf(c, 'Zucchero').unit], [25, 'g']);
