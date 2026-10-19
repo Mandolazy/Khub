@@ -173,7 +173,7 @@ const SRC = [
   'function updateKnownIngredientIds(knownByVariant,currentByVariant,deleted)', 'function firmaContenutoBozza(v)',
   'async function loadFromSupabase()', 'function parseSteps(raw)', 'function getStructuredSteps(legacySteps,stepsV2)',
   // LAB FIX 2B I4: resa dichiarata (caricamento, salvataggio, copie)
-  'function declaredYieldFromRow(row)', 'function copyDeclaredYield(src)', 'function declaredYieldPayload(v)', 'function stepsV2ToLegacyArray(stepsV2)', 'function makeDefaultLab(recipeId,name)', 'function buildValidatedVariantPayload(recipeId,vv)', 'async function saveToSupabase(recipe)',
+  'function targetFromDb(value)', 'function targetForDb(value)', 'function declaredYieldFromRow(row)', 'function copyDeclaredYield(src)', 'function declaredYieldPayload(v)', 'function stepsV2ToLegacyArray(stepsV2)', 'function makeDefaultLab(recipeId,name)', 'function buildValidatedVariantPayload(recipeId,vv)', 'async function saveToSupabase(recipe)',
 ].map(extractFunction).concat(html.match(/var SESSION_SCALING_[A-Z_]+=\{[^}]*\};/g), [html.match(/const UNITS = \[[^\]]*\];/)[0]]).join('\n');
 
 function makeClient(fetchImpl) {
@@ -408,7 +408,19 @@ function makeClient(fetchImpl) {
     };
     // LAB FIX 2B I4 aggiunge a load/save SOLO righe della resa dichiarata:
     // tolte quelle righe, le due funzioni sono identiche a main.
-    const withoutI4 = (m, code) => /loadFromSupabase|saveToSupabase/.test(m) ? code.split('\n').filter(l => !/declaredYield/.test(l)).join('\n') : code;
+    // LAB FIX 2C (C1) modifica di proposito caricamento e salvataggio (obiettivo di
+    // Produzione senza 4/200): applicando l'inverso ESATTO di quelle modifiche le
+    // due funzioni tornano identiche a main, quindi C1 non ha cambiato altro.
+    const undoC1 = code => code
+      .split('\n').filter(l => !/LAB FIX 2C \(C1\): obiettivo di Produzione letto dal DB|mai sostituito con 4\/200; 0 = non impostato\./.test(l)).join('\n')
+      .replace('portionsCount:targetFromDb(v.portions_count),', 'portionsCount:v.portions_count||4,')
+      .replace('gramsPerPortion:targetFromDb(v.grams_per_portion), //', 'gramsPerPortion:v.grams_per_portion||200, //')
+      .replace('portionSize:targetFromDb(v.grams_per_portion),      //', 'portionSize:v.grams_per_portion||200,      //')
+      .replace('portionsCount:targetFromDb(v.portions_count),', 'portionsCount:v.portions_count||4,')
+      .replace('gramsPerPortion:targetFromDb(v.grams_per_portion), //', 'gramsPerPortion:v.grams_per_portion||200, //')
+      .replace('portionSize:targetFromDb(v.grams_per_portion),      //', 'portionSize:v.grams_per_portion||200,      //')
+      .replace('portions_count:targetForDb(v.portionsCount),grams_per_portion:targetForDb(v.gramsPerPortion),', 'portions_count:v.portionsCount,grams_per_portion:v.gramsPerPortion,');
+    const withoutI4 = (m, code) => /loadFromSupabase|saveToSupabase/.test(m) ? undoC1(code).split('\n').filter(l => !/declaredYield/.test(l)).join('\n') : code;
     for (const [m, h] of Object.entries(expect)) assert.strictEqual(sha(withoutI4(m, extractFunction(m))), h, 'cambiato: ' + m);
   });
 

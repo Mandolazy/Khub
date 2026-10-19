@@ -147,7 +147,7 @@ const SRC = [
   'function resolveKnownProductionConversionFact(normalizedName,unit)',
   'function parseLocaleNumber(value)', 'function normalizeDeclaredYield(qty,unit)', 'function classifyYieldUnit(unit)',
   'function computeFormulationWeights(ingredients,resolveFact)', 'function deriveYieldPerUnit(weights,declared)', 'function formatQtyDisplay(value)',
-  'function declaredYieldFromRow(row)', 'function copyDeclaredYield(src)', 'function declaredYieldPayload(v)', 'function declaredYieldState(v)',
+  'function targetFromDb(value)', 'function targetForDb(value)', 'function declaredYieldFromRow(row)', 'function copyDeclaredYield(src)', 'function declaredYieldPayload(v)', 'function declaredYieldState(v)',
   'function declaredYieldInputText(raw)', 'function declaredYieldErrorMessage(error)', 'function onLabDeclaredYield(recipeId,field,value)',
   'function discardLabDeclaredYieldInput(recipeId)', 'function labGrams(x)', 'function renderLabWeightsPanel(recipe,v,w)',
   'function validateLabProductionTarget(field,value)', 'function setLabProductionTarget(recipeId,field,rawValue)', 'function onLabTargetPortions(recipeId,val)',
@@ -342,8 +342,8 @@ const box = (h, cls) => { const m = h.match(new RegExp('class="' + cls + '"[^>]*
     const before = { v: dbVariant(fake, 'vaB'), i: ingContent(fake, 'vaB'), s: clone(fake.tables.production_sessions) };
     c.onLabDeclaredYield('rB', 'qty', '32'); c.onLabDeclaredYield('rB', 'unit', 'bignè');
     c.onLabTargetPortions('rB', '50');
-    // grams_per_portion 0 viene riletto 200 (valore predefinito del caricamento, FIX 2C): invariato da I5
-    assert.deepStrictEqual([lab(c).declaredYieldQty, lab(c).portionsCount, lab(c).gramsPerPortion], [32, 50, 200]);
+    // LAB FIX 2C (C1): grams_per_portion 0 resta 0 alla rilettura (prima diventava 200)
+    assert.deepStrictEqual([lab(c).declaredYieldQty, lab(c).portionsCount, lab(c).gramsPerPortion], [32, 50, 0]);
     assert.strictEqual(await save(c), true);
     assert.deepStrictEqual(saves[0].variants.map(v => v.id), ['lvB']);
     assert.deepStrictEqual({ v: dbVariant(fake, 'vaB'), i: ingContent(fake, 'vaB'), s: clone(fake.tables.production_sessions) }, before);

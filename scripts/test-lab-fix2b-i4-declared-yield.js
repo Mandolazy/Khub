@@ -165,7 +165,7 @@ function extractFunction(startMarker) {
 const SRC = [
   'function R(id)', 'function curLab(recipe)', 'function cnum(n)', 'function upRec(id,fn)', 'function upLab(id,fn)', 'function activeVariants(recipe)',
   'function parseLocaleNumber(value)', 'function normalizeDeclaredYield(qty,unit)', 'function classifyYieldUnit(unit)',
-  'function declaredYieldFromRow(row)', 'function copyDeclaredYield(src)', 'function declaredYieldPayload(v)', 'function declaredYieldState(v)',
+  'function targetFromDb(value)', 'function targetForDb(value)', 'function declaredYieldFromRow(row)', 'function copyDeclaredYield(src)', 'function declaredYieldPayload(v)', 'function declaredYieldState(v)',
   'function validateLabProductionTarget(field,value)', 'function setLabProductionTarget(recipeId,field,rawValue)', 'function onLabTargetPortions(recipeId,val)',
   'function creaBozzaDaSorgente(recipeId,attiva)', 'function duplicaVersioneLAB(recipeId)', 'async function creaSchedaDaLab(recipeId)',
   'function rendiAttiva(recipeId)', 'function onValidate()', 'async function confirmValidate()',

@@ -1463,6 +1463,15 @@ function declaredYieldState(v){
   return{status:'invalid',error:r.error,raw:{qty:q,unit:u}};
 }
 
+// LAB FIX 2C (C1): obiettivo di Produzione (portions_count, grams_per_portion).
+// 0 = non impostato. In lettura il valore del DB resta esattamente quello
+// salvato (mai 4/200); in scrittura le due chiavi sono SEMPRE presenti e
+// solo null/undefined diventano 0 esplicito, cosi' una riga nuova non riceve
+// mai i default SQL 4/200. Qualunque altro valore viene inviato com'e'
+// (nessuna correzione dei dati storici).
+function targetFromDb(value){return value==null?0:value;}
+function targetForDb(value){return value==null?0:value;}
+
 let _persistedValidatedSig={};
 function buildValidatedVariantPayload(recipeId,vv){
   const structuredStepsVal=getStructuredSteps(vv.steps,vv.stepsV2);
@@ -1474,7 +1483,7 @@ function buildValidatedVariantPayload(recipeId,vv){
     label:vv.persistedLabel!=null?vv.persistedLabel:vv.name,
     note:vv.persistedNote!=null?vv.persistedNote:'',
     status:vv.status==='retired'?'retired':'validated', // simmetria con la lettura: 'retired' deve sopravvivere al save
-    portions_count:vv.portionsCount,grams_per_portion:vv.gramsPerPortion,portion_unit:vv.portionUnit||'g',
+    portions_count:targetForDb(vv.portionsCount),grams_per_portion:targetForDb(vv.gramsPerPortion),portion_unit:vv.portionUnit||'g',
     steps:JSON.stringify(stepsV2ToLegacyArray(structuredStepsVal)),
     steps_v2:structuredStepsVal,
     // LAB FIX 1.1: timestamp del DB riscritto identico; se nel DB mancava
@@ -1662,9 +1671,11 @@ async function loadFromSupabase(){
         id:v.id,label:v.label||v.name||'Bozza 1',name:v.name||r.name,note:v.note||'',
         originVariantId:v.origin_variant_id||null,
         contenutoModificatoIl:v.contenuto_modificato_il||null, // LAB globale (Micro-Step successivo)
-        portionsCount:v.portions_count||4,
-        gramsPerPortion:v.grams_per_portion||200, // mantenuto per compatibilità
-        portionSize:v.grams_per_portion||200,      // Step 1: nuovo nome semantico
+        // LAB FIX 2C (C1): obiettivo di Produzione letto dal DB cosi' com'e',
+        // mai sostituito con 4/200; 0 = non impostato.
+        portionsCount:targetFromDb(v.portions_count),
+        gramsPerPortion:targetFromDb(v.grams_per_portion), // mantenuto per compatibilità
+        portionSize:targetFromDb(v.grams_per_portion),      // Step 1: nuovo nome semantico
         portionUnit:v.portion_unit||'g',           // Step 1: unità porzione
         ...declaredYieldFromRow(v),                // I4: resa dichiarata, valore grezzo
         ingredients:(data.ingredients||[]).filter(i=>i.variant_id===v.id).sort((a,b)=>a.sort_order-b.sort_order).map(i=>({
@@ -1695,9 +1706,11 @@ async function loadFromSupabase(){
         // LAB FIX 1: valori grezzi del DB, riscritti identici al save
         validatedAtIso:v.validated_at||null,validatedAtMissingInDb:!v.validated_at,persistedNote:v.note!=null?v.note:null,persistedLabel:v.label!=null?v.label:null,
         originVariantId:v.origin_variant_id||null,
-        portionsCount:v.portions_count||4,
-        gramsPerPortion:v.grams_per_portion||200, // mantenuto per compatibilità
-        portionSize:v.grams_per_portion||200,      // Step 1: nuovo nome semantico
+        // LAB FIX 2C (C1): obiettivo di Produzione letto dal DB cosi' com'e',
+        // mai sostituito con 4/200; 0 = non impostato.
+        portionsCount:targetFromDb(v.portions_count),
+        gramsPerPortion:targetFromDb(v.grams_per_portion), // mantenuto per compatibilità
+        portionSize:targetFromDb(v.grams_per_portion),      // Step 1: nuovo nome semantico
         portionUnit:v.portion_unit||'g',           // Step 1: unità porzione
         ...declaredYieldFromRow(v),                // I4: resa dichiarata, valore grezzo
         ingredients:(data.ingredients||[]).filter(i=>i.variant_id===v.id).sort((a,b)=>a.sort_order-b.sort_order).map(i=>({
@@ -1871,7 +1884,7 @@ function parseExpectedDurationMinutesInput(val){
 }
 
 function makeDefaultLab(recipeId,name){
-  return{id:'lv_'+uid(),label:'Bozza 1',name:name||'',note:'',portionsCount:1,gramsPerPortion:0,portionSize:0,portionUnit:'g',ingredients:[],steps:[],stepsV2:[],mediaUrl:null,videoUrl:null,active:false,originVariantId:null,
+  return{id:'lv_'+uid(),label:'Bozza 1',name:name||'',note:'',portionsCount:0,gramsPerPortion:0,portionSize:0,portionUnit:'g',ingredients:[],steps:[],stepsV2:[],mediaUrl:null,videoUrl:null,active:false,originVariantId:null,
     l2Items:[],intentionInitial:null,intentionCurrent:null,criteriaInitial:null,criteriaCurrent:null,m1ReadingText:null};
 }
 
@@ -1904,7 +1917,7 @@ async function saveToSupabase(recipe){
       const structuredStepsLab=getStructuredSteps(v.steps,v.stepsV2);
       allVariants.push({
         id:v.id,recipe_id:recipe.id,name:v.name||recipe.name,label:v.label,note:v.note||'',
-        status:'lab',portions_count:v.portionsCount,grams_per_portion:v.gramsPerPortion,portion_unit:v.portionUnit||'g',
+        status:'lab',portions_count:targetForDb(v.portionsCount),grams_per_portion:targetForDb(v.gramsPerPortion),portion_unit:v.portionUnit||'g',
         steps:JSON.stringify(stepsV2ToLegacyArray(structuredStepsLab)),
         steps_v2:structuredStepsLab,
         media_url:v.mediaUrl||null,video_url:v.videoUrl||null,
@@ -2310,7 +2323,7 @@ async function saveFamilies(variantId, familyIds, newFamilyName){
 function creaBozzaDaSorgente(recipeId,attiva){
   var recipe=R(recipeId);
   if(!recipe)return;
-  var sorgente=attiva||{portionsCount:1,gramsPerPortion:0,portionSize:0,portionUnit:'g',ingredients:[],steps:[],label:'',name:recipe.name};
+  var sorgente=attiva||{portionsCount:0,gramsPerPortion:0,portionSize:0,portionUnit:'g',ingredients:[],steps:[],label:'',name:recipe.name}; // FIX 2C: obiettivo non impostato
   var nuovaBozza={
     id:"lv"+uid(),
     label:"Bozza 1",
@@ -2639,18 +2652,9 @@ function addIngredient(recipeId){
     if(!nameEl||!nameEl.value.trim())return;
     ing={id:uid(),name:nameEl.value.trim(),qty:parseFloat(qtyEl?.value)||0,unit:unitEl?.value||'g',isSubRecipe:false,subRecipeId:null,estimatedYieldPct:null,measuredYieldPct:null};
   }
-  upLab(recipeId,v=>{
-    const newIngs=[...v.ingredients,ing];
-    // Punto 4: se porzioni=1, gramsPerPortion = somma totale ingredienti
-    if(v.portionsCount===1){
-      const tot=newIngs.reduce((s,i)=>{
-        if(i.unit==='kg'||i.unit==='l')return s+cnum(i.qty)*1000;
-        return s+cnum(i.qty);
-      },0);
-      return{...v,ingredients:newIngs,gramsPerPortion:Math.round(tot),portionSize:Math.round(tot)};
-    }
-    return{...v,ingredients:newIngs};
-  });
+  // LAB FIX 2C (C1): aggiungere un ingrediente non modifica mai l'obiettivo
+  // di Produzione (niente G/porzione calcolato sommando le quantita').
+  upLab(recipeId,v=>({...v,ingredients:[...v.ingredients,ing]}));
   const nameEl=document.getElementById('new-ing-name');
   if(nameEl)nameEl.value='';
   if(qtyEl)qtyEl.value='';
