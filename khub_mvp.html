@@ -2715,6 +2715,10 @@ function targetPrintParts(portions,gpp){
   return(labTargetIsSet(portions)?' · '+portions+' porzioni':'')+(labTargetIsSet(gpp)?' · '+gpp+'g/porzione':'');
 }
 function targetForShare(value){return labTargetIsSet(value)?value:null;}
+// LAB FIX 2C (C6): obiettivo nei payload MichelinAI M1/M2. Non impostato =
+// null (il server lo mostra come "n/d"); valori impostati invariati. Solo nel
+// payload per l'AI: snapshot e baseline delle osservazioni L2 restano invariati.
+function targetForAi(value){return labTargetIsSet(value)?value:null;}
 
 function setLabProductionTarget(recipeId,field,rawValue){
   var v=curLab(R(recipeId));if(!v)return;
@@ -6084,8 +6088,8 @@ function costruisciPayloadM2(recipeId, message, classification){
       id:v.id,
       ingredients:(v.ingredients||[]).map(i=>({name:i.name,qty:i.qty,unit:i.unit})),
       steps:[...(v.steps||[])],
-      portionsCount:v.portionsCount,
-      gramsPerPortion:v.gramsPerPortion,
+      portionsCount:targetForAi(v.portionsCount), // FIX 2C (C6): non impostato = null
+      gramsPerPortion:targetForAi(v.gramsPerPortion),
       note:v.note||'',
     },
     l2:(v.l2Items||[]).map(function(item){
@@ -6704,7 +6708,8 @@ async function runM1(recipeId){
     const payload={
       mode:'m1',
       recipe:{id:recipe.id,name:recipe.name,category:recipe.category},
-      variant:{id:v.id,ingredients:snapshot.ingredients,steps:snapshot.steps,portionsCount:snapshot.portionsCount,gramsPerPortion:snapshot.gramsPerPortion,note:snapshot.note},
+      // FIX 2C (C6): null solo nel payload per l'AI; lo snapshot (baseline L2) resta invariato.
+      variant:{id:v.id,ingredients:snapshot.ingredients,steps:snapshot.steps,portionsCount:targetForAi(snapshot.portionsCount),gramsPerPortion:targetForAi(snapshot.gramsPerPortion),note:snapshot.note},
       intention:{initial:v.intentionInitial||null,current:v.intentionCurrent||null},
       criteria:{initial:v.criteriaInitial||null,current:v.criteriaCurrent||null},
       l3:(recipe.l3Items||[]).slice(0,20).map(x=>({distilledContent:x.distilledContent,contextConditions:x.contextConditions,knownLimits:x.knownLimits})),

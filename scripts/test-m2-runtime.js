@@ -40,6 +40,8 @@ function extractFunction(startMarker) {
 const srcR = extractFunction('function R(id)');
 const srcCurLab = extractFunction('function curLab(recipe)');
 const srcBuilder = extractFunction('function costruisciPayloadM2(recipeId, message, classification)');
+// LAB FIX 2C (C6): dipendenze di costruisciPayloadM2 (obiettivo non impostato = null nel payload).
+const srcTargetDeps = ['function parseLocaleNumber(value)', 'function labTargetIsSet(value)', 'function targetForAi(value)'].map(extractFunction).join('\n');
 const srcRunM2 = extractFunction('async function runM2(recipeId, message)');
 const srcUid = extractFunction('function uid()');
 
@@ -56,7 +58,7 @@ function makeRunM2(S, fetchImpl) {
   const renderLog = [];
   const factory = new Function(
     'S', 'KhubReconciliation', 'fetch', 'render', 'toast', 'console', 'uid',
-    srcR + '\n' + srcCurLab + '\n' + srcBuilder + '\n' + srcRunM2 + '\nreturn runM2;'
+    srcR + '\n' + srcCurLab + '\n' + srcTargetDeps + '\n' + srcBuilder + '\n' + srcRunM2 + '\nreturn runM2;'
   );
   const runM2 = factory(
     S, KhubReconciliation, fetchImpl,

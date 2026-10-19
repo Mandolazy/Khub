@@ -121,7 +121,7 @@ async function loadHandler() {
 // ══════════════════════════════════════════════════════════
 const CLIENT_SRC = [
   'function R(id)', 'function curLab(recipe)', 'function uid()', 'function escAttr(s)',
-  'function costruisciPayloadM2(recipeId, message, classification)', 'async function runM2(recipeId, message)',
+  'function parseLocaleNumber(value)', 'function labTargetIsSet(value)', 'function targetForAi(value)', 'function costruisciPayloadM2(recipeId, message, classification)', 'async function runM2(recipeId, message)',
   'async function inviaMichelinAI(recipeId)',
   'function m2TurnsEntry(variantId)', 'function sortM2Turns(turns)', 'function recordM2Turn(variantId,question,response)',
   'async function persistM2Turn(variantId,turnId)', 'function riprovaSalvataggioTurnoM2(variantId,turnId)',

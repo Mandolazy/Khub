@@ -48,6 +48,8 @@ function extractFunction(startMarker) {
 const srcR = extractFunction('function R(id)');
 const srcCurLab = extractFunction('function curLab(recipe)');
 const srcBuilder = extractFunction('function costruisciPayloadM2(recipeId, message, classification)');
+// LAB FIX 2C (C6): dipendenze di costruisciPayloadM2 (obiettivo non impostato = null nel payload).
+const srcTargetDeps = ['function parseLocaleNumber(value)', 'function labTargetIsSet(value)', 'function targetForAi(value)'].map(extractFunction).join('\n');
 
 console.log('A. estrazione e caricamento in sandbox');
 
@@ -65,7 +67,7 @@ test('le tre funzioni (R, curLab, costruisciPayloadM2) sono state estratte dal s
 // pur essendo l'output strutturalmente identico). Nessun bisogno di vero
 // isolamento: il codice estratto e' quello, fidato, di khub_mvp.html.
 function loadBuilder(S) {
-  const factory = new Function('S', srcR + '\n' + srcCurLab + '\n' + srcBuilder + '\nreturn costruisciPayloadM2;');
+  const factory = new Function('S', srcR + '\n' + srcCurLab + '\n' + srcTargetDeps + '\n' + srcBuilder + '\nreturn costruisciPayloadM2;');
   return factory(S);
 }
 
