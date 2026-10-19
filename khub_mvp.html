@@ -2693,6 +2693,18 @@ function validateLabProductionTarget(field,value){
 // Valore di un campo dell'obiettivo: vuoto se non impostato (0), mai "0".
 function labTargetIsSet(value){var n=parseLocaleNumber(value);return isFinite(n)&&n>0;}
 function labTargetInputValue(value){return value==null||value===''||Number(value)===0?'':String(value);}
+// LAB FIX 2C (C3): obiettivo fuori dal LAB (Schede, elenchi versioni, stampa,
+// intestazione Produzione, condivisione). Un valore non impostato e' assente
+// ("—" o null), mai "0"; i valori impostati, compresi i storici 4/200, sono
+// mostrati esattamente come prima. Solo visualizzazione: nessun dato cambia.
+function targetDisplay(value){return labTargetIsSet(value)?String(value):'—';}
+function targetSummaryShort(portions,gpp){
+  return targetDisplay(portions)+' porz · '+(labTargetIsSet(gpp)?gpp+'g/porz':'— g/porz');
+}
+function targetPrintParts(portions,gpp){
+  return(labTargetIsSet(portions)?' · '+portions+' porzioni':'')+(labTargetIsSet(gpp)?' · '+gpp+'g/porzione':'');
+}
+function targetForShare(value){return labTargetIsSet(value)?value:null;}
 
 function setLabProductionTarget(recipeId,field,rawValue){
   var v=curLab(R(recipeId));if(!v)return;
@@ -7298,7 +7310,7 @@ function shareVariant(recipeId,variantId){
   const recipe=R(recipeId);
   const vv=recipe&&recipe.validatedVariants.find(v=>v.id===variantId);
   if(!vv)return;
-  const data={n:recipe.name,v:vv.name,p:vv.portionsCount,g:vv.gramsPerPortion,i:vv.ingredients.map(i=>i.name+':'+i.qty+i.unit).join('|'),s:(vv.steps||[]).join('§')};
+  const data={n:recipe.name,v:vv.name,p:targetForShare(vv.portionsCount),g:targetForShare(vv.gramsPerPortion),i:vv.ingredients.map(i=>i.name+':'+i.qty+i.unit).join('|'),s:(vv.steps||[]).join('§')};
   const url=window.location.origin+'/khub_mvp.html?share='+btoa(encodeURIComponent(JSON.stringify(data)));
   if(navigator.share){navigator.share({title:recipe.name+' — '+vv.name,url});}
   else{navigator.clipboard.writeText(url).then(()=>toast('Link copiato','ti-link')).catch(()=>prompt('Copia:',url));}
@@ -7314,7 +7326,7 @@ function exportPDF(recipeId,variantId){
   const pesoFinitoStimato=hasYieldProd?Math.round(vv.ingredients.reduce((s,i)=>s+cnum(i.qty)*effectiveYield(i),0)):null;
   const rows=vv.ingredients.map(i=>`<tr><td>${i.name}</td><td style="text-align:right;font-family:monospace">${i.qty} ${i.unit}</td><td style="text-align:right;color:#888;font-family:monospace">${tot>0?(cnum(i.qty)/tot*100).toFixed(1):0}%</td></tr>`).join('');
   const steps=(vv.steps||[]).length?'<h3 style="margin:24px 0 10px">Procedimento</h3><ol>'+vv.steps.map(s=>`<li style="margin-bottom:6px;line-height:1.6">${s}</li>`).join('')+'</ol>':'';
-  const h=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${recipe.name} — ${vv.name}</title><style>*{box-sizing:border-box}body{font-family:Georgia,serif;max-width:700px;margin:40px auto;padding:0 20px;color:#222;font-size:14px;line-height:1.6}h1{font-size:24px;margin-bottom:4px;letter-spacing:-0.3px}table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}th{text-align:left;border-bottom:2px solid #333;padding:8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em}td{padding:6px 6px;border-bottom:1px solid #ddd}tr:last-child td{border-bottom:none}.meta{color:#888;font-size:12px;margin:6px 0 24px}.badge{background:#C85A1E;color:white;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;margin-left:8px;vertical-align:middle}.steps-list{margin-top:8px;padding-left:20px}.steps-list li{margin-bottom:8px;line-height:1.6}@media print{body{margin:16px;-webkit-print-color-adjust:exact}@page{margin:1.5cm}.badge{-webkit-print-color-adjust:exact}}</style></head><body><h1>${recipe.name}<span class="badge">${vv.name}</span></h1><div class="meta">Validata il ${vv.validatedAt} · ${vv.portionsCount} porzioni · ${vv.gramsPerPortion}g/porzione</div><table><thead><tr><th>Ingrediente</th><th style="text-align:right">Quantità</th><th style="text-align:right">%</th></tr></thead><tbody>${rows}</tbody></table>${steps}<div style="margin-top:40px;font-size:11px;color:#ccc;border-top:1px solid #eee;padding-top:12px">Generato da Khub</div></body></html>`;
+  const h=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${recipe.name} — ${vv.name}</title><style>*{box-sizing:border-box}body{font-family:Georgia,serif;max-width:700px;margin:40px auto;padding:0 20px;color:#222;font-size:14px;line-height:1.6}h1{font-size:24px;margin-bottom:4px;letter-spacing:-0.3px}table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}th{text-align:left;border-bottom:2px solid #333;padding:8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em}td{padding:6px 6px;border-bottom:1px solid #ddd}tr:last-child td{border-bottom:none}.meta{color:#888;font-size:12px;margin:6px 0 24px}.badge{background:#C85A1E;color:white;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;margin-left:8px;vertical-align:middle}.steps-list{margin-top:8px;padding-left:20px}.steps-list li{margin-bottom:8px;line-height:1.6}@media print{body{margin:16px;-webkit-print-color-adjust:exact}@page{margin:1.5cm}.badge{-webkit-print-color-adjust:exact}}</style></head><body><h1>${recipe.name}<span class="badge">${vv.name}</span></h1><div class="meta">Validata il ${vv.validatedAt}${targetPrintParts(vv.portionsCount,vv.gramsPerPortion)}</div><table><thead><tr><th>Ingrediente</th><th style="text-align:right">Quantità</th><th style="text-align:right">%</th></tr></thead><tbody>${rows}</tbody></table>${steps}<div style="margin-top:40px;font-size:11px;color:#ccc;border-top:1px solid #eee;padding-top:12px">Generato da Khub</div></body></html>`;
   const w=window.open('','_blank');
   if(!w){toast('Popup bloccato — consenti i popup per questo sito','ti-alert-circle');return;}
   w.document.write(h);
@@ -7493,7 +7505,7 @@ function renderRicettaMadreV2(recipe){
       return `<div class="si-riga">
         <button class="si-riga-apri" onclick="S.view='recipe';S.mode='produzione';S.selectedVariantId='${v.id}';render()">
           <span class="si-riga-nome">${v.name}</span>
-          <span class="si-riga-sub">${v.portionsCount} porz · ${v.gramsPerPortion}g/porz · dal ${v.validatedAt}</span>
+          <span class="si-riga-sub">${targetSummaryShort(v.portionsCount,v.gramsPerPortion)} · dal ${v.validatedAt}</span>
         </button>
         <div class="si-riga-azioni">
           <button class="si-riga-btn" onclick="S.rmv2AttivaEspansa['${v.id}']=!S.rmv2AttivaEspansa['${v.id}'];render()">${espansa?'Chiudi':'Contenuto'}</button>
@@ -8048,7 +8060,7 @@ function renderLabRecipe(recipe){
         const isRetired=vv.status==='retired';
         return `<div class="variant-card ${isActive?'production':''}">
           <div class="vc-dot ${isActive?'production':'validated'}"></div>
-          <div style="flex:1"><div class="vc-name">${vv.name}</div><div class="vc-meta">${vv.portionsCount} porz · ${vv.gramsPerPortion}g/porz · ${vv.validatedAt}</div></div>
+          <div style="flex:1"><div class="vc-name">${vv.name}</div><div class="vc-meta">${targetSummaryShort(vv.portionsCount,vv.gramsPerPortion)} · ${vv.validatedAt}</div></div>
           ${isActive?'<span class="vc-prod-badge">Attiva</span>':isRetired?'<span class="vc-prod-badge" style="color:var(--light)">Archiviata</span>':'<span class="vc-prod-badge validated">Pronta</span>'}
           <button onclick="deleteVariant('${recipe.id}','${vv.id}')" title="Elimina" style="background:none;border:none;cursor:pointer;color:var(--light);font-size:13px;padding:4px;transition:color 0.12s" onmouseover="this.style.color='#c0392b'" onmouseout="this.style.color='var(--light)'"><i class="ti ti-trash"></i></button>
         </div>`;
@@ -8395,15 +8407,15 @@ function renderProdRecipe(recipe){
     <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
       <div class="scale-box">
         <div class="scale-label">Porzioni</div>
-        <div class="scale-total">${vv.portionsCount}</div>
+        <div class="scale-total rw-portions">${targetDisplay(vv.portionsCount)}</div>
       </div>
       <div class="scale-box">
         <div class="scale-label">${hasYieldProd?'G/Porz. finiti':'G/Porzione'}</div>
-        <div class="scale-total">${vv.gramsPerPortion}</div>
+        <div class="scale-total rw-gpp">${targetDisplay(vv.gramsPerPortion)}</div>
       </div>
       <div class="scale-box">
         <div class="scale-label">Target dichiarato</div>
-        <div class="scale-total rw-declared">${formatQuickCalcQty(targetDichiarato,'g')} g</div>
+        <div class="scale-total rw-declared">${labTargetIsSet(vv.portionsCount)&&labTargetIsSet(vv.gramsPerPortion)?formatQuickCalcQty(targetDichiarato,'g')+' g':'—'}</div>
       </div>
       <div class="scale-box">
         <div class="scale-label">Peso finito teorico</div>
@@ -8479,7 +8491,7 @@ function renderProdRecipe(recipe){
         return `
       <div class="variant-card" onclick="S.selectedVariantId='${v2.id}';render()">
         <div class="vc-dot ${isActive2?'production':'validated'}"></div>
-        <div style="flex:1"><div class="vc-name">${v2.name}</div><div class="vc-meta">${v2.portionsCount} porz · ${v2.gramsPerPortion}g/porz</div></div>
+        <div style="flex:1"><div class="vc-name">${v2.name}</div><div class="vc-meta">${targetSummaryShort(v2.portionsCount,v2.gramsPerPortion)}</div></div>
         ${isActive2?'<span class="vc-prod-badge">Attiva</span>':isRetired2?'<span class="vc-prod-badge" style="color:var(--light)">Archiviata</span>':'<span class="vc-prod-badge validated">Pronta</span>'}
       </div>`;}).join('')}
     </div>
