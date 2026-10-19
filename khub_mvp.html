@@ -2676,18 +2676,23 @@ var LAB_TARGET_PORTIONS_MAX=2147483647; // portions_count e' integer in Postgres
 // {ok:true,value} | {ok:false,error}. Porzioni: intero > 0 (la colonna e'
 // integer: un decimale farebbe fallire l'intero salvataggio). G/porzione:
 // numero finito > 0, a precisione piena.
+// LAB FIX 2C (C2): i due campi sono facoltativi e indipendenti. Un campo
+// vuoto (stringa vuota o solo spazi) = non impostato -> 0; uno 0 scritto
+// esplicitamente resta rifiutato (per togliere il valore si svuota il campo).
 function validateLabProductionTarget(field,value){
+  if(field!=='portions'&&field!=='gpp')return{ok:false,error:'Campo non valido.'};
+  if(typeof value==='string'&&value.trim()==='')return{ok:true,value:0};
   var n=parseLocaleNumber(value);
   if(field==='portions'){
-    if(!isFinite(n)||n<=0||!Number.isInteger(n)||n>LAB_TARGET_PORTIONS_MAX)return{ok:false,error:'Porzioni: inserisci un numero intero maggiore di zero.'};
+    if(!isFinite(n)||n<=0||!Number.isInteger(n)||n>LAB_TARGET_PORTIONS_MAX)return{ok:false,error:'Porzioni: inserisci un numero intero maggiore di zero, oppure svuota il campo per toglierlo.'};
     return{ok:true,value:n};
   }
-  if(field==='gpp'){
-    if(!isFinite(n)||n<=0)return{ok:false,error:'G/porzione: inserisci un numero maggiore di zero.'};
-    return{ok:true,value:n};
-  }
-  return{ok:false,error:'Campo non valido.'};
+  if(!isFinite(n)||n<=0)return{ok:false,error:'G/porzione: inserisci un numero maggiore di zero, oppure svuota il campo per toglierlo.'};
+  return{ok:true,value:n};
 }
+// Valore di un campo dell'obiettivo: vuoto se non impostato (0), mai "0".
+function labTargetIsSet(value){var n=parseLocaleNumber(value);return isFinite(n)&&n>0;}
+function labTargetInputValue(value){return value==null||value===''||Number(value)===0?'':String(value);}
 
 function setLabProductionTarget(recipeId,field,rawValue){
   var v=curLab(R(recipeId));if(!v)return;
@@ -7811,6 +7816,31 @@ function renderPreview(){
   </div>`;
 }
 
+// LAB FIX 2C (C2): Obiettivo di Produzione della bozza. Campi facoltativi e
+// indipendenti: vuoti se non impostati (mai "0"); testo libero, cosi' un
+// valore non numerico arriva al gestore e viene rifiutato invece di essere
+// letto come campo vuoto. Totale finito solo con entrambi i valori > 0.
+function renderLabProductionTarget(recipe,v){
+  var entrambi=labTargetIsSet(v.portionsCount)&&labTargetIsSet(v.gramsPerPortion);
+  return`<div id="lab-production-target" style="margin-top:16px">
+      <div class="scale-label" style="margin-bottom:6px" title="Quanto produrre: non modifica gli ingredienti della Ricetta">Obiettivo di Produzione · non modifica gli ingredienti</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div class="scale-box">
+          <div class="scale-label">Porzioni</div>
+          <input class="scale-input lab-target-portions" type="text" inputmode="numeric" autocomplete="off" placeholder="—" value="${escAttr(labTargetInputValue(v.portionsCount))}" onchange="onLabTargetPortions('${recipe.id}',this.value)">
+        </div>
+        <div class="scale-box">
+          <div class="scale-label">G/porzione finiti</div>
+          <input class="scale-input lab-target-gpp" type="text" inputmode="decimal" autocomplete="off" placeholder="—" value="${escAttr(labTargetInputValue(v.gramsPerPortion))}" onchange="onLabTargetGpp('${recipe.id}',this.value)">
+        </div>
+        <div class="scale-box">
+          <div class="scale-label">Totale finito</div>
+          <div class="scale-total lab-target-total">${entrambi?formatQtyDisplay(parseLocaleNumber(v.portionsCount)*parseLocaleNumber(v.gramsPerPortion))+' g':'—'}</div>
+        </div>
+      </div>
+    </div>`;
+}
+
 function renderLabRecipe(recipe){
   const v=curLab(recipe);if(!v)return'';
   // LAB FIX 2B I5: pesi in grammi (conversioni + rese), mai somme di unita' diverse
@@ -7837,23 +7867,7 @@ function renderLabRecipe(recipe){
       </div>
 
     </div>
-    <div id="lab-production-target" style="margin-top:16px">
-      <div class="scale-label" style="margin-bottom:6px" title="Quanto produrre: non modifica gli ingredienti della Ricetta">Obiettivo di Produzione · non modifica gli ingredienti</div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <div class="scale-box">
-          <div class="scale-label">Porzioni</div>
-          <input class="scale-input" type="number" min="1" step="1" value="${v.portionsCount}" onchange="onLabTargetPortions('${recipe.id}',this.value)">
-        </div>
-        <div class="scale-box">
-          <div class="scale-label">G/porzione finiti</div>
-          <input class="scale-input" type="number" min="0" step="any" value="${v.gramsPerPortion}" onchange="onLabTargetGpp('${recipe.id}',this.value)">
-        </div>
-        <div class="scale-box">
-          <div class="scale-label">Totale finito</div>
-          <div class="scale-total">${formatQtyDisplay(cnum(v.portionsCount)*cnum(v.gramsPerPortion))} g</div>
-        </div>
-      </div>
-    </div>
+    ${renderLabProductionTarget(recipe,v)}
     <div class="header-actions">
       <button class="btn btn-ghost btn-sm" onclick="duplicaVersioneLAB('${recipe.id}')" title="Duplica bozza LAB corrente"><i class="ti ti-copy"></i> Nuova bozza</button>
       <button class="btn btn-outline btn-sm" id="btn-show-validate" title="Salva questa bozza come Ricetta pronta, senza metterla in produzione"><i class="ti ti-check"></i> Valida</button>

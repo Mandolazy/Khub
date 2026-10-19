@@ -370,7 +370,8 @@ const box = (h, cls) => { const m = h.match(new RegExp('class="' + cls + '"[^>]*
     assert.ok(!/Stima peso finito/.test(lab));
     assert.ok(!/reduce\(\(s,i\)=>s\+cnum\(i\.qty\)/.test(lab), 'nessuna somma diretta delle quantita\'');
     assert.ok(lab.includes("pesiLab.byId[ing.id].rawGrams/pesiLab.raw*100"));
-    assert.ok(/id="lab-production-target"/.test(lab), 'Obiettivo di Produzione separato e invariato');
+    // LAB FIX 2C (C2): l'Obiettivo e' reso da renderLabProductionTarget, sempre separato dal pannello
+    assert.ok(lab.includes('${renderLabProductionTarget(recipe,v)}') && /id="lab-production-target"/.test(extractFunction('function renderLabProductionTarget(recipe,v)')), 'Obiettivo di Produzione separato');
   });
 
   // ── Firma del contenuto e data di ultima modifica (trigger di Supabase) ──

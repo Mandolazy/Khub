@@ -251,8 +251,9 @@ const cur = c => rec(c).labVersions[rec(c).currentLabIdx];
   });
 
   await test('T5. valori non validi rifiutati: nessuna modifica, nessun salvataggio, messaggio esplicito', async () => {
-    const badPortions = ['-1', '0', '-0', 'abc', '', '  ', 'Infinity', 'NaN', '2.5', '2,5', '1e3', '2147483648', null, undefined, '1.234,5'];
-    const badGpp = ['-5', '0', '0,0', 'abc', '', 'Infinity', '-Infinity', 'NaN', null, undefined, '1e3', '1.234,5', {}];
+    // LAB FIX 2C (C2): '' e '  ' non sono piu' rifiutati: svuotare il campo = obiettivo non impostato (test C2)
+    const badPortions = ['-1', '0', '-0', 'abc', 'Infinity', 'NaN', '2.5', '2,5', '1e3', '2147483648', null, undefined, '1.234,5'];
+    const badGpp = ['-5', '0', '0,0', 'abc', 'Infinity', '-Infinity', 'NaN', null, undefined, '1e3', '1.234,5', {}];
     const c = memClient();
     const before = clone(c.S.recipes);
     badPortions.forEach(v => c.onLabTargetPortions('rM', v));
