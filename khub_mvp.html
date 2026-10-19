@@ -2132,7 +2132,7 @@ async function extractRecipe(){
   S.isLoading=true;render();
   try{
     let messages=[];
-    const PROMPT=`Estrai la ricetta e rispondi SOLO con JSON valido. La fonte può essere in qualsiasi lingua (francese, inglese, spagnolo, ecc.): TRADUCI SEMPRE in italiano il nome della ricetta, i nomi degli ingredienti e i passi del procedimento, anche se il testo originale è in un'altra lingua. Converti unità di misura locali (es. cuillère à soupe, cup, oz) nel loro equivalente in g/ml quando possibile. Elenca TUTTI gli ingredienti uno per uno con quantità numeriche esatte. Formato: {"name":"nome","category":"Dolci|Salato|Basi|Altro","portionsCount":4,"gramsPerPortion":200,"ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo 1"],"subRecipes":[{"name":"Nome Prep","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo"]}]}. Unità: g,ml,kg,l,n,tbsp,tsp,cl. Gli ingredienti nella ricetta principale devono avere quantità reali anche se appartengono a sub-preparazioni.`;
+    const PROMPT=`Estrai la ricetta e rispondi SOLO con JSON valido. La fonte può essere in qualsiasi lingua (francese, inglese, spagnolo, ecc.): TRADUCI SEMPRE in italiano il nome della ricetta, i nomi degli ingredienti e i passi del procedimento, anche se il testo originale è in un'altra lingua. Converti unità di misura locali (es. cuillère à soupe, cup, oz) nel loro equivalente in g/ml quando possibile. Elenca TUTTI gli ingredienti uno per uno con quantità numeriche esatte. Formato: {"name":"nome","category":"Dolci|Salato|Basi|Altro","portionsCount":null,"gramsPerPortion":null,"ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo 1"],"subRecipes":[{"name":"Nome Prep","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo"]}]}. Unità: g,ml,kg,l,n,tbsp,tsp,cl. Gli ingredienti nella ricetta principale devono avere quantità reali anche se appartengono a sub-preparazioni. portionsCount (numero intero di porzioni) e gramsPerPortion (grammi per porzione) vanno indicati SOLO se la fonte li riporta esplicitamente; se la fonte non li fornisce usa null. Non stimarli, non calcolarli dagli ingredienti e non trasformare una resa (per esempio "30 bignè" o "1 torta") in porzioni o grammi per porzione.`;
 
     if(type==='foto'&&S.loadImageB64){
       messages=[{role:'user',content:[
@@ -2171,8 +2171,10 @@ async function extractRecipe(){
       qty:parseFloat(i.qty)||0,unit:UNITS.includes(i.unit)?i.unit:'g'
     }));
     parsed.steps=parsed.steps||[];
+    parsed.portionsCount=importTargetValue('portions',parsed.portionsCount);
+    parsed.gramsPerPortion=importTargetValue('gpp',parsed.gramsPerPortion);
     parsed.subRecipes=(parsed.subRecipes||[]).map(sr=>({
-      ...sr,ingredients:(sr.ingredients||[]).map(i=>({...i,id:uid(),qty:parseFloat(i.qty)||0,unit:UNITS.includes(i.unit)?i.unit:'g'}))
+      ...sr,portionsCount:importTargetValue('portions',sr.portionsCount),gramsPerPortion:importTargetValue('gpp',sr.gramsPerPortion),ingredients:(sr.ingredients||[]).map(i=>({...i,id:uid(),qty:parseFloat(i.qty)||0,unit:UNITS.includes(i.unit)?i.unit:'g'}))
     }));
     S.loadPreview=parsed;
     S.view='preview';
@@ -2186,7 +2188,7 @@ function savePreview(){
 
   const buildLabVersion=note=>({
     id:'lv'+ts,label:p.name||'Nuova Scheda',name:p.name||'Nuova Scheda',note,originVariantId:null,
-    portionsCount:parseInt(p.portionsCount)||4,gramsPerPortion:parseFloat(p.gramsPerPortion)||200,portionSize:parseFloat(p.gramsPerPortion)||200,portionUnit:'g',
+    portionsCount:importTargetValue('portions',p.portionsCount),gramsPerPortion:importTargetValue('gpp',p.gramsPerPortion),portionSize:importTargetValue('gpp',p.gramsPerPortion),portionUnit:'g',
     ingredients:p.ingredients.map(i=>({...i,id:uid()})),
     steps:p.steps||[],mediaUrl:null,videoUrl:null,active:false,
   });
@@ -2199,7 +2201,7 @@ function savePreview(){
       const srId='r'+(ts+i+1);
       const srLab={
         id:'lv'+(ts+i+1),label:sr.name||'Bozza 1',note:'Da '+p.name,
-        portionsCount:1,gramsPerPortion:sr.ingredients.reduce((s,x)=>s+cnum(x.qty),0)||200,
+        portionsCount:importTargetValue('portions',sr.portionsCount),gramsPerPortion:importTargetValue('gpp',sr.gramsPerPortion), // FIX 2C (C5): mai somme di ingredienti
         ingredients:sr.ingredients.map(x=>({...x,id:uid()})),
         steps:sr.steps||[],mediaUrl:null,videoUrl:null,
       };
@@ -2689,6 +2691,14 @@ function validateLabProductionTarget(field,value){
   }
   if(!isFinite(n)||n<=0)return{ok:false,error:'G/porzione: inserisci un numero maggiore di zero, oppure svuota il campo per toglierlo.'};
   return{ok:true,value:n};
+}
+// LAB FIX 2C (C5): obiettivo di Produzione arrivato da una fonte importata.
+// Solo valori presenti e validi (Porzioni intero positivo, G/porzione numero
+// positivo); assente o non valido = 0 (non impostato). Mai 4/200, mai somme
+// di ingredienti, mai una resa dichiarata trasformata in porzioni.
+function importTargetValue(field,value){
+  var r=validateLabProductionTarget(field,value);
+  return r.ok?r.value:0;
 }
 // Valore di un campo dell'obiettivo: vuoto se non impostato (0), mai "0".
 function labTargetIsSet(value){var n=parseLocaleNumber(value);return isFinite(n)&&n>0;}
@@ -7781,8 +7791,8 @@ function renderPreview(){
       </div>
     </div>
     <div class="form-row" style="margin-bottom:16px">
-      <div class="form-group"><label class="form-label">Porzioni</label><input class="form-input" type="number" id="prev-portions" value="${p.portionsCount||4}"></div>
-      <div class="form-group"><label class="form-label">G/Porzione</label><input class="form-input" type="number" id="prev-gpp" value="${p.gramsPerPortion||200}"></div>
+      <div class="form-group"><label class="form-label">Porzioni</label><input class="form-input" type="text" inputmode="numeric" autocomplete="off" id="prev-portions" value="${labTargetInputValue(p.portionsCount)}"></div>
+      <div class="form-group"><label class="form-label">G/Porzione</label><input class="form-input" type="text" inputmode="decimal" autocomplete="off" id="prev-gpp" value="${labTargetInputValue(p.gramsPerPortion)}"></div>
     </div>
     <div class="card-label"><i class="ti ti-list-details"></i> Ingredienti (${p.ingredients.length})</div>
     ${p.ingredients.map((ing,idx)=>`
@@ -9471,8 +9481,13 @@ function bindEvents(){
     const pg=document.getElementById('prev-gpp');
     if(pn&&S.loadPreview)S.loadPreview.name=pn.value||S.loadPreview.name;
     if(pc&&S.loadPreview)S.loadPreview.category=pc.value;
-    if(pp&&S.loadPreview)S.loadPreview.portionsCount=parseInt(pp.value)||4;
-    if(pg&&S.loadPreview)S.loadPreview.gramsPerPortion=parseFloat(pg.value)||200;
+    // FIX 2C (C5): vuoto = non impostato; un valore non valido blocca il salvataggio.
+    const vp=pp?validateLabProductionTarget('portions',pp.value):null;
+    const vg=pg?validateLabProductionTarget('gpp',pg.value):null;
+    if(vp&&!vp.ok){toast(vp.error,'ti-alert-circle');return;}
+    if(vg&&!vg.ok){toast(vg.error,'ti-alert-circle');return;}
+    if(vp&&S.loadPreview)S.loadPreview.portionsCount=vp.value;
+    if(vg&&S.loadPreview)S.loadPreview.gramsPerPortion=vg.value;
     // Aggiorna ingredienti preview
     document.querySelectorAll('[data-prev-ing]').forEach(el=>{
       const idx=parseInt(el.dataset.prevIng);
