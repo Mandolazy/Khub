@@ -455,7 +455,10 @@ const text = h => h.replace(/<[^>]+>/g, ' ').replace(/&#39;/g, "'").replace(/\s+
     const expect = {
       'function computeSessionScaling(input)': 'ddfc1febb5010cdc', 'function resolveKnownProductionConversionFact(normalizedName,unit)': '5b0be8c06a5e4919',
       'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)': '9df6758db87b12b1',
-      'function computeRecipeWeightSummary(recipe,vv)': '180343ceee9590a5', 'async function confirmConversionPreflightStep(rawValue)': 'e2aae961c47a7615',
+      // LAB FIX 2C (C4): computeRecipeWeightSummary usa di proposito computeFormulationWeights
+      // (pesi senza obiettivo salvato); la parita' con la versione precedente e' verificata
+      // in test-lab-fix2c-c4-weight-summary.js. Impronta aggiornata solo per questa funzione.
+      'function computeRecipeWeightSummary(recipe,vv)': 'beac67cc93eee93b', 'async function confirmConversionPreflightStep(rawValue)': 'e2aae961c47a7615',
     };
     for (const [m, h] of Object.entries(expect)) assert.strictEqual(sha(extractFunction(m)), h, 'cambiato: ' + m);
     const chat = fs.readFileSync(path.join(ROOT, 'api/chat.js'), 'utf8');

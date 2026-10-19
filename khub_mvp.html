@@ -8262,9 +8262,10 @@ function openQuickCalc(recipeId,variantId){
   var vv=findRecipeVariant(recipeId,variantId);
   if(!canSendToProduction(vv)){toast('Il Calcolo rapido è disponibile solo per una Ricetta attiva.','ti-alert-circle');return;}
   // Riparte SEMPRE dai valori salvati della Ricetta attiva (solo letti).
+  // LAB FIX 2C (C4): precompila solo i valori impostati; gli altri restano vuoti.
   S.quickCalc={recipeId:recipeId,variantId:variantId,
-    portions:vv.portionsCount!=null?String(vv.portionsCount):'',
-    gpp:vv.gramsPerPortion!=null?String(vv.gramsPerPortion):''};
+    portions:labTargetIsSet(vv.portionsCount)?String(vv.portionsCount):'',
+    gpp:labTargetIsSet(vv.gramsPerPortion)?String(vv.gramsPerPortion):''};
   render();
 }
 function closeQuickCalc(){
@@ -8345,25 +8346,30 @@ function renderQuickCalcPanel(recipe,vv){
   </div>`;
 }
 
-// Riepilogo dei pesi della formulazione SALVATA, dal motore delle Sessioni
-// (nessuna formula propria). Il motore richiede un target: si usa quello
-// dichiarato, da cui pero' pesi a crudo/finiti non dipendono. Esito:
-// {status:'complete',raw,finished,byId:{[ingId]:{rawGrams,finishedGrams,pct}}}
+// Riepilogo dei pesi della formulazione SALVATA. LAB FIX 2C (C4): i pesi
+// vengono da computeFormulationWeights (stesse regole del motore delle
+// Sessioni, senza target), quindi non dipendono piu' dall'obiettivo di
+// Produzione salvato. Conversioni mancanti rilevate come prima
+// (findMissingProductionConversions sull'input del motore); stessi casi
+// 'unavailable' di prima (id mancante, quantita' non finite, finito <= 0).
+// Esito:
+// {status:'complete',raw,finished,byId:{[ingId]:{rawGrams,finishedGrams,pct}},referenceDataUsed}
 // | {status:'missing_conversions',missing} | {status:'unavailable'}.
-// pct = quota del peso totale A CRUDO.
+// pct = quota del peso totale A CRUDO. referenceDataUsed non vuoto = stima
+// (pesi di riferimento non confermati).
 function computeRecipeWeightSummary(recipe,vv){
-  var p=parseFloat(vv.portionsCount),g=parseFloat(vv.gramsPerPortion);
-  if(!(isFinite(p)&&p>0&&isFinite(g)&&g>0))return{status:'unavailable'};
-  var input=buildPreparedInputDaRicettaAttiva(recipe,vv,p,g);
+  var input=buildPreparedInputDaRicettaAttiva(recipe,vv,null,null);
   var missing=findMissingProductionConversions(input);
   if(missing.length)return{status:'missing_conversions',missing:missing};
-  var r;
-  try{r=computeSessionScaling(input);}catch(e){return{status:'unavailable'};}
+  if(input.ingredients.some(function(i){return i.itemKey==null||i.itemKey==='';}))return{status:'unavailable'};
+  var w=computeFormulationWeights(vv.ingredients);
+  if(w.status!=='complete'||!(isFinite(w.finished)&&w.finished>0))return{status:'unavailable'};
   var byId={};
-  r.ingredients.forEach(function(i){
-    byId[i.sourceIngredientId!=null?i.sourceIngredientId:i.itemKey]={rawGrams:i.rawGrams,finishedGrams:i.finishedGrams,pct:r.baseRawTotal>0?i.rawGrams/r.baseRawTotal*100:0};
+  Object.keys(w.byId).forEach(function(k){
+    var b=w.byId[k];
+    byId[k]={rawGrams:b.rawGrams,finishedGrams:b.finishedGrams,pct:w.raw>0?b.rawGrams/w.raw*100:0};
   });
-  return{status:'complete',raw:r.baseRawTotal,finished:r.baseExpectedFinishedTotal,byId:byId};
+  return{status:'complete',raw:w.raw,finished:w.finished,byId:byId,referenceDataUsed:w.referenceDataUsed};
 }
 
 function renderProdRecipe(recipe){
@@ -8419,7 +8425,7 @@ function renderProdRecipe(recipe){
       </div>
       <div class="scale-box">
         <div class="scale-label">Peso finito teorico</div>
-        <div class="scale-total rw-finished">${pesi.status==='complete'?formatQuickCalcQty(pesi.finished,'g')+' g':'incompleto'}</div>
+        <div class="scale-total rw-finished">${pesi.status==='complete'?formatQuickCalcQty(pesi.finished,'g')+' g'+(pesi.referenceDataUsed.length?' <span class="rw-estimate" style="font-size:12px;font-weight:400">(stima)</span>':''):'incompleto'}</div>
       </div>
     </div>
     <div class="header-actions">
@@ -8475,7 +8481,7 @@ function renderProdRecipe(recipe){
 
   <div class="rw-summary" style="padding:10px 14px;background:var(--cream);border-radius:var(--r-md);border:1px solid var(--border);font-size:13px;color:var(--mid);margin-bottom:8px">
     ${pesi.status==='complete'
-      ?`<i class="ti ti-check" style="color:var(--sage)"></i> Peso finito teorico: <strong style="color:var(--dark)">${formatQuickCalcQty(pesi.finished,'g')} g</strong> <span style="margin-left:8px;font-size:12px">· peso a crudo ${formatQuickCalcQty(pesi.raw,'g')} g</span>`
+      ?`<i class="ti ti-check" style="color:var(--sage)"></i> Peso finito teorico: <strong style="color:var(--dark)">${formatQuickCalcQty(pesi.finished,'g')} g</strong>${pesi.referenceDataUsed.length?' <span class="rw-estimate">(stima)</span>':''} <span style="margin-left:8px;font-size:12px">· peso a crudo ${formatQuickCalcQty(pesi.raw,'g')} g</span>`
       :pesi.status==='missing_conversions'
         ?`<i class="ti ti-alert-triangle"></i> Peso finito teorico non calcolabile: mancano le conversioni in grammi di ${pesi.missing.map(m=>escAttr(m.ingredientName)+' ('+escAttr(m.currentUnit)+')').join(', ')}. Percentuali non disponibili.`
         :`<i class="ti ti-alert-triangle"></i> Peso finito teorico non disponibile.`}

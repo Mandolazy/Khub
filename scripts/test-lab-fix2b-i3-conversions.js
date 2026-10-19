@@ -401,7 +401,10 @@ function makeClient(fetchImpl) {
       'function chooseConversionAskUnit(unit)': 'ed754d663dbc6ebf', 'function resolveKnownProductionConversionFact(normalizedName,unit)': '5b0be8c06a5e4919',
       'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)': '9df6758db87b12b1',
       'function findMissingProductionConversions(preparedInput)': 'ad0ecd9f8e506dce', 'async function confirmConversionPreflightStep(rawValue)': 'e2aae961c47a7615',
-      'function computeRecipeWeightSummary(recipe,vv)': '180343ceee9590a5',
+      // LAB FIX 2C (C4): computeRecipeWeightSummary usa di proposito computeFormulationWeights
+      // (pesi senza obiettivo salvato); la parita' con la versione precedente e' verificata
+      // in test-lab-fix2c-c4-weight-summary.js. Impronta aggiornata solo per questa funzione.
+      'function computeRecipeWeightSummary(recipe,vv)': 'beac67cc93eee93b',
       'async function saveIngredientConversion(ingredientName,fromUnit,toUnit,factor,sourceType,sourceDetail)': 'e3916db5353173da',
       'function onVarIngUnit(recipeId,varId,ingId,val)': 'bd2537533a1563d7',
       'async function loadFromSupabase()': '41eb85ed926af59c', 'async function saveToSupabase(recipe)': '42a1765ea7f27644',

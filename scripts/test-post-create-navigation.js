@@ -88,7 +88,7 @@ const CLIENT_SRC = [
   'function parseQuickCalcNumber(text)', 'function computeQuickCalc(recipe,vv,portionsText,gppText)', 'function formatQuickCalcQty(qty,unit)',
   'function openQuickCalc(recipeId,variantId)', 'function closeQuickCalc()', 'function onQuickCalcInput(field,value)', 'function syncQuickCalcScope()',
   'function openQuickCalcConversions()', 'function sendQuickCalcToProduction()', 'function renderQuickCalcPanel(recipe,vv)',
-  'function computeRecipeWeightSummary(recipe,vv)', 'function parseLocaleNumber(value)', 'function labTargetIsSet(value)', 'function targetDisplay(value)', 'function targetSummaryShort(portions,gpp)', 'function renderProdRecipe(recipe)',
+  'function computeFormulationWeights(ingredients,resolveFact)', 'function computeRecipeWeightSummary(recipe,vv)', 'function parseLocaleNumber(value)', 'function labTargetIsSet(value)', 'function targetDisplay(value)', 'function targetSummaryShort(portions,gpp)', 'function renderProdRecipe(recipe)',
   'async function loadProductionSessions()', 'function formatFinishedTotalLabel(grams)', 'function historyNormalizeText(value)',
   'function renderPendingSessionCard(sess)', 'function renderInProgressSessionCard(sess)', 'function selectProductionHomeSessions(sessions,section,context)',
   'function activeRecipeEntries(recipes)', 'function rankActiveRecipeEntries(entries,sessions)', 'function filterActiveRecipeEntries(entries,query)',
