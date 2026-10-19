@@ -400,8 +400,51 @@ const text = h => h.replace(/<[^>]+>/g, ' ').replace(/&#39;/g, "'").replace(/\s+
     await c.saveToSupabase(rec(c));
     const sent = saves[0].variants.find(v => v.id === 'vaB');
     assert.ok(sent, 'la versione con la modifica in sospeso viene inviata');
-    assert.deepStrictEqual([sent.note, sent.declared_yield_qty, sent.declared_yield_unit], ['nota cambiata', 32, 'bignè'], 'con la resa gia\' corretta, mai quella vecchia');
+    // Correzione A: il salvataggio completo di un'Attiva gia' nel DB non contiene la resa
+    assert.deepStrictEqual([sent.note, 'declared_yield_qty' in sent, 'declared_yield_unit' in sent], ['nota cambiata', false, false], 'resa mai nel salvataggio completo');
     assert.deepStrictEqual([dbRow(fake, 'vaB').note, dbRow(fake, 'vaB').declared_yield_qty], ['nota cambiata', 32]);
+  });
+
+  await test('A12. conflitto 9a: un dispositivo con dati vecchi che salva la stessa Attiva non riporta indietro la resa corretta', async () => {
+    const pc = await setup();
+    const tablet = makeClient(clientFetch); await tablet.loadFromSupabase(); // caricato PRIMA della correzione: vede 30
+    await correct(pc, 'vaB', '32', 'bignè');
+    assert.strictEqual(dbRow(fake, 'vaB').declared_yield_qty, 32);
+    // il tablet modifica e salva la stessa Attiva (nota) con i suoi dati vecchi
+    rec(tablet).validatedVariants = rec(tablet).validatedVariants.map(v => v.id === 'vaB' ? { ...v, persistedNote: 'nota dal tablet' } : v);
+    saves = [];
+    assert.strictEqual(await tablet.saveToSupabase(rec(tablet)), true);
+    assert.ok(saves[0].variants.some(v => v.id === 'vaB'), 'la versione modificata viene inviata');
+    assert.deepStrictEqual([dbRow(fake, 'vaB').note, dbRow(fake, 'vaB').declared_yield_qty, dbRow(fake, 'vaB').declared_yield_unit], ['nota dal tablet', 32, 'bignè'], 'nota nuova E resa corretta');
+    // anche disattivare/ritirare da un dispositivo vecchio non tocca la resa
+    rec(tablet).validatedVariants = rec(tablet).validatedVariants.map(v => v.id === 'vaB' ? { ...v, active: false } : v);
+    await tablet.saveToSupabase(rec(tablet));
+    assert.deepStrictEqual([dbRow(fake, 'vaB').active, dbRow(fake, 'vaB').declared_yield_qty], [false, 32]);
+    const c2 = makeClient(clientFetch); await c2.loadFromSupabase();
+    assert.deepStrictEqual([vv(c2, 'vaB').declaredYieldQty, vv(c2, 'vaB').persistedNote], [32, 'nota dal tablet'], 'dopo la rilettura: 32 bignè e la nuova nota');
+  });
+
+  await test('A13. conflitto 9b: un salvataggio completo con dati vecchi che arriva DOPO la correzione non la annulla', async () => {
+    const c = await setup();
+    rec(c).validatedVariants = rec(c).validatedVariants.map(v => v.id === 'vaB' ? { ...v, persistedNote: 'in sospeso' } : v);
+    const statoVecchio = clone(rec(c)); // stato catturato dal salvataggio partito prima della correzione
+    await correct(c, 'vaB', '33', 'bignè');
+    assert.strictEqual(dbRow(fake, 'vaB').declared_yield_qty, 33);
+    assert.strictEqual(await c.saveToSupabase(statoVecchio), true); // arriva dopo
+    assert.deepStrictEqual([dbRow(fake, 'vaB').note, dbRow(fake, 'vaB').declared_yield_qty], ['in sospeso', 33], 'resa corretta conservata, nota salvata');
+    saves = [];
+    await c.saveToSupabase(rec(c));
+    assert.ok(saves[0].variants.every(v => v.id !== 'vaB'), 'nessun reinvio successivo');
+    assert.strictEqual(dbRow(fake, 'vaB').declared_yield_qty, 33);
+  });
+
+  await test('A14. l\'unica via per cambiare la resa di un\'Attiva gia\' nel DB e\' updateDeclaredYield', async () => {
+    const c = await setup();
+    // anche una modifica diretta della resa in memoria non arriva al DB col salvataggio completo
+    rec(c).validatedVariants = rec(c).validatedVariants.map(v => v.id === 'vaB' ? { ...v, declaredYieldQty: 99, persistedNote: 'x' } : v);
+    await c.saveToSupabase(rec(c));
+    assert.deepStrictEqual([dbRow(fake, 'vaB').note, dbRow(fake, 'vaB').declared_yield_qty], ['x', '30']);
+    for (const id of ['vaC', 'vaI', 'vaP', 'vaR']) assert.ok(!('declared_yield_qty' in c.buildValidatedVariantPayload('rB', vv(c, id)).row), id);
   });
 
   await test('A11. vista: "Correggi resa" solo nel Contenuto delle Ricette Attive; Produzione, MichelinAI e motore invariati', async () => {

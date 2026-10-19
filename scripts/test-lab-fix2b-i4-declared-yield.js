@@ -277,7 +277,8 @@ function makeClient(fetchImpl) {
     const c = await setup();
     for (const vid of ['vaT', 'vaR', 'vaP']) assert.strictEqual(c.buildValidatedVariantPayload('rT', val(c, vid)).sig, c.getSig(vid), vid);
     const row = c.buildValidatedVariantPayload('rT', val(c, 'vaT')).row;
-    assert.deepStrictEqual([row.declared_yield_qty, row.declared_yield_unit], ['30', 'pz'], 'se inviata, riscritta identica');
+    // Correzione A: la resa di una versione validata gia' nel DB non entra nel salvataggio completo
+    assert.ok(!('declared_yield_qty' in row) && !('declared_yield_unit' in row), 'resa mai riscritta dal salvataggio completo');
   });
 
   await test('Y6. obiettivo di Produzione indipendente: cambiare Porzioni non tocca la resa dichiarata (ne\' il contrario)', async () => {
@@ -363,6 +364,21 @@ function makeClient(fetchImpl) {
     for (const rid of ['rT', 'rK']) assert.strictEqual(await c.saveToSupabase(rec(c, rid)), true);
     assert.ok(!JSON.stringify(saves).includes('declared_yield'));
     assert.deepStrictEqual(c.declaredYieldState(val(c, 'vaT')), { status: 'absent' });
+  });
+
+  await test('Y13. correzione A: dopo la promozione la resa viaggia una sola volta; i salvataggi successivi dell\'Attiva non la riscrivono', async () => {
+    const c = await setup();
+    rec(c, 'rT').currentLabIdx = 0;
+    c.rendiAttiva('rT');
+    assert.strictEqual(await c.saveToSupabase(rec(c, 'rT')), true);
+    assert.deepStrictEqual(saves[0].variants.filter(v => v.id === 'lvT').map(v => [v.declared_yield_qty, v.declared_yield_unit]), [[2.5, 'teglia 30x40']], 'promozione: resa inviata');
+    // altra modifica dell'Attiva nata in sessione (es. disattivazione): la resa non viene piu' inviata
+    rec(c, 'rT').validatedVariants = rec(c, 'rT').validatedVariants.map(v => v.id === 'lvT' ? { ...v, active: false } : v);
+    saves = [];
+    assert.strictEqual(await c.saveToSupabase(rec(c, 'rT')), true);
+    const sent = saves[0].variants.find(v => v.id === 'lvT');
+    assert.ok(sent && !('declared_yield_qty' in sent), 'seconda scrittura senza resa');
+    assert.deepStrictEqual([dbVariant(fake, 'lvT').active, dbVariant(fake, 'lvT').declared_yield_qty, dbVariant(fake, 'lvT').declared_yield_unit], [false, 2.5, 'teglia 30x40'], 'resa conservata nel DB');
   });
 
   await test('Y12. Sessioni di Produzione e dati non validi mai toccati da tutti i flussi', async () => {

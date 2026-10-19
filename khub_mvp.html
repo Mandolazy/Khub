@@ -1489,7 +1489,6 @@ function buildValidatedVariantPayload(recipeId,vv){
     origin_variant_id:vv.originVariantId||null, // D3: sopravvive alle transizioni di lifecycle
     intention_initial:vv.intentionInitial||null,intention_current:vv.intentionCurrent||null,
     criteria_initial:vv.criteriaInitial||null,criteria_current:vv.criteriaCurrent||null,
-    ...declaredYieldPayload(vv), // I4: valore grezzo riscritto identico, solo se noto
   };
   // LAB FIX 1.1: qualsiasi id esistente non vuoto viene conservato (anche
   // se corto). Un id nuovo nasce solo se manca davvero, e viene assegnato
@@ -1506,7 +1505,15 @@ function buildValidatedVariantPayload(recipeId,vv){
     estimated_yield_pct:ing.estimatedYieldPct!==undefined&&ing.estimatedYieldPct!==null?ing.estimatedYieldPct:null,
     measured_yield_pct:ing.measuredYieldPct!==undefined&&ing.measuredYieldPct!==null?ing.measuredYieldPct:null,
   }));
-  return{row,ingredients,sig:JSON.stringify({row,ingredients})};
+  const sig=JSON.stringify({row,ingredients});
+  // LAB FIX 2B — correzione A: la resa dichiarata di una versione validata
+  // gia' presente nel DB e' scritta SOLO da updateDeclaredYield, mai dal
+  // salvataggio completo (un salvataggio con dati vecchi non puo' riportarla
+  // indietro). Viene inclusa solo per una versione validata nata in questa
+  // sessione (Valida / Rendi attiva), che porta con se' la resa della bozza.
+  // Fuori dalla firma: correggere la resa non provoca reinvii.
+  if(!Object.prototype.hasOwnProperty.call(_persistedValidatedSig,vv.id))Object.assign(row,declaredYieldPayload(vv));
+  return{row,ingredients,sig};
 }
 function buildKnownIngredientIds(ingredientRows){
   const known={};
