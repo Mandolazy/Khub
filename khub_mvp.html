@@ -7323,7 +7323,9 @@ function renderLabWeightsPanel(recipe,v,w){
 // l/cl -> ml), poi arrotonda. Anteprima, conferma, annullamento esatto di
 // quantita' e unita' finche' la bozza non cambia. Pezzi, cucchiai e altre
 // unita' non convertibili direttamente restano come sono ed esclusi: lo chef
-// puo' convertirli in g solo con una conversione gia' confermata. Mai nomi,
+// puo' selezionarli per la conversione in g, solo con una conversione gia'
+// confermata, e la conversione entra nella stessa operazione (anteprima,
+// Applica, Annulla). Il menu ordinario delle unita' resta separato. Mai nomi,
 // rese, procedimento o conversioni. Nessun arrotondamento al salvataggio.
 // Una quantita' positiva che diventerebbe 0 blocca l'applicazione.
 var LAB_ROUND_DECIMALS=[0,1,2,3];
@@ -7349,20 +7351,34 @@ function labUniformUnit(unit){
   var table=sessionScalingGenericFamilyTable(sessionScalingUnitFamily(unit));
   return{unit:to,exp:Math.round(Math.log10(table[unit]/table[to]))};
 }
-// Esito puro. decimals null = solo uniformazione.
-// rows: {id,name,unit,qty,convUnit,convQty,converted,rounded,excluded,changed,zeroed,variation}
-function computeLabRounding(ingredients,decimals){
+// Fattore confermato dell'ingrediente verso g (mai 'reference_data'), o null.
+function labConfirmedFactToGrams(ing){
+  if(sessionScalingUnitFamily(ing.unit)!=null)return null;
+  return resolveConfirmedLabConversionFact(normalizeIngredientName(ing.name),ing.unit);
+}
+// Esito puro. decimals null = solo uniformazione. toGrams = {idIngrediente:true}
+// per gli ingredienti in pezzi/cucchiai che lo chef ha scelto di convertire in g
+// (solo con una conversione confermata, stesso calcolo del menu delle unita').
+// rows: {id,name,unit,qty,convUnit,convQty,converted,toGrams,rounded,excluded,changed,zeroed,variation}
+function computeLabRounding(ingredients,decimals,toGrams){
   var rows=[],changed=0,converted=0,zeroed=[],excluded=[];
   (ingredients||[]).forEach(function(ing){
     var n=typeof ing.qty==='number'?ing.qty:parseLocaleNumber(ing.qty);
-    var base={id:ing.id,name:ing.name,unit:ing.unit,qty:ing.qty,convUnit:ing.unit,convQty:ing.qty,converted:false,rounded:ing.qty,excluded:false,changed:false,zeroed:false,variation:0};
-    if(sessionScalingUnitFamily(ing.unit)==null){base.excluded=true;excluded.push(base);rows.push(base);return;}
-    if(typeof n!=='number'||!isFinite(n)||n<0){rows.push(base);return;}
-    var u=labUniformUnit(ing.unit);
-    var cq=u?shiftQtyDecimals(n,u.exp):n;
+    var base={id:ing.id,name:ing.name,unit:ing.unit,qty:ing.qty,convUnit:ing.unit,convQty:ing.qty,converted:false,toGrams:false,rounded:ing.qty,excluded:false,changed:false,zeroed:false,variation:0};
+    var valida=typeof n==='number'&&isFinite(n)&&n>=0;
+    var cq=n,cu=ing.unit,conv=false,inG=false;
+    if(sessionScalingUnitFamily(ing.unit)==null){
+      var g=valida&&toGrams&&toGrams[ing.id]&&labConfirmedFactToGrams(ing)?convertIngredientQty(n,ing.unit,'g',ing.name,resolveConfirmedLabConversionFact):null;
+      if(!g||!g.ok){base.excluded=true;excluded.push(base);rows.push(base);return;}
+      cq=g.qty;cu='g';conv=true;inG=true;
+    }else{
+      if(!valida){rows.push(base);return;}
+      var u=labUniformUnit(ing.unit);
+      if(u){cq=shiftQtyDecimals(n,u.exp);cu=u.unit;conv=true;}
+    }
     var r=decimals==null?cq:roundQtyDecimals(cq,decimals);
-    var row=Object.assign(base,{qty:n,convUnit:u?u.unit:ing.unit,convQty:cq,converted:!!u,rounded:r,
-      changed:!!u||r!==n,zeroed:n>0&&r===0,variation:cq>0?(r-cq)/cq:0});
+    var row=Object.assign(base,{qty:n,convUnit:cu,convQty:cq,converted:conv,toGrams:inG,rounded:r,
+      changed:conv||r!==n,zeroed:n>0&&r===0,variation:cq>0?(r-cq)/cq:0});
     if(row.converted)converted++;
     if(row.changed)changed++;
     if(row.zeroed)zeroed.push(row);
@@ -7376,7 +7392,7 @@ function labRoundUndoValido(recipe,v){
 }
 function openLabRound(recipeId){
   var v=curLab(R(recipeId));if(!v)return;
-  S.labRound={recipeId:recipeId,labVersionId:v.id,decimals:null};
+  S.labRound={recipeId:recipeId,labVersionId:v.id,decimals:null,toGrams:{}};
   render();
 }
 function setLabRoundDecimals(d){
@@ -7384,10 +7400,19 @@ function setLabRoundDecimals(d){
   S.labRound.decimals=d;render();
 }
 function closeLabRound(){S.labRound=null;render();}
+// Seleziona o toglie un ingrediente in pezzi/cucchiai dalla conversione in g
+// del pannello: non modifica la bozza.
+function toggleLabRoundToGrams(ingId){
+  var p=S.labRound;if(!p)return;
+  var v=curLab(R(p.recipeId));var ing=v&&v.id===p.labVersionId&&v.ingredients.find(function(i){return i.id===ingId;});
+  if(!ing||!labConfirmedFactToGrams(ing))return;
+  if(p.toGrams[ingId])delete p.toGrams[ingId];else p.toGrams[ingId]=true;
+  render();
+}
 function applyLabRound(recipeId){
   var p=S.labRound;var v=curLab(R(recipeId));
   if(!p||!v||p.recipeId!==recipeId||p.labVersionId!==v.id)return;
-  var res=computeLabRounding(v.ingredients,p.decimals);
+  var res=computeLabRounding(v.ingredients,p.decimals,p.toGrams);
   if(!res.ok){render();return;}
   var prev={},nuovi={};
   res.rows.forEach(function(r){
@@ -7421,35 +7446,36 @@ function renderLabRoundSection(recipe,v){
   if(!v.ingredients.length)return'';
   if(labRoundUndoValido(recipe,v)){
     var u=S.labRoundUndo;
-    var fatto=[u.converted?'unità uniformate':'',u.decimals!=null?'quantità arrotondate a '+labDecimaliText(u.decimals):''].filter(Boolean).join(' e ');
+    var fatto=[u.converted?'unità convertite':'',u.decimals!=null?'quantità arrotondate a '+labDecimaliText(u.decimals):''].filter(Boolean).join(' e ');
     return`<div class="lab-round-done" style="margin-top:12px;font-size:13px;color:var(--mid)"><i class="ti ti-circle-check" style="color:var(--sage)"></i> ${fatto.charAt(0).toUpperCase()+fatto.slice(1)} (${u.count} ingredient${u.count===1?'e':'i'}). <button id="lab-round-undo" class="btn btn-outline btn-sm" onclick="undoLabRound('${recipe.id}')">Annulla</button></div>`;
   }
   var p=S.labRound;
   if(!p||p.recipeId!==recipe.id||p.labVersionId!==v.id){
     return`<div style="margin-top:12px"><button id="lab-round-open" class="btn btn-outline btn-sm" onclick="openLabRound('${recipe.id}')" title="Uniforma le unità e arrotonda le quantità, con anteprima"><i class="ti ti-decimal"></i> Arrotonda quantità</button></div>`;
   }
-  var res=computeLabRounding(v.ingredients,p.decimals);
+  var res=computeLabRounding(v.ingredients,p.decimals,p.toGrams);
   var scelta=[null].concat(LAB_ROUND_DECIMALS).map(function(d){return`<button class="btn btn-sm ${p.decimals===d?'btn-lab':'btn-outline'} lab-round-d" onclick="setLabRoundDecimals(${d===null?'null':d})">${d===null?'Non arrotondare':labDecimaliText(d)}</button>`;}).join('');
   var mono="font-family:'DM Mono',monospace";
   var righe=res.rows.filter(function(r){return r.changed;}).map(function(r){
     var pct=r.variation*100;var forte=Math.abs(pct)>=5;
     var conv=r.converted?`<span>→</span><span style="${mono}" class="lab-round-conv">${labQtyText(r.convQty)} ${escAttr(r.convUnit)}</span>`:'';
+    var togli=r.toGrams?`<button class="btn btn-outline btn-sm lab-round-to-g-off" onclick="toggleLabRoundToGrams('${r.id}')" title="Non convertire: resta in ${escAttr(r.unit)} ed escluso">Non convertire</button>`:'';
     var arr=p.decimals!=null&&r.rounded!==r.convQty?`<span>→</span><span style="${mono};font-weight:600" class="lab-round-new">${labQtyText(r.rounded)} ${escAttr(r.convUnit)}</span><span style="font-size:11px;${forte||r.zeroed?'color:var(--orange-accessible,#b45309);font-weight:600':'color:var(--light)'}">${r.zeroed?'diventerebbe 0':(pct>0?'+':'')+formatQtyDisplay(pct)+'%'}</span>`:'';
     return`<div class="lab-round-row${r.zeroed?' lab-round-zero':''}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:baseline;padding:6px 0;border-top:1px solid var(--border);font-size:13px${r.zeroed?';color:#c0392b':''}">
         <span style="flex:1;min-width:120px;color:var(--dark)">${escAttr(r.name)}</span>
-        <span style="${mono}" class="lab-round-orig">${labQtyText(r.qty)} ${escAttr(r.unit)}</span>${conv}${arr}
+        <span style="${mono}" class="lab-round-orig">${labQtyText(r.qty)} ${escAttr(r.unit)}</span>${conv}${arr}${togli}
       </div>`;}).join('');
   var esclusi=res.excluded.map(function(r){
-    var fact=resolveConfirmedLabConversionFact(normalizeIngredientName(r.name),r.unit);
+    var fact=labConfirmedFactToGrams(r);
     return`<div class="lab-round-excluded" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:4px 0;font-size:12px;color:var(--mid)">
         <span style="flex:1;min-width:120px">${escAttr(r.name)} · ${labQtyText(r.qty)} ${escAttr(r.unit)}</span>
-        ${fact?`<button class="btn btn-outline btn-sm lab-round-to-g" onclick="onIngUnit('${recipe.id}','${r.id}','g')" title="Usa la conversione confermata: ${labQtyText(fact.factor)} g per ${escAttr(fact.fromUnit)}">Converti in g</button>`:'<span style="font-size:11px">nessuna conversione confermata in archivio</span>'}
+        ${fact?`<button class="btn btn-outline btn-sm lab-round-to-g" onclick="toggleLabRoundToGrams('${r.id}')" title="Prepara la conversione con il fattore confermato: ${labQtyText(fact.factor)} g per ${escAttr(fact.fromUnit)}. Si applica con Applica.">Converti in g</button>`:'<span style="font-size:11px">nessuna conversione confermata in archivio</span>'}
       </div>`;}).join('');
   var pesoPrima=computeFormulationWeights(v.ingredients),pesoDopo=computeFormulationWeights(res.rows.map(function(r,idx){return Object.assign({},v.ingredients[idx],{qty:r.rounded,unit:r.convUnit});}));
   var riepilogoPeso=res.changed&&pesoPrima.status==='complete'&&pesoDopo.status==='complete'?` Peso a crudo: ${labGrams(pesoPrima.raw)} → ${labGrams(pesoDopo.raw)}.`:'';
   var corpo=!res.changed
     ?`<div class="lab-round-none" style="font-size:13px;color:var(--mid);margin-top:8px">${p.decimals==null?'Unità già uniformate: scegli quanti decimali tenere.':'Nessuna quantità da arrotondare con '+labDecimaliText(p.decimals)+'.'}</div>`
-    :`<div style="font-size:12px;color:var(--mid);margin:8px 0 4px">${res.converted?res.converted+' unità da uniformare (kg → g, l e cl → ml). ':''}${res.changed} ingredient${res.changed===1?'e cambia':'i cambiano'}.${riepilogoPeso}</div>${righe}`
+    :`<div style="font-size:12px;color:var(--mid);margin:8px 0 4px">${res.converted?res.converted+' unità da convertire. ':''}${res.changed} ingredient${res.changed===1?'e cambia':'i cambiano'}.${riepilogoPeso}</div>${righe}`
       +(res.zeroed.length?`<div class="lab-round-blocked" style="font-size:12px;color:#c0392b;margin-top:8px"><i class="ti ti-alert-triangle"></i> ${res.zeroed.map(function(r){return escAttr(r.name);}).join(', ')} diventerebbe 0: scegli più decimali. Arrotondamento non applicabile.</div>`:'');
   return`<div class="lab-round-panel" style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--cream)">
     <div style="font-size:13px;font-weight:600;color:var(--dark)"><i class="ti ti-decimal"></i> Uniforma unità e arrotonda quantità</div>
