@@ -743,6 +743,11 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
 .si-famiglia-tag{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;color:var(--dpop-inchiostro-testo);border:1px solid var(--dpop-filetto-riga);padding:3px 8px;}
 
 .si-azione-principale{margin:0 22px 22px;}
+.si-btn-nuova{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.06em;text-transform:uppercase;color:var(--dpop-inchiostro-testo);background:none;border:1.5px solid var(--dpop-inchiostro-struttura);padding:9px 12px;min-height:40px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+.si-btn-nuova:hover,.si-btn-nuova:active{background:var(--dpop-carta-0-foglio);}
+.si-conferma-validazione{margin:0 22px 14px;padding:6px 10px;border-left:3px solid var(--sage,#3d7a5c);font-size:13px;color:var(--mid);}
+.si-conferma-validazione strong{color:var(--dark);font-weight:600;}
+.si-riga.si-riga-evidenziata{background:#eef5f0;box-shadow:inset 3px 0 0 var(--sage,#3d7a5c);}
 .si-btn-principale{width:100%;font-family:'Newsreader',serif;font-size:18px;font-weight:500;color:var(--dpop-bianco-caldo);background:var(--dpop-lacca-pieno);border:none;padding:15px;cursor:pointer;-webkit-tap-highlight-color:transparent;min-height:52px;text-align:center;}
 .si-btn-principale:hover,.si-btn-principale:active{background:var(--dpop-lacca-segno);}
 .si-scelta-partenza{margin:0 22px 22px;padding:14px;border:1.5px solid var(--dpop-inchiostro-struttura);}
@@ -2885,7 +2890,7 @@ async function confirmValidate(){
     S.view='ricetta-madre-v2';
     S.mode='produzione';
     S.selectedVariantId=null;
-    S.justValidated={recipeId:id,variantId:nv.id}; // riquadro: Rendi attiva / Correggi nel LAB
+    S.justValidated={recipeId:id,variantId:nv.id}; // conferma discreta e riga evidenziata nella Scheda
     toast('"'+nv.name+'" è pronta.','ti-circle-check');
     render();
   }
@@ -7800,6 +7805,20 @@ function parseDataItaliana(str){
   return new Date(a,m-1,g).getTime();
 }
 
+// Toglie conferma ed evidenza dopo qualche secondo. Nessun nuovo render se lo
+// chef sta scrivendo (rinomina aperta o campo attivo): sparisce al successivo.
+var EVIDENZA_VALIDATA_MS=8000;
+function programmaFineEvidenzaValidata(variantId){
+  if(S._evidenzaTimer&&S._evidenzaTimer.variantId===variantId)return;
+  if(S._evidenzaTimer)clearTimeout(S._evidenzaTimer.id);
+  S._evidenzaTimer={variantId:variantId,id:setTimeout(function(){
+    S._evidenzaTimer=null;
+    if(!S.justValidated||S.justValidated.variantId!==variantId)return;
+    S.justValidated=null;
+    var occupato=S.renameEdit||(document.activeElement&&/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName));
+    if(S.view==='ricetta-madre-v2'&&!occupato)render();
+  },EVIDENZA_VALIDATA_MS)};
+}
 function renderRicettaMadreV2(recipe){
   const all=allVariants(recipe);
   const attive=all.filter(v=>v._type==='active');
@@ -7873,7 +7892,7 @@ function renderRicettaMadreV2(recipe){
       <button class="si-scelta-annulla" onclick="S.pendingDuplicaSceltaRecipeId=null;render()">Annulla</button>
     </div>`:`
     <div class="si-azione-principale">
-      <button class="si-btn-principale" onclick="duplicaVersioneLAB('${recipe.id}')"><i class="ti ti-plus"></i> Nuova Ricetta in LAB</button>
+      <button class="si-btn-nuova" onclick="duplicaVersioneLAB('${recipe.id}')"><i class="ti ti-plus"></i> Nuova Ricetta in LAB</button>
     </div>`;
 
   // ═══ B. OGGI — cosa sta succedendo ora: Attive + Bozze + Pronte. Mai le Archiviate. ═══
@@ -7906,12 +7925,19 @@ function renderRicettaMadreV2(recipe){
       <div class="si-riga-azioni"><button class="si-riga-btn" onclick="S.view='recipe';S.mode='lab';S.recipes=S.recipes.map(r=>r.id==='${recipe.id}'?{...r,currentLabIdx:${v._idx}}:r);S.selectedVariantId=null;render()">Apri LAB</button></div>
     </div>`).join('')}`:'';
 
+  // Conferma discreta dopo la validazione: la Ricetta appena validata resta
+  // evidenziata per qualche secondo; le azioni sono quelle della sua riga.
+  const appenaValidata=S.justValidated&&S.justValidated.recipeId===recipe.id?pronte.find(v=>v.id===S.justValidated.variantId):null;
+  if(appenaValidata)programmaFineEvidenzaValidata(appenaValidata.id);
+  const zonaDopoValidazione=appenaValidata?`
+    <div class="si-conferma-validazione" role="status"><i class="ti ti-circle-check"></i> <strong>«${escAttr(appenaValidata.name)}» è pronta.</strong> Ricetta validata e salvata.</div>`:'';
+
   const sezionePronteOggi=pronte.length>0?`
     <div class="si-sezione-cesura"><span class="si-sezione-notch neutro"></span><span class="si-sezione-titolo">Pronte, non ancora attive</span><span class="si-sezione-count">${pronte.length}</span></div>
-    ${pronte.map(v=>`<div class="si-riga">
+    ${pronte.map(v=>`<div class="si-riga${appenaValidata&&appenaValidata.id===v.id?' si-riga-evidenziata':''}">
       <button class="si-riga-apri" onclick="S.view='recipe';S.mode='produzione';S.selectedVariantId='${v.id}';render()">
         <span class="si-riga-nome">${v.name}</span>
-        <span class="si-riga-sub">Pronta il ${v.validatedAt}</span>
+        <span class="si-riga-sub">Pronta il ${v.validatedAt}${appenaValidata&&appenaValidata.id===v.id?' · appena validata':''}</span>
       </button>
       <div class="si-riga-azioni">
         <button class="si-riga-btn" onclick="rendiAttivaPronta('${recipe.id}','${v.id}')" title="Disponibile in Produzione: non avvia nessuna Sessione">Rendi attiva</button>
@@ -7921,19 +7947,6 @@ function renderRicettaMadreV2(recipe){
       </div>
       ${S.renameEdit&&S.renameEdit.kind==='ricetta'&&S.renameEdit.variantId===v.id?renderRinominaForm('ricetta',recipe.id,v.id,v.name):''}
     </div>`).join('')}`:'';
-
-  // Riquadro subito dopo la validazione: i due passi successivi, espliciti.
-  const appenaValidata=S.justValidated&&S.justValidated.recipeId===recipe.id?pronte.find(v=>v.id===S.justValidated.variantId):null;
-  const zonaDopoValidazione=appenaValidata?`
-    <div class="si-dopo-validazione" style="margin:12px 0;padding:14px 16px;border:1.5px solid var(--sage,#3d7a5c);border-radius:var(--r-md);background:var(--white)">
-      <div style="font-size:15px;font-weight:700;color:var(--dark)">«${escAttr(appenaValidata.name)}» è pronta.</div>
-      <div style="font-size:13px;color:var(--mid);margin-top:4px">Rendila attiva per usarla in Produzione (non avvia nessuna Sessione), oppure riaprila nel LAB per correggerla.</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
-        <button class="si-btn-principale" id="btn-dopo-rendi-attiva" onclick="rendiAttivaPronta('${recipe.id}','${appenaValidata.id}')"><i class="ti ti-circle-check"></i> Rendi attiva</button>
-        <button class="si-riga-btn" id="btn-dopo-correggi" onclick="riapriProntaInLab('${recipe.id}','${appenaValidata.id}')">Correggi nel LAB</button>
-        <button class="si-riga-btn" onclick="S.justValidated=null;render()">Più tardi</button>
-      </div>
-    </div>`:'';
 
   const oggiVuoto=attive.length===0&&inLab.length===0&&pronte.length===0;
   const zonaOggi=`

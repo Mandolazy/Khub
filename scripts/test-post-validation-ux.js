@@ -218,20 +218,23 @@ const EXTRA = ['function getStructuredSteps(legacySteps,stepsV2)', 'function par
   'async function riapriProntaInLab(recipeId,variantId)', 'function bozzaVuota(v)', 'function nuovaBozzaDaRicetta(recipeId,variantId)', 'function creaBozzaDaSorgente(recipeId,attiva)',
   'function renderAzioniLabRicetta(recipe,vv)', 'function apriRinomina(kind,recipeId,variantId)', 'function confermaRinominaScheda(recipeId)',
   'async function confermaRinominaRicetta(recipeId,variantId)', 'function renderRinominaForm(kind,recipeId,variantId,valore)', 'function onRecipeNameChange(recipeId,val)',
-  'function renderLabRecipe(recipe)'];
+  'function renderLabRecipe(recipe)', 'function allVariants(recipe)', 'function findVariantById(variantId)', 'function parseDataItaliana(str)',
+  'function labTargetIsSet(value)', 'function targetDisplay(value)', 'function targetSummaryShort(portions,gpp)',
+  'function correggibileInPagina(recipe,vv)', 'function programmaFineEvidenzaValidata(variantId)', 'function renderRicettaMadreV2(recipe)'];
 const defined = n => new RegExp('function ' + n.replace(/^(async )?function /, '').split('(')[0] + '\\(').test(SRC);
-const SRC_UX = SRC + '\n' + EXTRA.filter(m => !defined(m)).map(extractFunction).join('\n');
+const SRC_UX = SRC + '\n' + EXTRA.filter(m => !defined(m)).map(extractFunction).join('\n')
+  + '\n' + html.match(/var EVIDENZA_VALIDATA_MS=\d+;/)[0].replace(/\d+/, '30'); // durata ridotta per il test
 function makeClient2(fetchImpl, opts = {}) {
   const log = { toasts: [] };
   const dom = {};
   const c = new Function('fetch', 'log', 'document', 'confirm', `
     var S={recipes:[],selectedId:null,families:[],variantFamilies:{},variantHistory:{},unitWeights:{},unitWeightFacts:{},productionConversionFacts:{},labYieldInput:{},activeYieldEdit:null,
-      view:'ricetta-madre-v2',mode:'produzione',selectedVariantId:null,pendingFamilies:[],pendingNewFamily:'',showFamilyPicker:false,familyManagerMode:false,justValidated:null,renameEdit:null};
+      view:'ricetta-madre-v2',mode:'produzione',selectedVariantId:null,pendingFamilies:[],pendingNewFamily:'',showFamilyPicker:false,familyManagerMode:false,justValidated:null,renameEdit:null,rmv2AttivaEspansa:{},pendingDuplicaSceltaRecipeId:null,confirmDeleteId:null};
     var _knownIngredientIdsByVariant={}; var _persistedValidatedSig={}; var _saveLocked=false, _saveTimer={};
     function render(){} function autosave(){} function toast(msg){log.toasts.push(msg);}
     ${SRC_UX}
     return {S, loadFromSupabase, saveToSupabase, onValidate, confirmValidate, toggleActiveV2, rendiAttivaPronta, riapriProntaInLab, nuovaBozzaDaRicetta,
-      renderAzioniLabRicetta, apriRinomina, confermaRinominaScheda, confermaRinominaRicetta, renderLabRecipe, upLab, prontaRiapribileMotivo, creaBozzaDaSorgente, R, getSig: id => _persistedValidatedSig[id]};
+      renderAzioniLabRicetta, apriRinomina, confermaRinominaScheda, confermaRinominaRicetta, renderLabRecipe, renderRicettaMadreV2, upLab, prontaRiapribileMotivo, creaBozzaDaSorgente, R, getSig: id => _persistedValidatedSig[id]};
   `)(fetchImpl, log, { getElementById: id => dom[id] || null }, () => opts.confirm !== false);
   c.log = log; c.dom = dom; return c;
 }
@@ -487,6 +490,37 @@ const sha = s => crypto.createHash('sha256').update(s).digest('hex').slice(0, 16
     c.onValidate(); c.S.pendingFamilies = []; await c.confirmValidate(); await tick();
     const t = tagDi('lvB'); assert.strictEqual(t.length, 1); assert.notStrictEqual(t[0], 'famO'); assert.ok(t[0].startsWith('fam_r'));
     assert.deepStrictEqual(tagDi('vaX'), ['famO'], 'Famiglia dell\'altra Scheda invariata');
+  });
+
+
+  await test('U13. schermata dopo la validazione: conferma discreta, riga evidenziata per qualche secondo, azioni solo nella riga, nessun duplicato, Nuova Ricetta in LAB meno enfatizzata', async () => {
+    const c = await setup();
+    c.onValidate(); await c.confirmValidate(); await tick();
+    const dbDopo = clone([fake.tables.variants, fake.tables.ingredients, fake.tables.variant_families, fake.tables.production_sessions]);
+    const nome = rec(c).validatedVariants.find(v => v.id === 'lvB').name;
+    let h = c.renderRicettaMadreV2(rec(c));
+    const conta = t => h.split(t).length - 1;
+    assert.strictEqual(conta('class="si-conferma-validazione"'), 1);
+    assert.ok(h.includes('«' + nome + '» è pronta.</strong> Ricetta validata e salvata.'), 'testo della conferma');
+    for (const vecchio of ['si-dopo-validazione', 'btn-dopo-rendi-attiva', 'btn-dopo-correggi', 'Più tardi']) assert.ok(!h.includes(vecchio), 'riquadro rimosso: ' + vecchio);
+    assert.strictEqual(conta('si-riga-evidenziata'), 1, 'una sola riga evidenziata');
+    const riga = h.slice(h.indexOf('si-riga-evidenziata'), h.indexOf('</div>', h.indexOf('si-riga-azioni', h.indexOf('si-riga-evidenziata'))));
+    assert.ok(riga.includes(nome) && riga.includes('appena validata'), 'evidenziata la Ricetta giusta');
+    for (const az of [`rendiAttivaPronta('rB','lvB')`, `riapriProntaInLab('rB','lvB')`, `apriRinomina('ricetta','rB','lvB')`, `retireVariant('rB','lvB')`])
+      assert.strictEqual(conta(az), 1, 'azione presente una sola volta: ' + az);
+    assert.ok(h.includes('class="si-btn-nuova"') && !h.includes('si-btn-principale'), 'Nuova Ricetta in LAB meno enfatizzata');
+    assert.strictEqual(conta(`duplicaVersioneLAB('rB')`), 1);
+    // Dopo qualche secondo: conferma ed evidenza spariscono, nessun dato toccato.
+    await new Promise(r => setTimeout(r, 80));
+    assert.strictEqual(c.S.justValidated, null);
+    h = c.renderRicettaMadreV2(rec(c));
+    assert.ok(!h.includes('si-conferma-validazione') && !h.includes('si-riga-evidenziata'));
+    assert.strictEqual(conta(`rendiAttivaPronta('rB','lvB')`), 1, 'azioni della riga invariate');
+    assert.deepStrictEqual([fake.tables.variants, fake.tables.ingredients, fake.tables.variant_families, fake.tables.production_sessions], dbDopo, 'nessun dato modificato');
+    // Conferma legata alla sua Scheda: un'altra Scheda non la mostra.
+    c.S.justValidated = { recipeId: 'rB', variantId: 'vaP' };
+    assert.ok(!c.renderRicettaMadreV2(rec(c, 'rX')).includes('si-conferma-validazione'));
+    c.S.justValidated = null;
   });
 
   await test('U9. codice: motore, salvataggio, firme e attivazione invariati', async () => {
