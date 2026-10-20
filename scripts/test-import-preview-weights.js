@@ -5,7 +5,8 @@
  * diverse; al massimo un decimale. Pesi di riferimento non confermati =
  * percentuali stimate; conversioni mancanti = "—" con l'elenco; dati non
  * validi = "—". Nomi protetti nelle note; dati e salvataggio invariati; resa
- * dichiarata dell'anteprima ancora funzionante.
+ * dichiarata dell'anteprima ancora funzionante. Dopo una modifica di quantita'
+ * o unita' le percentuali diventano "—" con un unico messaggio (solo visivo).
  *
  * Codice REALE estratto da khub_mvp.html e api/chat.js contro un finto
  * PostgREST. Solo dati sintetici.
@@ -347,6 +348,59 @@ const sha = s => require('crypto').createHash('sha256').update(s).digest('hex').
     assert.deepStrictEqual([row.declared_yield_qty, row.declared_yield_unit, row.portions_count, row.grams_per_portion], [6, 'porzioni', 0, 0]);
     assert.ok(row.note.startsWith('Importata · Resa nella fonte (intervallo): 4–6 porzioni'));
     assert.deepStrictEqual(fake.tables.ingredients.filter(i => i.variant_id === row.id).map(i => [i.name, Number(i.qty), i.unit]), [['Farina', 333.33, 'g'], ['Burro', 0.125, 'kg'], ['Uova', 3, 'n']]);
+  });
+
+  // Pagina simulata ricavata dall'HTML reale dell'anteprima: celle %, nota, righe degli ingredienti.
+  function paginaDa(h) {
+    const cells = [...h.matchAll(/<span class="preview-ing-pct"[^>]*>([^<]*)<\/span>/g)].map(m => ({ textContent: m[1] }));
+    const m = h.match(/<div class="preview-weights-note"[^>]*>([\s\S]*?)<\/div>/);
+    const box = { note: m ? { textContent: m[1] } : null, inserts: 0, cells };
+    const rows = [...h.matchAll(/<div class="preview-ing-row">/g)].map(() => ({ insertAdjacentHTML: (pos, html) => {
+      assert.strictEqual(pos, 'afterend'); box.inserts++; box.note = { textContent: html.replace(/<[^>]*>/g, '') }; } }));
+    box.querySelectorAll = sel => sel === '.preview-ing-pct' ? cells : sel === '.preview-ing-row' ? rows : [];
+    box.querySelector = sel => sel === '.preview-weights-note' ? box.note : null;
+    const campo = { closest: sel => sel === '.card' ? box : null };
+    return { box, campo };
+  }
+  // Funzione reale, eseguita con render e S che falliscono se toccati.
+  const segna = new Function('render', 'S', 'document', extractFunction('function segnaPercentualiObsolete(el)') + html.match(/var PREVIEW_PCT_OBSOLETE_MSG='[^']*';/)[0] + ';return segnaPercentualiObsolete;')(
+    () => { throw new Error('render chiamato'); }, new Proxy({}, { get() { throw new Error('S letto'); }, set() { throw new Error('S scritto'); } }), null);
+  const MSG = 'Ingredienti modificati: le percentuali saranno ricalcolate dopo il salvataggio';
+
+  await test('P8. modifica di quantita\' o unita\': tutte le percentuali "—" e un solo messaggio, anche dopo piu\' modifiche', async () => {
+    const r = await anteprima([I('Farina', 500, 'g'), I('Burro', 0.3, 'kg')]);
+    const { box, campo } = paginaDa(r.h);
+    assert.deepStrictEqual(box.cells.map(c => c.textContent), ['62.5%', '37.5%']);
+    assert.strictEqual(box.note, null, 'nessuna nota all\'apertura');
+    for (let k = 0; k < 4; k++) segna(campo);
+    assert.deepStrictEqual(box.cells.map(c => c.textContent), ['—', '—']);
+    assert.strictEqual(box.note.textContent, MSG);
+    assert.strictEqual(box.inserts, 1, 'messaggio creato una sola volta');
+  });
+
+  await test('P9. nota precedente (stima o conversioni mancanti) sostituita dal messaggio; asterischi rimossi', async () => {
+    for (const [ings, prima] of [[[I('Farina', 150, 'g'), I('Uova', 4, 'n')], /^Percentuali stimate/], [[I('Zucchero', 150, 'g'), I('Panna', 200, 'ml')], /^Percentuali non calcolabili/]]) {
+      const r = await anteprima(ings);
+      const { box, campo } = paginaDa(r.h);
+      assert.ok(prima.test(box.note.textContent));
+      segna(campo); segna(campo);
+      assert.ok(box.cells.every(c => c.textContent === '—'));
+      assert.strictEqual(box.note.textContent, MSG);
+      assert.strictEqual(box.inserts, 0, 'nessuna nota in piu\'');
+    }
+  });
+
+  await test('P10. solo aggiornamento visivo: nessun render, nessuna lettura o scrittura dello stato; gestori sui campi degli ingredienti', async () => {
+    const r = await anteprima([I('Farina', 150, 'g'), I('Uova', 4, 'n')]);
+    const prima = JSON.stringify(r.c.S.loadPreview);
+    segna(paginaDa(r.h).campo); // render e S sono trappole: fallirebbe se toccati
+    assert.strictEqual(JSON.stringify(r.c.S.loadPreview), prima);
+    const be = extractFunction('function bindEvents()');
+    const blk = be.slice(be.indexOf("document.querySelectorAll('[data-prev-ing]').forEach(el=>{\n    el.addEventListener('input'"), be.indexOf("const btnBackLoad"));
+    assert.ok(blk.includes("el.addEventListener('input',()=>segnaPercentualiObsolete(el));") && blk.includes("el.addEventListener('change',()=>segnaPercentualiObsolete(el));"));
+    assert.ok(!/render\(|S\.|fetch\(|save/.test(blk), 'il gestore non ridisegna, non scrive, non salva');
+    const f = extractFunction('function segnaPercentualiObsolete(el)');
+    assert.ok(!/render\(|S\.|fetch\(|computeFormulationWeights/.test(f), 'nessun ricalcolo, nessuno stato');
   });
 
   console.log('');

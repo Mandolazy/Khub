@@ -7951,6 +7951,22 @@ function renderPreview(){
   </div>`;
 }
 
+// Anteprima di importazione: quando lo chef modifica quantita' o unita' di un
+// ingrediente, le percentuali calcolate all'apertura non valgono piu'. Solo
+// aggiornamento visivo del riquadro dell'anteprima: tutte le percentuali "—" e
+// un unico messaggio al posto della nota. Nessun ricalcolo, nessun render,
+// nessuna scrittura: gli altri campi (resa dichiarata compresa) restano come
+// li ha lasciati lo chef e il salvataggio li legge come prima.
+var PREVIEW_PCT_OBSOLETE_MSG='Ingredienti modificati: le percentuali saranno ricalcolate dopo il salvataggio';
+function segnaPercentualiObsolete(el){
+  var box=(el&&el.closest&&el.closest('.card'))||document;
+  box.querySelectorAll('.preview-ing-pct').forEach(function(c){c.textContent='—';});
+  var nota=box.querySelector('.preview-weights-note');
+  if(nota){nota.textContent=PREVIEW_PCT_OBSOLETE_MSG;return;}
+  var righe=box.querySelectorAll('.preview-ing-row');
+  if(righe.length)righe[righe.length-1].insertAdjacentHTML('afterend','<div class="preview-weights-note" style="font-size:11px;color:var(--mid);margin-top:6px">'+PREVIEW_PCT_OBSOLETE_MSG+'</div>');
+}
+
 // LAB FIX 2C (C2): Obiettivo di Produzione della bozza. Campi facoltativi e
 // indipendenti: vuoti se non impostati (mai "0"); testo libero, cosi' un
 // valore non numerico arriva al gestore e viene rifiutato invece di essere
@@ -9594,6 +9610,11 @@ function bindEvents(){
   if(btnExtract)btnExtract.addEventListener('click',extractRecipe);
 
   // Preview
+  // Quantita' o unita' degli ingredienti modificate: percentuali obsolete (solo visivo).
+  document.querySelectorAll('[data-prev-ing]').forEach(el=>{
+    el.addEventListener('input',()=>segnaPercentualiObsolete(el));
+    el.addEventListener('change',()=>segnaPercentualiObsolete(el));
+  });
   const btnBackLoad=document.getElementById('btn-back-load');
   if(btnBackLoad)btnBackLoad.addEventListener('click',()=>{S.loadDestinazione='nuova';S.loadDestinazioneSchedaId=null;S.view='load';render();});
   const btnSavePreview=document.getElementById('btn-save-preview');
