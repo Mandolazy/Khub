@@ -2,8 +2,9 @@
  * Test — FIX 2D: pesi nella fascia verde del LAB e arrotondamento facoltativo.
  * Fascia: peso a crudo e finito teorico in sola lettura, resa dichiarata
  * correggibile (un solo controllo), Obiettivo di Produzione non piu' mostrato
- * ma conservato. Arrotonda quantita': anteprima, conferma, annullamento
- * esatto finche' la bozza non cambia, blocco degli azzeramenti, nessun
+ * ma conservato. Arrotonda quantita': uniformazione kg -> g, l/cl -> ml, pezzi
+ * e cucchiai esclusi salvo conversione confermata; anteprima, conferma,
+ * annullamento esatto di quantita' e unita', blocco degli azzeramenti, nessun
  * arrotondamento al salvataggio. Ricette Attive, Sessioni, conversioni e
  * motore di Produzione invariati.
  *
@@ -106,7 +107,7 @@ function makeFakeSupabase() {
 const clone = x => JSON.parse(JSON.stringify(x));
 
 // Bignè: 500 g farina + 0,25 kg burro + 150 g zucchero, resa 70% -> 900 g crudi, 630 g finiti.
-function seed(fake, { draftYield = [null, null] } = {}) {
+function seed(fake, { draftYield = [null, null], extra = false } = {}) {
   const steps = [{ id: 'st1', order: 0, text: 'Impastare', expectedDurationSeconds: null }];
   const base = { portion_unit: 'g', media_url: null, video_url: null, intention_initial: null, intention_current: null, criteria_initial: null, criteria_current: null, steps: JSON.stringify(['Impastare']), steps_v2: steps, primo_consulto: null, m1_reading_text: null };
   fake.tables.recipes = [{ id: 'rB', name: 'Bignè TEST', category: 'Dolci', department: 'Cucina', notes: '', created_at: '2026-10-01T00:00:00Z' }];
@@ -120,6 +121,8 @@ function seed(fake, { draftYield = [null, null] } = {}) {
   fake.tables.ingredients.push(
     ing('d1', 'lvB', 'Farina', 166.66666666666669, 'g', 0, 70), ing('d2', 'lvB', 'Burro', 0.375, 'kg', 1, 70), ing('d3', 'lvB', 'Latte', 12.5, 'ml', 2, null),
     ing('d4', 'lvB', 'Panna', 1.2345, 'l', 3, null), ing('d5', 'lvB', 'Uova', 4.5, 'n', 4, null), ing('d6', 'lvB', 'Sale', 0.004, 'g', 5, null), ing('d7', 'lvB', 'Zucchero', 150, 'g', 6, 70));
+  // Unita' non convertibili direttamente senza conversione confermata, e cl.
+  if (extra) fake.tables.ingredients.push(ing('d8', 'lvB', 'Rum', 0.021, 'cl', 7, null), ing('d9', 'lvB', 'Gelatina', 3, 'n', 8, null), ing('d10', 'lvB', 'Cannella', 1, 'tsp', 9, null));
   fake.tables.ingredient_conversions = [{ id: 'k1', ingredient_name: 'latte', from_unit: 'ml', to_unit: 'g', factor: 1.03, source_type: 'chef_confirmed', source_detail: null, confirmed_at: '2026-10-01T00:00:00Z' },
     { id: 'k2', ingredient_name: 'panna', from_unit: 'ml', to_unit: 'g', factor: 1, source_type: 'chef_confirmed', source_detail: null, confirmed_at: '2026-10-01T00:00:00Z' },
     { id: 'k3', ingredient_name: 'uova', from_unit: 'n', to_unit: 'g', factor: 55, source_type: 'chef_confirmed', source_detail: null, confirmed_at: '2026-10-01T00:00:00Z' }];
@@ -156,7 +159,7 @@ const SRC = [
   'function computeFormulationWeights(ingredients,resolveFact)', 'function deriveYieldPerUnit(weights,declared)', 'function formatQtyDisplay(value)',
   'function targetFromDb(value)', 'function targetForDb(value)', 'function declaredYieldFromRow(row)', 'function copyDeclaredYield(src)', 'function declaredYieldPayload(v)', 'function declaredYieldState(v)',
   'function declaredYieldInputText(raw)', 'function declaredYieldErrorMessage(error)', 'function onLabDeclaredYield(recipeId,field,value)',
-  'function discardLabDeclaredYieldInput(recipeId)', 'function labGrams(x)', 'function labWeightsStima(w)', 'function renderLabFormulationBand(recipe,v,w)', 'function renderLabWeightsPanel(recipe,v,w)', 'function roundQtyDecimals(x,d)', 'function computeLabRounding(ingredients,decimals)', 'function labRoundUndoValido(recipe,v)', 'function openLabRound(recipeId)', 'function setLabRoundDecimals(d)', 'function closeLabRound()', 'function applyLabRound(recipeId)', 'function undoLabRound(recipeId)', 'function labQtyText(x)', 'function renderLabRoundSection(recipe,v)',
+  'function discardLabDeclaredYieldInput(recipeId)', 'function labGrams(x)', 'function labWeightsStima(w)', 'function renderLabFormulationBand(recipe,v,w)', 'function renderLabWeightsPanel(recipe,v,w)', 'function roundQtyDecimals(x,d)', 'function shiftQtyDecimals(x,exp)', 'function labUniformUnit(unit)', 'function labDecimaliText(d)', 'function resolveConfirmedLabConversionFact(normalizedName,unit)', 'function referenceConversionProposal(normalizedName,unit)', 'function labUnitAnchorKey(recipeId,labVersionId,ingId)', 'function ingredientGramsPerUnit(unit,ingredientName,resolver)', 'function convertIngredientQty(qty,fromUnit,toUnit,ingredientName,resolveFact)', 'function computeLabUnitConversion(ing,toUnit,anchor,resolveFact)', 'function onIngUnit(recipeId,ingId,val)', 'function computeLabRounding(ingredients,decimals)', 'function labRoundUndoValido(recipe,v)', 'function openLabRound(recipeId)', 'function setLabRoundDecimals(d)', 'function closeLabRound()', 'function applyLabRound(recipeId)', 'function undoLabRound(recipeId)', 'function labQtyText(x)', 'function renderLabRoundSection(recipe,v)',
   'function validateLabProductionTarget(field,value)', 'function setLabProductionTarget(recipeId,field,rawValue)', 'function onLabTargetPortions(recipeId,val)',
   'function onIngQty(recipeId,ingId,val)',
   'function uid()', 'function normalizeIngredientName(name)', 'function conversionFactSourcePriority(sourceType)',
@@ -170,13 +173,13 @@ const SRC = [
 ].map(extractFunction).concat(html.match(/var SESSION_SCALING_[A-Z_]+=\{[^}]*\};/g), [
   html.match(/var DECLARED_YIELD_UNIT_MAX_LENGTH=\d+;/)[0], html.match(/var DECLARED_YIELD_MEASURE_UNITS=\{[\s\S]*?\n\};/)[0],
   html.match(/var DECLARED_YIELD_UNSUPPORTED_UNITS=\[[^\]]*\];/)[0], html.match(/var LAB_TARGET_PORTIONS_MAX=\d+;/)[0],
-  html.match(/var LAB_WEIGHT_INVALID_REASONS=\{[^}]*\};/)[0], html.match(/var LAB_ROUND_DECIMALS=\[[^\]]*\];/)[0],
+  html.match(/var LAB_WEIGHT_INVALID_REASONS=\{[^}]*\};/)[0], html.match(/var LAB_ROUND_DECIMALS=\[[^\]]*\];/)[0], html.match(/var LAB_UNIFORM_UNITS=\{[^}]*\};/)[0], html.match(/const UNITS = \[[^\]]*\];/)[0],
 ]).join('\n');
 
 function makeClient(fetchImpl, unitWeights = {}) {
   const log = { autosaves: [], renders: 0, toasts: [] };
   const c = new Function('fetch', 'log', 'unitWeights', `
-    var S={recipes:[],selectedId:null,families:[],variantFamilies:{},unitWeights:unitWeights,unitWeightFacts:{},productionConversionFacts:{},labYieldInput:{},labRound:null,labRoundUndo:null};
+    var S={recipes:[],selectedId:null,families:[],variantFamilies:{},unitWeights:unitWeights,unitWeightFacts:{},productionConversionFacts:{},labYieldInput:{},labRound:null,labRoundUndo:null,labUnitAnchors:{},pendingLabConversion:null};
     var _knownIngredientIdsByVariant={};
     var _persistedValidatedSig={};
     function render(){log.renders++;}
@@ -184,7 +187,7 @@ function makeClient(fetchImpl, unitWeights = {}) {
     function toast(msg){log.toasts.push(msg);render();}
     ${SRC}
     return {S, loadFromSupabase, saveToSupabase, onLabDeclaredYield, renderLabFormulationBand, renderLabWeightsPanel, computeFormulationWeights, onIngQty, buildValidatedVariantPayload,
-      roundQtyDecimals, computeLabRounding, openLabRound, setLabRoundDecimals, closeLabRound, applyLabRound, undoLabRound, renderLabRoundSection, firmaContenutoBozza, getSig: id => _persistedValidatedSig[id]};
+      roundQtyDecimals, shiftQtyDecimals, labUniformUnit, onIngUnit, computeLabRounding, openLabRound, setLabRoundDecimals, closeLabRound, applyLabRound, undoLabRound, renderLabRoundSection, firmaContenutoBozza, getSig: id => _persistedValidatedSig[id]};
   `)(fetchImpl, log, unitWeights);
   c.log = log;
   return c;
@@ -251,62 +254,77 @@ const box = (h, cls) => { const m = h.match(new RegExp('class="' + cls + '"[^>]*
     assert.deepStrictEqual([lab(c).declaredYieldQty, lab(c).declaredYieldUnit], [30, 'bignè'], 'resa invariata');
   });
 
-  await test('D3. arrotondamento decimale esatto per unita\' diverse (g, kg, ml, l, pezzi)', async () => {
+  await test('D3. uniformazione esatta kg -> g, l e cl -> ml; pezzi, cucchiai e altre unita\' esclusi; arrotondamento decimale esatto', async () => {
     const c = await setup();
     const r = c.roundQtyDecimals;
-    assert.deepStrictEqual([r(1.005, 2), r(2.675, 2), r(1.2345, 3), r(166.66666666666669, 2), r(0.375, 1), r(0.375, 2), r(4.5, 0), r(12.5, 0), r(0.004, 2), r(150, 0), r(1e-7, 3)],
-      [1.01, 2.68, 1.235, 166.67, 0.4, 0.38, 5, 13, 0, 150, 0]);
-    const res = c.computeLabRounding(lab(c).ingredients, 1);
-    assert.deepStrictEqual(res.rows.map(x => [x.unit, x.rounded]), [['g', 166.7], ['kg', 0.4], ['ml', 12.5], ['l', 1.2], ['n', 4.5], ['g', 0], ['g', 150]]);
-    assert.deepStrictEqual(res.rows.map(x => x.changed), [true, true, false, true, false, true, false]);
-    assert.ok(Object.is(res.rows[2].rounded, 12.5) && Object.is(res.rows[6].rounded, 150), 'valori gia\' arrotondati identici');
-    assert.deepStrictEqual([res.zeroed.map(x => x.name), res.ok], [['Sale'], false]);
-    assert.deepStrictEqual(c.computeLabRounding([{ id: 'x', name: 'X', qty: 'abc', unit: 'g' }, { id: 'y', name: 'Y', qty: -1, unit: 'g' }, { id: 'z', name: 'Z', qty: 0, unit: 'g' }], 0).changed, 0, 'non numeriche, negative e zero lasciate come sono');
+    assert.deepStrictEqual([r(1.005, 2), r(2.675, 2), r(1.2345, 3), r(166.66666666666669, 2), r(4.5, 0), r(12.5, 0), r(0.004, 2), r(150, 0), r(1e-7, 3)], [1.01, 2.68, 1.235, 166.67, 5, 13, 0, 150, 0]);
+    assert.deepStrictEqual([c.shiftQtyDecimals(0.021, 1), c.shiftQtyDecimals(1.2345, 3), c.shiftQtyDecimals(0.375, 3), c.shiftQtyDecimals(0.29, 3)], [0.21, 1234.5, 375, 290], 'nessun artefatto (0,021 x 10 = 0,21000000000000002)');
+    assert.deepStrictEqual(['kg', 'l', 'cl', 'g', 'ml', 'n', 'tbsp', 'tsp'].map(u => c.labUniformUnit(u)), [{ unit: 'g', exp: 3 }, { unit: 'ml', exp: 3 }, { unit: 'ml', exp: 1 }, null, null, null, null, null]);
+    const solo = c.computeLabRounding(lab(c).ingredients, null);
+    assert.deepStrictEqual(solo.rows.map(x => [x.rounded, x.convUnit]), [[166.66666666666669, 'g'], [375, 'g'], [12.5, 'ml'], [1234.5, 'ml'], [4.5, 'n'], [0.004, 'g'], [150, 'g']]);
+    assert.deepStrictEqual([solo.converted, solo.changed, solo.excluded.map(x => x.name), solo.ok], [2, 2, ['Uova'], true]);
+    const res = c.computeLabRounding(lab(c).ingredients, 0);
+    assert.deepStrictEqual(res.rows.map(x => [x.rounded, x.convUnit]), [[167, 'g'], [375, 'g'], [13, 'ml'], [1235, 'ml'], [4.5, 'n'], [0, 'g'], [150, 'g']], 'pezzi mai arrotondati (4,5 n resta 4,5)');
+    assert.deepStrictEqual([res.rows[4].excluded, res.rows[4].changed, res.zeroed.map(x => x.name), res.ok], [true, false, ['Sale'], false]);
+    assert.deepStrictEqual(c.computeLabRounding([{ id: 'x', name: 'X', qty: 'abc', unit: 'g' }, { id: 'y', name: 'Y', qty: -1, unit: 'kg' }, { id: 'z', name: 'Z', qty: 0, unit: 'g' }], 0).changed, 0, 'non numeriche, negative e zero lasciate come sono');
   });
 
-  await test('D4. anteprima: valori originali e arrotondati, nessuna modifica prima della conferma', async () => {
+  await test('D4. anteprima: originali, convertite e arrotondate; ingredienti esclusi indicati; nulla cambia prima della conferma', async () => {
     const c = await setup();
     const prima = clone(lab(c).ingredients), firma = c.firmaContenutoBozza(lab(c));
     assert.ok(round(c).includes('id="lab-round-open"'));
-    c.openLabRound('rB'); assert.ok(/disabled/.test(round(c).match(/<button id="lab-round-apply"[^>]*>/)[0]), 'senza scelta non si applica');
+    c.openLabRound('rB');
+    let h = round(c);
+    assert.ok(text(h).includes('0,375 kg → 375 g') && text(h).includes('1,2345 l → 1234,5 ml'), 'conversioni proposte');
+    assert.ok(!/disabled/.test(h.match(/<button id="lab-round-apply"[^>]*>/)[0]), 'uniformazione applicabile da sola');
+    assert.ok(/Restano nella loro unità/.test(text(h)) && /Uova · 4,5 n/.test(text(h)) && /lab-round-to-g/.test(h), 'Uova esclusa, convertibile con la conversione confermata');
     c.setLabRoundDecimals(3);
-    const h = round(c);
-    assert.ok(text(h).includes('166,66666666666669 g → 166,667 g') && text(h).includes('1,2345 l → 1,235 l'));
-    assert.ok(!/disabled/.test(h.match(/<button id="lab-round-apply"[^>]*>/)[0]));
+    h = round(c);
+    assert.ok(text(h).includes('166,66666666666669 g → 166,667 g') && text(h).includes('1,2345 l → 1234,5 ml'));
+    c.setLabRoundDecimals(0); h = round(c);
+    assert.ok(text(h).includes('1,2345 l → 1234,5 ml → 1235 ml'), 'tre passaggi');
     assert.deepStrictEqual(lab(c).ingredients, prima); assert.strictEqual(c.firmaContenutoBozza(lab(c)), firma);
     assert.deepStrictEqual(c.log.autosaves, [], 'nessun salvataggio durante l\'anteprima');
     c.closeLabRound(); assert.deepStrictEqual(lab(c).ingredients, prima); assert.strictEqual(c.S.labRound, null);
   });
 
-  await test('D5. applicazione: solo le quantita\' cambiano; salvate esatte; annullamento ripristina i valori precedenti anche nel DB', async () => {
+  await test('D5. applicazione: solo quantita\' e unita\'; salvate esatte; annullamento ripristina quantita\' e unita\' anche nel DB', async () => {
     const c = await setup({ draftYield: [30, 'bignè'] });
     const before = intatti(), prima = clone(lab(c).ingredients), labPrima = { ...lab(c) };
+    const w0 = c.computeFormulationWeights(lab(c).ingredients);
     c.openLabRound('rB'); c.setLabRoundDecimals(3); c.applyLabRound('rB');
-    assert.deepStrictEqual(qtys(c), [166.667, 0.375, 12.5, 1.235, 4.5, 0.004, 150]);
-    assert.deepStrictEqual(altriCampi(lab(c).ingredients), altriCampi(prima), 'nomi, unita\', rese, id, mattoncini invariati');
+    assert.deepStrictEqual(lab(c).ingredients.map(i => [i.qty, i.unit]), [[166.667, 'g'], [375, 'g'], [12.5, 'ml'], [1234.5, 'ml'], [4.5, 'n'], [0.004, 'g'], [150, 'g']]);
+    const senza = l => l.map(i => { const x = { ...i }; delete x.qty; delete x.unit; return x; });
+    assert.deepStrictEqual(senza(lab(c).ingredients), senza(prima), 'nomi, rese, id, ordine, mattoncini invariati');
     for (const k of ['name', 'declaredYieldQty', 'declaredYieldUnit', 'portionsCount', 'gramsPerPortion', 'steps', 'stepsV2']) assert.deepStrictEqual(lab(c)[k], labPrima[k], k);
     assert.deepStrictEqual(c.log.autosaves, ['rB']);
     assert.strictEqual(await save(c), true);
-    assert.deepStrictEqual(dbQ(), qtys(c), 'salvate senza ulteriori arrotondamenti');
-    assert.ok(round(c).includes('id="lab-round-undo"'));
+    const dbRows = () => fake.tables.ingredients.filter(i => i.variant_id === 'lvB').sort((a, b) => a.sort_order - b.sort_order);
+    assert.deepStrictEqual(dbRows().map(i => [i.qty, i.unit]), lab(c).ingredients.map(i => [i.qty, i.unit]), 'salvate senza ulteriori arrotondamenti');
+    assert.ok(round(c).includes('id="lab-round-undo"') && /Unità uniformate e quantità arrotondate a 3 decimali/.test(text(round(c))));
     c.undoLabRound('rB');
-    qtys(c).forEach((q, i) => assert.ok(Object.is(q, prima[i].qty), 'ripristino esatto ' + i));
+    lab(c).ingredients.forEach((i, k) => assert.ok(Object.is(i.qty, prima[k].qty) && i.unit === prima[k].unit, 'ripristino esatto ' + k));
     assert.strictEqual(await save(c), true);
-    dbQ().forEach((q, i) => assert.ok(Object.is(q, ORIG[i]), 'DB ripristinato esatto ' + i));
+    dbRows().forEach((i, k) => assert.ok(Object.is(i.qty, ORIG[k]) && i.unit === prima[k].unit, 'DB ripristinato esatto ' + k));
     assert.deepStrictEqual(intatti(), before, 'Ricetta Attiva, Sessioni e conversioni invariate');
     assert.deepStrictEqual(saves.map(s => s.variants.map(v => v.id)), [['lvB'], ['lvB']]);
     const db = dbVariant(fake, 'lvB'); assert.deepStrictEqual([db.portions_count, db.grams_per_portion, String(db.declared_yield_qty), db.declared_yield_unit], [12, 21, '30', 'bignè'], 'Obiettivo e resa conservati');
+    // Solo uniformazione: pesi in grammi identici
+    c.openLabRound('rB'); c.applyLabRound('rB');
+    assert.deepStrictEqual(lab(c).ingredients.map(i => [i.qty, i.unit]), [[166.66666666666669, 'g'], [375, 'g'], [12.5, 'ml'], [1234.5, 'ml'], [4.5, 'n'], [0.004, 'g'], [150, 'g']]);
+    const w1 = c.computeFormulationWeights(lab(c).ingredients);
+    assert.ok(Math.abs(w1.raw - w0.raw) < 1e-9 && Math.abs(w1.finished - w0.finished) < 1e-9, 'uniformare non cambia i pesi');
   });
 
   await test('D6. annullamento non piu\' disponibile dopo un\'altra modifica della bozza: nulla viene ripristinato', async () => {
     const c = await setup();
-    c.openLabRound('rB'); c.setLabRoundDecimals(1); assert.strictEqual(c.computeLabRounding(lab(c).ingredients, 1).ok, false, 'Sale si azzererebbe');
-    c.onIngQty('rB', 'd6', '0.04'); c.setLabRoundDecimals(2); c.applyLabRound('rB');
-    const dopo = qtys(c);
+    c.onIngQty('rB', 'd6', '0.04');
+    c.openLabRound('rB'); c.setLabRoundDecimals(2); c.applyLabRound('rB');
+    const dopo = lab(c).ingredients.map(i => [i.qty, i.unit]);
     c.onIngQty('rB', 'd7', '151');
     assert.ok(!round(c).includes('lab-round-undo'), 'pulsante non piu\' mostrato');
     c.undoLabRound('rB');
-    assert.deepStrictEqual(qtys(c), dopo.map((q, i) => i === 6 ? 151 : q), 'nessun ripristino parziale');
+    assert.deepStrictEqual(lab(c).ingredients.map(i => [i.qty, i.unit]), dopo.map((q, i) => i === 6 ? [151, 'g'] : q), 'nessun ripristino parziale');
     assert.ok(c.log.toasts.some(t => /non più disponibile/.test(t)));
   });
 
@@ -319,13 +337,35 @@ const box = (h, cls) => { const m = h.match(new RegExp('class="' + cls + '"[^>]*
       assert.ok(/disabled/.test(h.match(/<button id="lab-round-apply"[^>]*>/)[0]), d + ' decimali: Applica disattivato');
       assert.ok(text(h).includes('Sale') && /diventerebbe 0/.test(text(h)));
       c.applyLabRound('rB');
-      assert.deepStrictEqual(lab(c).ingredients, prima, d + ' decimali: nulla cambia');
+      assert.deepStrictEqual(lab(c).ingredients, prima, d + ' decimali: nulla cambia, nemmeno le unita\'');
       c.closeLabRound();
     }
     assert.deepStrictEqual(c.log.autosaves, []);
     c.openLabRound('rB'); c.setLabRoundDecimals(3); c.applyLabRound('rB');
     assert.ok(lab(c).ingredients.every((i, k) => !(prima[k].qty > 0) || i.qty > 0), 'con 3 decimali nessuno a 0');
-    assert.strictEqual(lab(c).ingredients[5].qty, 0.004);
+  });
+
+  await test('D10. pezzi, cucchiai e unita\' senza conversione confermata restano esclusi; conversione in g solo esplicita e solo con una conversione confermata', async () => {
+    const c = await setup({ extra: true });
+    const convPrima = clone(fake.tables.ingredient_conversions);
+    c.S.unitWeights.gelatina = 2; // peso medio di riferimento, NON confermato
+    c.openLabRound('rB'); c.setLabRoundDecimals(0);
+    let h = round(c), res = c.computeLabRounding(lab(c).ingredients, 0);
+    assert.deepStrictEqual(res.excluded.map(x => x.name), ['Uova', 'Gelatina', 'Cannella']);
+    assert.deepStrictEqual(res.rows.filter(x => x.excluded).map(x => [x.rounded, x.convUnit]), [[4.5, 'n'], [3, 'n'], [1, 'tsp']], 'mai convertiti o arrotondati');
+    assert.ok(text(h).includes('0,021 cl → 0,21 ml'), 'cl uniformato');
+    assert.strictEqual((h.match(/lab-round-to-g/g) || []).length, 1, 'Converti in g solo per Uova (conversione confermata)');
+    assert.ok(/Gelatina · 3 n nessuna conversione confermata in archivio/.test(text(h)) && /Cannella · 1 tsp nessuna conversione confermata in archivio/.test(text(h)));
+    // Conversione esplicita delle uova: conversione confermata 55 g, poi partecipa all'arrotondamento.
+    c.onIngUnit('rB', 'd5', 'g');
+    assert.deepStrictEqual([lab(c).ingredients[4].qty, lab(c).ingredients[4].unit], [247.5, 'g']);
+    res = c.computeLabRounding(lab(c).ingredients, 0);
+    assert.deepStrictEqual([res.rows[4].excluded, res.rows[4].rounded], [false, 248]);
+    // Gelatina con il solo peso medio: nessuna conversione automatica
+    c.onIngUnit('rB', 'd9', 'g');
+    assert.ok(c.S.pendingLabConversion && c.S.pendingLabConversion.isReference, 'chiede conferma allo chef, non converte');
+    assert.deepStrictEqual([lab(c).ingredients[8].qty, lab(c).ingredients[8].unit], [3, 'n']);
+    assert.deepStrictEqual(fake.tables.ingredient_conversions, convPrima, 'conversioni confermate invariate');
   });
 
   await test('D8. nessun arrotondamento automatico: salvataggio e rilettura conservano i valori completi', async () => {
@@ -347,7 +387,8 @@ const box = (h, cls) => { const m = h.match(new RegExp('class="' + cls + '"[^>]*
       'function onLabDeclaredYield(recipeId,field,value)': '7bbbd369b9438f26', 'function toggleActiveV2(recipeId,variantId,currentActive)': 'ca8f22881e9ba641',
       'async function confirmValidate()': '84c902e4f4cba6ae', 'function validateLabProductionTarget(field,value)': 'fefbd04eed656496',
       'function computeRecipeWeightSummary(recipe,vv)': 'beac67cc93eee93b', 'function onIngUnit(recipeId,ingId,val)': '9839d1f8237ed53e',
-      'function renderProdRecipe(recipe)': '8a9ec67ee54bfdd4', 'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)': '9df6758db87b12b1',
+      'function renderProdRecipe(recipe)': '8a9ec67ee54bfdd4', 'function computeLabUnitConversion(ing,toUnit,anchor,resolveFact)': 'dbf8adeb56a128a8',
+      'function convertIngredientQty(qty,fromUnit,toUnit,ingredientName,resolveFact)': 'a112b9ab70b1c60c', 'function resolveConfirmedLabConversionFact(normalizedName,unit)': 'abae9dfb0a09fae3', 'async function confirmLabConversion(rawValue)': '5eaca20d0914bdc8', 'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)': '9df6758db87b12b1',
     };
     for (const [m, h] of Object.entries(PROTETTE)) assert.strictEqual(sha(extractFunction(m)), h, m);
     const nuovo = ['function roundQtyDecimals(x,d)', 'function computeLabRounding(ingredients,decimals)', 'function applyLabRound(recipeId)', 'function undoLabRound(recipeId)'].map(extractFunction).join('\n');
