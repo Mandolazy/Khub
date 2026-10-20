@@ -1,0 +1,17 @@
+# KHUB — pubblica su Vercel SOLO cio' che serve all'app (allowlist).
+# Tutto il resto del repository (migrazioni e script SQL in supabase/,
+# test in scripts/, docs/, file di sistema) non viene caricato nel
+# deployment e non puo' quindi essere servito come asset statico.
+# Deve restare allineato con ALLOWED_PATHS in middleware.js (verificato da
+# scripts/test-security-access.js).
+/*
+!/index.html
+!/khub_mvp.html
+!/middleware.js
+!/vercel.json
+!/package.json
+!/api
+!/lib
+/lib/*
+!/lib/baseline.js
+!/lib/reconciliation.js

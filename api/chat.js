@@ -1,3 +1,5 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
 // ══════════════════════════════════════════════════════════
 // M1 — PRIMO CONSULTO
 // Contratto cognitivo congelato (D1): sostituisce l'unico Primo Consulto
@@ -255,7 +257,70 @@ function normalizeActualYield(y) {
 // applicativo, validato anche dal client; nessun vincolo nel DB.
 const SESSION_NOTE_MAX_LENGTH = 2000;
 
+// ══════════════════════════════════════════════════════════
+// ACCESSO PRIVATO — secondo controllo, indipendente da middleware.js.
+// Se il middleware mancasse o venisse aggirato, l'API resta chiusa: prima
+// di qualsiasi azione (Supabase, fetchUrl, Anthropic) si richiede un cookie
+// di sessione valido firmato con KHUB_SESSION_SECRET e una richiesta
+// same-origin. Fail-closed: variabili assenti o deboli -> 503. Il formato
+// del token deve restare identico a quello di middleware.js (verificato da
+// scripts/test-security-access.js). Codice inline: questo file non importa
+// moduli locali (i test lo caricano come modulo data:).
+// ══════════════════════════════════════════════════════════
+const KHUB_SESSION_COOKIE = '__Host-khub_session';
+const KHUB_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
+const KHUB_SESSION_CLOCK_SKEW_SECONDS = 300;
+
+function khubHeader(req, name) {
+  const v = req && req.headers ? req.headers[name] : undefined;
+  return Array.isArray(v) ? v[0] : (typeof v === 'string' ? v : '');
+}
+
+function khubReadCookie(req, name) {
+  for (const part of khubHeader(req, 'cookie').split(';')) {
+    const i = part.indexOf('=');
+    if (i !== -1 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+  }
+  return '';
+}
+
+// Stesso HMAC-SHA256 di middleware.js, calcolato in modo sincrono con
+// node:crypto (questa funzione gira sempre nel runtime Node.js).
+function khubVerifySession(token, secret) {
+  const m = /^v1\.(\d{1,12})\.([A-Za-z0-9_-]{43})$/.exec(token);
+  if (!m) return false;
+  const exp = Number(m[1]);
+  const now = Date.now() / 1000;
+  if (!(exp > now) || exp > now + KHUB_SESSION_TTL_SECONDS + KHUB_SESSION_CLOCK_SKEW_SECONDS) return false;
+  const sig = Buffer.from(m[2], 'base64url');
+  const expected = createHmac('sha256', secret).update('khub-session.v1.' + exp).digest();
+  return sig.length === expected.length && timingSafeEqual(sig, expected);
+}
+
+function khubIsSameOrigin(req) {
+  const host = khubHeader(req, 'x-forwarded-host') || khubHeader(req, 'host');
+  const origin = khubHeader(req, 'origin');
+  if (origin) {
+    try { return !!host && new URL(origin).host === host; } catch (e) { return false; }
+  }
+  return khubHeader(req, 'sec-fetch-site') === 'same-origin';
+}
+
+// null se la richiesta puo' proseguire, altrimenti { status, error }.
+function khubAccessDenied(req) {
+  const secret = process.env.KHUB_SESSION_SECRET || '';
+  const password = process.env.KHUB_ACCESS_PASSWORD || '';
+  if (secret.length < 32 || password.length < 16) return { status: 503, error: 'Accesso non configurato' };
+  let valid = false;
+  try { valid = khubVerifySession(khubReadCookie(req, KHUB_SESSION_COOKIE), secret); } catch (e) { valid = false; }
+  if (!valid) return { status: 401, error: 'Accesso non autorizzato' };
+  if (!khubIsSameOrigin(req)) return { status: 403, error: 'Origine non consentita' };
+  return null;
+}
+
 export default async function handler(req, res) {
+  const denied = khubAccessDenied(req);
+  if (denied) return res.status(denied.status).json({ error: denied.error });
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   try {
     const body = req.body;

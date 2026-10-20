@@ -145,7 +145,7 @@ function seed(fake) {
 
 async function loadHandler() {
   const src = fs.readFileSync(path.join(ROOT, 'api/chat.js'), 'utf8');
-  return (await import('data:text/javascript;base64,' + Buffer.from(src).toString('base64'))).default;
+  return require('./_khub-test-session').withTestSession((await import('data:text/javascript;base64,' + Buffer.from(src).toString('base64'))).default);
 }
 const html = fs.readFileSync(path.join(ROOT, 'khub_mvp.html'), 'utf8');
 function extractFunction(m) { const s = html.indexOf(m); if (s === -1) throw new Error('marker ' + m); let d = 0; for (let i = html.indexOf('{', s); i < html.length; i++) { if (html[i] === '{') d++; else if (html[i] === '}') { d--; if (!d) return html.slice(s, i + 1); } } }

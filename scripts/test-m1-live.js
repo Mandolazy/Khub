@@ -117,8 +117,13 @@ async function run() {
     console.log(fixture.name);
     console.log('══════════════════════════════════════════════════');
     try {
+      // Deployment protetto: KHUB_SESSION_COOKIE = valore del cookie
+      // __Host-khub_session copiato dal browser dopo il login.
+      const authHeaders = process.env.KHUB_SESSION_COOKIE
+        ? { Cookie: '__Host-khub_session=' + process.env.KHUB_SESSION_COOKIE, Origin: new URL(baseUrl).origin }
+        : {};
       const res = await fetch(baseUrl.replace(/\/$/, '') + '/api/chat', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders),
         body: JSON.stringify(fixture.payload),
       });
       const data = await res.json().catch(() => null);

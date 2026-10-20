@@ -126,7 +126,7 @@ const ingContent = (fake, id) => clone(fake.tables.ingredients.filter(i => i.var
 async function loadHandler() {
   const src = fs.readFileSync(path.join(ROOT, 'api/chat.js'), 'utf8');
   const mod = await import('data:text/javascript;base64,' + Buffer.from(src).toString('base64'));
-  return mod.default;
+  return require('./_khub-test-session').withTestSession(mod.default);
 }
 const html = fs.readFileSync(path.join(ROOT, 'khub_mvp.html'), 'utf8');
 function extractFunction(startMarker) {
