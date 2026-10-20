@@ -89,7 +89,7 @@ const CLIENT_SRC = [
   'function openQuickCalcConversions()', 'function sendQuickCalcToProduction()', 'function renderQuickCalcPanel(recipe,vv)',
   'function computeFormulationWeights(ingredients,resolveFact)', 'function computeRecipeWeightSummary(recipe,vv)', 'function parseLocaleNumber(value)', 'function labTargetIsSet(value)', 'function targetDisplay(value)', 'function targetSummaryShort(portions,gpp)', 
   // UX dopo la validazione: azioni verso il LAB nella vista della Ricetta.
-  'function curLab(recipe)', 'function bozzaVuota(v)', 'function renderAzioniLabRicetta(recipe,vv)', 'function renderProdRecipe(recipe)',
+  'function curLab(recipe)', 'function bozzaVuota(v)', 'function findDependentsOfVariant(variantId)', 'function prontaRiapribileMotivo(recipe,vv)', 'function correggibileInPagina(recipe,vv)', 'function renderAzioniLabRicetta(recipe,vv)', 'function renderProdRecipe(recipe)',
   'function goToNewProductionSession(sessionId)', 'function isHighlightedProductionSession(id)', 'function revealProductionHighlight()',
 ].map(extractFunction).concat(html.match(/var SESSION_SCALING_[A-Z_]+=\{[^}]*\};/g)).join('\n');
 

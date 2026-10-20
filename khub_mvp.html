@@ -1367,10 +1367,15 @@ function prontaRiapribileMotivo(recipe,vv){
   if(!recipe||!vv)return'Ricetta non trovata.';
   if(vv.status==='retired')return'Questa Ricetta è archiviata.';
   if(vv.active===true)return'Questa Ricetta è attiva: la formulazione è protetta. Crea una nuova bozza per modificarla.';
-  if((S.variantHistory[vv.id]||[]).some(function(h){return h.event==='attivata';}))return'Questa Ricetta è già stata attivata: per correggerla crea una nuova bozza.';
   var dip=findDependentsOfVariant(vv.id);
   if(dip.length)return'Questa Ricetta è usata come mattoncino in altre Schede: per correggerla crea una nuova bozza.';
   return null;
+}
+// Solo per mostrare il pulsante: le Sessioni sono note solo se gia' caricate.
+// La protezione vera resta il controllo sul DB in riapriProntaInLab.
+function correggibileInPagina(recipe,vv){
+  if(prontaRiapribileMotivo(recipe,vv))return false;
+  return!(S.productionSessions||[]).some(function(x){return x.sourceVariantId===vv.id;});
 }
 function rendiAttivaPronta(recipeId,variantId){
   var r=R(recipeId);var vv=r&&r.validatedVariants.find(function(x){return x.id===variantId;});
@@ -1458,8 +1463,9 @@ function nuovaBozzaDaRicetta(recipeId,variantId){
 function renderAzioniLabRicetta(recipe,vv){
   var pronta=vv.status!=='retired'&&vv.active!==true;
   var cur=curLab(recipe);
-  var b=pronta?`<button class="btn btn-sm" id="btn-rendi-attiva" style="background:var(--sage,#3d7a5c);color:#fff;border:none" onclick="rendiAttivaPronta('${recipe.id}','${vv.id}')"><i class="ti ti-circle-check"></i> Rendi attiva</button>
-      <button class="btn btn-ghost btn-sm" id="btn-correggi-lab" onclick="riapriProntaInLab('${recipe.id}','${vv.id}')"><i class="ti ti-flask"></i> Correggi nel LAB</button>`:'';
+  var b=pronta?`<button class="btn btn-sm" id="btn-rendi-attiva" style="background:var(--sage,#3d7a5c);color:#fff;border:none" onclick="rendiAttivaPronta('${recipe.id}','${vv.id}')"><i class="ti ti-circle-check"></i> Rendi attiva</button>`:'';
+  if(pronta&&correggibileInPagina(recipe,vv))b+=`
+      <button class="btn btn-ghost btn-sm" id="btn-correggi-lab" onclick="riapriProntaInLab('${recipe.id}','${vv.id}')"><i class="ti ti-flask"></i> Correggi nel LAB</button>`;
   b+=cur&&!bozzaVuota(cur)
     ?`<button class="btn btn-ghost btn-sm" id="btn-apri-bozza" onclick="S.mode='lab';S.selectedVariantId=null;render()"><i class="ti ti-flask"></i> Apri la bozza in LAB: ${escAttr(cur.label||cur.name||'Bozza')}</button>`
     :`<button class="btn btn-ghost btn-sm" id="btn-nuova-bozza" onclick="nuovaBozzaDaRicetta('${recipe.id}','${vv.id}')"><i class="ti ti-copy"></i> Nuova bozza da questa Ricetta</button>`;
@@ -2535,6 +2541,23 @@ function suggestFamilies(recipe, variantName){
   return [...new Set(suggestions)].slice(0,5);
 }
 
+function idVariantiScheda(recipe){
+  return [...(recipe.validatedVariants||[]),...(recipe.labVersions||[])].map(function(v){return v.id;});
+}
+function famigliaAutomaticaScheda(recipe){
+  var conta={},attiva={};
+  (recipe.validatedVariants||[]).concat(recipe.labVersions||[]).forEach(function(v){
+    (S.variantFamilies[v.id]||[]).forEach(function(fid){
+      if(fid.indexOf('fam_r')!==0||!S.families.some(function(f){return f.id===fid;}))return;
+      conta[fid]=(conta[fid]||0)+1;if(v.active===true)attiva[fid]=true;
+    });
+  });
+  var ids=Object.keys(conta).sort(function(a,b){return (attiva[b]?1:0)-(attiva[a]?1:0)||conta[b]-conta[a]||(a<b?-1:a>b?1:0);});
+  return ids.length?S.families.find(function(f){return f.id===ids[0];}):null;
+}
+function famigliaUsataAltrove(familyId,recipeId){
+  return S.recipes.some(function(r){return r.id!==recipeId&&idVariantiScheda(r).some(function(id){return (S.variantFamilies[id]||[]).includes(familyId);});});
+}
 async function saveFamilies(variantId, familyIds, newFamilyName){
   var famIds=[...familyIds];
   // Crea nuova famiglia se specificata
@@ -2544,10 +2567,13 @@ async function saveFamilies(variantId, familyIds, newFamilyName){
     famIds.push(newFam.id);
     await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'saveFamily',family:newFam})});
   }
-  // Crea famiglia con nome ricetta se non esiste
+  // Famiglia automatica della Scheda: prima quella già associata alle sue
+  // Ricette (resta valida anche dopo una rinomina), poi una Famiglia con lo
+  // stesso nome non usata da altre Schede; altrimenti ne crea una nuova.
+  // Le Famiglie esistenti non vengono mai rinominate.
   var recipe=R(S.selectedId);
   if(recipe){
-    var existing=S.families.find(function(f){return f.name.toLowerCase()===recipe.name.toLowerCase();});
+    var existing=famigliaAutomaticaScheda(recipe)||S.families.find(function(f){return f.name.toLowerCase()===recipe.name.toLowerCase()&&!famigliaUsataAltrove(f.id,recipe.id);});
     if(!existing){
       var recipeFam={id:'fam_r'+uid(),name:recipe.name};
       S.families=[...S.families,recipeFam];
@@ -7889,7 +7915,7 @@ function renderRicettaMadreV2(recipe){
       </button>
       <div class="si-riga-azioni">
         <button class="si-riga-btn" onclick="rendiAttivaPronta('${recipe.id}','${v.id}')" title="Disponibile in Produzione: non avvia nessuna Sessione">Rendi attiva</button>
-        <button class="si-riga-btn" onclick="riapriProntaInLab('${recipe.id}','${v.id}')" title="Riapre questa Ricetta nel LAB, senza creare una copia">Correggi nel LAB</button>
+        ${correggibileInPagina(recipe,v)?`<button class="si-riga-btn" onclick="riapriProntaInLab('${recipe.id}','${v.id}')" title="Riapre questa Ricetta nel LAB, senza creare una copia">Correggi nel LAB</button>`:''}
         <button class="si-riga-btn" onclick="apriRinomina('ricetta','${recipe.id}','${v.id}')" title="Correggi il nome">Rinomina</button>
         <button class="si-riga-btn" onclick="retireVariant('${recipe.id}','${v.id}')" title="Archivia Ricetta">Archivia</button>
       </div>

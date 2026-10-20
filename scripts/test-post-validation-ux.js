@@ -213,8 +213,8 @@ const PROTETTE = {
 
 // Funzioni reali aggiuntive: validazione, attivazione, riapertura, accesso al LAB, rinomina.
 const EXTRA = ['function getStructuredSteps(legacySteps,stepsV2)', 'function parseSteps(raw)', 'function addHistory(variantId,event,label)', 'function findDependentsOfVariant(variantId)',
-  'function suggestFamilies(recipe, variantName)', 'async function saveFamilies(variantId, familyIds, newFamilyName)', 'function onValidate()', 'async function confirmValidate()',
-  'function toggleActiveV2(recipeId,variantId,currentActive)', 'function prontaRiapribileMotivo(recipe,vv)', 'function rendiAttivaPronta(recipeId,variantId)',
+  'function suggestFamilies(recipe, variantName)', 'function idVariantiScheda(recipe)', 'function famigliaAutomaticaScheda(recipe)', 'function famigliaUsataAltrove(familyId,recipeId)', 'async function saveFamilies(variantId, familyIds, newFamilyName)', 'function onValidate()', 'async function confirmValidate()',
+  'function toggleActiveV2(recipeId,variantId,currentActive)', 'function prontaRiapribileMotivo(recipe,vv)', 'function correggibileInPagina(recipe,vv)', 'function rendiAttivaPronta(recipeId,variantId)',
   'async function riapriProntaInLab(recipeId,variantId)', 'function bozzaVuota(v)', 'function nuovaBozzaDaRicetta(recipeId,variantId)', 'function creaBozzaDaSorgente(recipeId,attiva)',
   'function renderAzioniLabRicetta(recipe,vv)', 'function apriRinomina(kind,recipeId,variantId)', 'function confermaRinominaScheda(recipeId)',
   'async function confermaRinominaRicetta(recipeId,variantId)', 'function renderRinominaForm(kind,recipeId,variantId,valore)', 'function onRecipeNameChange(recipeId,val)',
@@ -231,7 +231,7 @@ function makeClient2(fetchImpl, opts = {}) {
     function render(){} function autosave(){} function toast(msg){log.toasts.push(msg);}
     ${SRC_UX}
     return {S, loadFromSupabase, saveToSupabase, onValidate, confirmValidate, toggleActiveV2, rendiAttivaPronta, riapriProntaInLab, nuovaBozzaDaRicetta,
-      renderAzioniLabRicetta, apriRinomina, confermaRinominaScheda, confermaRinominaRicetta, renderLabRecipe, upLab, prontaRiapribileMotivo, getSig: id => _persistedValidatedSig[id]};
+      renderAzioniLabRicetta, apriRinomina, confermaRinominaScheda, confermaRinominaRicetta, renderLabRecipe, upLab, prontaRiapribileMotivo, creaBozzaDaSorgente, R, getSig: id => _persistedValidatedSig[id]};
   `)(fetchImpl, log, { getElementById: id => dom[id] || null }, () => opts.confirm !== false);
   c.log = log; c.dom = dom; return c;
 }
@@ -320,17 +320,13 @@ const sha = s => crypto.createHash('sha256').update(s).digest('hex').slice(0, 16
     assert.deepStrictEqual([String(righe('vaP')[0].declared_yield_qty), righe('vaP')[0].declared_yield_unit], ['24', 'pz'], 'resa corretta nel LAB arriva al DB');
   });
 
-  await test('U4. protezioni: Attiva, archiviata, usata in una Sessione, attivata in questa sessione, usata come mattoncino -> nessuna riapertura', async () => {
+  await test('U4. protezioni: Attiva, archiviata, usata in una Sessione, usata come mattoncino -> nessuna riapertura', async () => {
     for (const [id, msg] of [['vaB', /attiva/], ['vaR', /archiviata/], ['vaQ', /usata in Produzione/]]) {
       const c = await setup(); const prima = clone(fake.tables.variants);
       await c.riapriProntaInLab('rB', id);
       assert.deepStrictEqual(fake.tables.variants, prima, id + ': nulla cambia'); assert.ok(msg.test(c.log.toasts.join(' ')), id + ' ' + c.log.toasts);
     }
-    let c = await setup();
-    c.toggleActiveV2('rB', 'vaP', false); c.toggleActiveV2('rB', 'vaP', true); await tick();
-    const prima = clone(fake.tables.variants); await c.riapriProntaInLab('rB', 'vaP');
-    assert.deepStrictEqual(fake.tables.variants, prima); assert.ok(/già stata attivata/.test(c.log.toasts.join(' ')));
-    c = await setup(); rec(c, 'rX').validatedVariants[0].ingredients.push({ id: 'sub', name: 'P', qty: 1, unit: 'n', isSubRecipe: true, subRecipeId: 'vaP' });
+    let c = await setup(); rec(c, 'rX').validatedVariants[0].ingredients.push({ id: 'sub', name: 'P', qty: 1, unit: 'n', isSubRecipe: true, subRecipeId: 'vaP' });
     await c.riapriProntaInLab('rB', 'vaP'); assert.ok(/mattoncino/.test(c.log.toasts.join(' ')));
     c = await setup({ confirm: false }); const p2 = clone(fake.tables.variants); await c.riapriProntaInLab('rB', 'vaP');
     assert.deepStrictEqual(fake.tables.variants, p2, 'annullata dallo chef: nulla cambia');
@@ -393,6 +389,104 @@ const sha = s => crypto.createHash('sha256').update(s).digest('hex').slice(0, 16
     c.confermaRinominaScheda('rB'); await tick();
     assert.strictEqual(fake.tables.recipes.find(r => r.id === 'rB').name, 'Bignè della casa');
     assert.ok(saves.length && saves.every(s => !s.variants.some(v => v.status === 'validated' || v.status === 'retired')), 'nessuna Ricetta validata riscritta');
+  });
+
+
+  await test('U10. riapertura dopo una ricarica: Pronta correggibile; Attiva, Sessione, mattoncino e archiviata protette; limite accettato attivata e poi disattivata', async () => {
+    // Validata in una visita, corretta in un'altra dopo la ricarica.
+    let c = await setup();
+    c.onValidate(); await c.confirmValidate(); await tick();
+    assert.deepStrictEqual([righe('lvB')[0].status, righe('lvB')[0].active], ['validated', false]);
+    const idPrima = fake.tables.variants.map(v => v.id);
+    let c2 = makeClient2(clientFetch); await c2.loadFromSupabase(); c2.S.selectedId = 'rB';
+    // Uniche righe nuove ammesse: la bozza vuota automatica creata al caricamento (comportamento esistente).
+    const soloBozzaVuota = () => fake.tables.variants.filter(v => !idPrima.includes(v.id)).every(v => v.status === 'lab' && !fake.tables.ingredients.some(i => i.variant_id === v.id));
+    assert.strictEqual(c2.prontaRiapribileMotivo(rec(c2), rec(c2).validatedVariants.find(v => v.id === 'lvB')), null);
+    await c2.riapriProntaInLab('rB', 'lvB');
+    assert.deepStrictEqual([righe('lvB').length, righe('lvB')[0].status, soloBozzaVuota()], [1, 'lab', true], 'stessa riga, nessuna copia');
+    assert.strictEqual(c2.R('rB').labVersions.slice(-1)[0].id, 'lvB');
+    c2.onValidate(); await c2.confirmValidate(); await tick();
+    assert.deepStrictEqual([righe('lvB').length, righe('lvB')[0].status, soloBozzaVuota()], [1, 'validated', true], 'rivalidata, nessun duplicato');
+    // Pronta del seed (vaP) dopo la ricarica: correggibile, dati conservati.
+    c = await setup(); await c.riapriProntaInLab('rB', 'vaP');
+    assert.deepStrictEqual([righe('vaP')[0].status, righe('vaP')[0].m1_reading_text], ['lab', 'lettura M1 vaP']);
+    // Dopo la ricarica restano protette: Attiva, archiviata, usata in una Sessione, mattoncino salvato nel DB.
+    c = await setup();
+    fake.tables.ingredients.push({ id: 'subP', variant_id: 'vaX', name: 'Pronta P', qty: 1, unit: 'n', sort_order: 9, estimated_yield_pct: null, measured_yield_pct: null, is_sub_recipe: true, sub_recipe_id: 'vaP' });
+    c = makeClient2(clientFetch); await c.loadFromSupabase(); c.S.selectedId = 'rB';
+    for (const [id, msg] of [['vaB', /attiva/], ['vaR', /archiviata/], ['vaQ', /usata in Produzione/], ['vaP', /mattoncino/]]) {
+      const prima = clone(fake.tables.variants), ingPrima = clone(fake.tables.ingredients), sessPrima = clone(fake.tables.production_sessions);
+      c.log.toasts.length = 0; await c.riapriProntaInLab('rB', id);
+      assert.deepStrictEqual([fake.tables.variants, fake.tables.ingredients, fake.tables.production_sessions], [prima, ingPrima, sessPrima], id + ': nulla cambia');
+      assert.ok(msg.test(c.log.toasts.join(' ')), id + ' ' + c.log.toasts);
+      // Pulsante nascosto quando i dati in pagina bastano (Sessioni solo se gia' caricate dallo Storico).
+      c.S.productionSessions = fake.tables.production_sessions.map(x => ({ id: x.id, sourceVariantId: x.source_variant_id }));
+      const h = c.renderAzioniLabRicetta(rec(c), rec(c).validatedVariants.find(v => v.id === id));
+      assert.ok(!h.includes('btn-correggi-lab'), id + ': nessun pulsante Correggi');
+      c.S.productionSessions = undefined;
+    }
+    // Limite accettato: attivata e poi disattivata, senza Sessioni ne' dipendenze -> correggibile (anche nella stessa visita).
+    c = await setup();
+    c.toggleActiveV2('rB', 'vaP', false); await tick(); assert.strictEqual(righe('vaP')[0].active, true);
+    c.toggleActiveV2('rB', 'vaP', true); await tick(); assert.strictEqual(righe('vaP')[0].active, false);
+    assert.strictEqual(c.prontaRiapribileMotivo(rec(c), rec(c).validatedVariants.find(v => v.id === 'vaP')), null, 'stesso criterio nella stessa visita');
+    c = makeClient2(clientFetch); await c.loadFromSupabase(); c.S.selectedId = 'rB'; // ricarica
+    await c.riapriProntaInLab('rB', 'vaP');
+    assert.strictEqual(righe('vaP')[0].status, 'lab');
+  });
+
+  await test('U11. tag dopo la rinomina della Scheda: Famiglia automatica riutilizzata, nessuna Famiglia nuova o estranea, scelte dello chef conservate', async () => {
+    const nomi = () => fake.tables.families.map(f => [f.id, f.name]);
+    const tagDi = id => fake.tables.variant_families.filter(x => x.variant_id === id).map(x => x.family_id).sort();
+    const nuovaValidazione = async (c, scelte, nuova = '') => {
+      c.creaBozzaDaSorgente('rB', rec(c).validatedVariants.find(v => v.id === 'vaB'));
+      const id = c.R('rB').labVersions.slice(-1)[0].id;
+      c.onValidate(); c.S.pendingFamilies = scelte; c.S.pendingNewFamily = nuova; await c.confirmValidate(); await tick();
+      return id;
+    };
+    // 1) prima validazione: crea la Famiglia automatica col nome attuale (comportamento esistente)
+    let c = await setup();
+    c.onValidate(); c.S.pendingFamilies = []; await c.confirmValidate(); await tick();
+    const auto = fake.tables.families.find(f => f.name === 'Bignè TEST');
+    assert.ok(auto && auto.id.startsWith('fam_r'), 'Famiglia automatica creata');
+    // Famiglia estranea con il nome futuro della Scheda, usata da un'altra Scheda
+    fake.tables.families.push({ id: 'famZ', name: 'Bignè classici' }); fake.tables.variant_families.push({ variant_id: 'vaX', family_id: 'famZ' });
+    // 2) rinomina, ricarica, nuova validazione
+    let c2 = makeClient2(clientFetch); await c2.loadFromSupabase(); c2.S.selectedId = 'rB';
+    c2.S.renameEdit = null; const el = { value: 'Bignè classici' }; c2.dom['rename-input'] = el; c2.confermaRinominaScheda('rB'); await tick();
+    assert.strictEqual(fake.tables.recipes.find(r => r.id === 'rB').name, 'Bignè classici');
+    c2 = makeClient2(clientFetch); await c2.loadFromSupabase(); c2.S.selectedId = 'rB';
+    const famPrima = nomi();
+    const n1 = await nuovaValidazione(c2, []);
+    assert.deepStrictEqual(nomi(), famPrima, 'nessuna Famiglia creata, rinominata o cancellata');
+    assert.deepStrictEqual(tagDi(n1), [auto.id], 'Famiglia automatica riutilizzata, estranea non agganciata');
+    assert.deepStrictEqual(tagDi('lvB'), [auto.id], 'tag precedenti invariati');
+    assert.deepStrictEqual(tagDi('vaX'), ['famZ']);
+    // 3) scelte dello chef conservate: Famiglia esistente scelta a mano e Famiglia nuova digitata
+    const n2 = await nuovaValidazione(c2, ['famT', 'famZ'], 'Ricorrenze');
+    const ric = fake.tables.families.find(f => f.name === 'Ricorrenze');
+    assert.ok(ric, 'Famiglia nuova digitata creata');
+    assert.deepStrictEqual(tagDi(n2), [auto.id, 'famT', 'famZ', ric.id].sort());
+    assert.strictEqual(fake.tables.families.filter(f => f.name === 'Bignè classici').length, 1, 'nessuna Famiglia automatica col nuovo nome');
+  });
+
+  await test('U12. Famiglia automatica senza associazioni precedenti: nome libero riutilizzato, nome usato da altre Schede mai agganciato', async () => {
+    const tagDi = id => fake.tables.variant_families.filter(x => x.variant_id === id).map(x => x.family_id).sort();
+    // Scheda senza Famiglia automatica, nessun nome uguale -> creata (come oggi)
+    let c = await setup();
+    c.onValidate(); c.S.pendingFamilies = []; await c.confirmValidate(); await tick();
+    let f = fake.tables.families.filter(x => x.name === 'Bignè TEST'); assert.strictEqual(f.length, 1); assert.deepStrictEqual(tagDi('lvB'), [f[0].id]);
+    // Famiglia con lo stesso nome non usata da altre Schede -> riutilizzata (come oggi)
+    c = await setup(); fake.tables.families.push({ id: 'famL', name: 'bignè test' });
+    c = makeClient2(clientFetch); await c.loadFromSupabase(); c.S.selectedId = 'rB';
+    c.onValidate(); c.S.pendingFamilies = []; await c.confirmValidate(); await tick();
+    assert.deepStrictEqual(tagDi('lvB'), ['famL']); assert.strictEqual(fake.tables.families.length, 2);
+    // Famiglia con lo stesso nome usata da un'altra Scheda -> non agganciata; creata la Famiglia della Scheda
+    c = await setup(); fake.tables.families.push({ id: 'famO', name: 'Bignè TEST' }); fake.tables.variant_families.push({ variant_id: 'vaX', family_id: 'famO' });
+    c = makeClient2(clientFetch); await c.loadFromSupabase(); c.S.selectedId = 'rB';
+    c.onValidate(); c.S.pendingFamilies = []; await c.confirmValidate(); await tick();
+    const t = tagDi('lvB'); assert.strictEqual(t.length, 1); assert.notStrictEqual(t[0], 'famO'); assert.ok(t[0].startsWith('fam_r'));
+    assert.deepStrictEqual(tagDi('vaX'), ['famO'], 'Famiglia dell\'altra Scheda invariata');
   });
 
   await test('U9. codice: motore, salvataggio, firme e attivazione invariati', async () => {

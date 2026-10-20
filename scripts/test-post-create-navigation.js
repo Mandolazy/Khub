@@ -92,7 +92,7 @@ const CLIENT_SRC = [
   'function openQuickCalcConversions()', 'function sendQuickCalcToProduction()', 'function renderQuickCalcPanel(recipe,vv)',
   'function computeFormulationWeights(ingredients,resolveFact)', 'function computeRecipeWeightSummary(recipe,vv)', 'function parseLocaleNumber(value)', 'function labTargetIsSet(value)', 'function targetDisplay(value)', 'function targetSummaryShort(portions,gpp)', 
   // UX dopo la validazione: azioni verso il LAB nella vista della Ricetta.
-  'function curLab(recipe)', 'function bozzaVuota(v)', 'function renderAzioniLabRicetta(recipe,vv)', 'function renderProdRecipe(recipe)',
+  'function curLab(recipe)', 'function bozzaVuota(v)', 'function findDependentsOfVariant(variantId)', 'function prontaRiapribileMotivo(recipe,vv)', 'function correggibileInPagina(recipe,vv)', 'function renderAzioniLabRicetta(recipe,vv)', 'function renderProdRecipe(recipe)',
   'async function loadProductionSessions()', 'function formatFinishedTotalLabel(grams)', 'function historyNormalizeText(value)',
   'function renderPendingSessionCard(sess)', 'function renderInProgressSessionCard(sess)', 'function selectProductionHomeSessions(sessions,section,context)',
   'function activeRecipeEntries(recipes)', 'function rankActiveRecipeEntries(entries,sessions)', 'function filterActiveRecipeEntries(entries,query)',
