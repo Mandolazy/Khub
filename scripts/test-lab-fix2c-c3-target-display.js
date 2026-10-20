@@ -149,7 +149,9 @@ const PROD_SRC = CLIENT_SRC;
 const SCHEDA_SRC = [
   'function escAttr(s)', 'function cnum(n)', 'function R(id)', 'function allVariants(recipe)', 'function findVariantById(variantId)', 'function parseDataItaliana(str)',
   'function parseLocaleNumber(value)', 'function labTargetIsSet(value)', 'function targetDisplay(value)', 'function targetSummaryShort(portions,gpp)', 'function targetPrintParts(portions,gpp)',
-  'function targetForShare(value)', 'function effectiveYield(ing)', 'function exportPDF(recipeId,variantId)', 'function shareVariant(recipeId,variantId)',
+  'function targetForShare(value)', 'function effectiveYield(ing)', 'function exportPDF(recipeId,variantId)',
+  // FIX 2C-R1: la stampa usa il riepilogo pesi della vista Produzione.
+  'function computeRecipeWeightSummary(recipe,vv)', 'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)', 'function findMissingProductionConversions(preparedInput)', 'function getStructuredSteps(legacySteps,stepsV2)', 'function formatQuickCalcQty(qty,unit)', 'function shareVariant(recipeId,variantId)',
   'function sessionScalingUnitFamily(unit)', 'function sessionScalingGenericFamilyTable(family)', 'function resolveSessionScalingConversionToGrams(unit,conversionFact)',
   'function chooseConversionAskUnit(unit)', 'function resolveKnownProductionConversionFact(normalizedName,unit)', 'function normalizeIngredientName(name)',
   'function normalizeDeclaredYield(qty,unit)', 'function classifyYieldUnit(unit)', 'function computeFormulationWeights(ingredients,resolveFact)', 'function deriveYieldPerUnit(weights,declared)',

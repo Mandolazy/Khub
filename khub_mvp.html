@@ -7335,13 +7335,24 @@ function exportPDF(recipeId,variantId){
   const recipe=R(recipeId);
   const vv=recipe&&recipe.validatedVariants.find(v=>v.id===variantId);
   if(!vv)return;
-  const tot=vv.ingredients.reduce((s,i)=>s+cnum(i.qty),0);
-  // Step 4: peso finito stimato con rese
-  const hasYieldProd=vv.ingredients.some(i=>i.estimatedYieldPct!=null);
-  const pesoFinitoStimato=hasYieldProd?Math.round(vv.ingredients.reduce((s,i)=>s+cnum(i.qty)*effectiveYield(i),0)):null;
-  const rows=vv.ingredients.map(i=>`<tr><td>${i.name}</td><td style="text-align:right;font-family:monospace">${i.qty} ${i.unit}</td><td style="text-align:right;color:#888;font-family:monospace">${tot>0?(cnum(i.qty)/tot*100).toFixed(1):0}%</td></tr>`).join('');
+  // FIX 2C-R1: pesi e percentuali dalla stessa funzione della vista Produzione
+  // (conversioni e rese in grammi), mai somme di quantita' in unita' diverse.
+  // Con pesi di riferimento non confermati ogni percentuale e ogni peso e' una
+  // stima (il totale a crudo ne dipende); senza conversioni o pesi validi: "—".
+  const pesi=computeRecipeWeightSummary(recipe,vv);
+  const pesiOk=pesi.status==='complete';
+  const stima=pesiOk&&pesi.referenceDataUsed.length>0;
+  const stimaIds=stima?pesi.referenceDataUsed.map(x=>String(x.id)):[];
+  const pctCell=i=>pesiOk&&pesi.byId[i.id]?pesi.byId[i.id].pct.toFixed(1)+'%'+(stimaIds.indexOf(String(i.id))!==-1?' *':''):'—';
+  const rows=vv.ingredients.map(i=>`<tr><td>${i.name}</td><td style="text-align:right;font-family:monospace">${i.qty} ${i.unit}</td><td class="pdf-pct" style="text-align:right;color:#888;font-family:monospace">${pctCell(i)}</td></tr>`).join('');
+  const pesiRiga=pesiOk
+    ?`<div class="pdf-weights" style="margin-top:12px">Peso a crudo: ${formatQuickCalcQty(pesi.raw,'g')} g · Peso finito teorico: ${formatQuickCalcQty(pesi.finished,'g')} g${stima?' (stima)':''}</div>`
+      +(stima?`<div class="pdf-estimate" style="margin-top:4px;font-size:12px;color:#888">(stima) Pesi e percentuali calcolati con pesi di riferimento non confermati per ${pesi.referenceDataUsed.map(x=>'* '+escAttr(x.name)+' ('+escAttr(x.unit)+')').join(', ')}: tutti i valori dipendono da questa stima.</div>`:'')
+    :pesi.status==='missing_conversions'
+      ?`<div class="pdf-weights" style="margin-top:12px">Pesi e percentuali non calcolabili: mancano le conversioni in grammi di ${pesi.missing.map(m=>escAttr(m.ingredientName)+' ('+escAttr(m.currentUnit)+')').join(', ')}.</div>`
+      :`<div class="pdf-weights" style="margin-top:12px">Pesi e percentuali non disponibili.</div>`;
   const steps=(vv.steps||[]).length?'<h3 style="margin:24px 0 10px">Procedimento</h3><ol>'+vv.steps.map(s=>`<li style="margin-bottom:6px;line-height:1.6">${s}</li>`).join('')+'</ol>':'';
-  const h=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${recipe.name} — ${vv.name}</title><style>*{box-sizing:border-box}body{font-family:Georgia,serif;max-width:700px;margin:40px auto;padding:0 20px;color:#222;font-size:14px;line-height:1.6}h1{font-size:24px;margin-bottom:4px;letter-spacing:-0.3px}table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}th{text-align:left;border-bottom:2px solid #333;padding:8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em}td{padding:6px 6px;border-bottom:1px solid #ddd}tr:last-child td{border-bottom:none}.meta{color:#888;font-size:12px;margin:6px 0 24px}.badge{background:#C85A1E;color:white;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;margin-left:8px;vertical-align:middle}.steps-list{margin-top:8px;padding-left:20px}.steps-list li{margin-bottom:8px;line-height:1.6}@media print{body{margin:16px;-webkit-print-color-adjust:exact}@page{margin:1.5cm}.badge{-webkit-print-color-adjust:exact}}</style></head><body><h1>${recipe.name}<span class="badge">${vv.name}</span></h1><div class="meta">Validata il ${vv.validatedAt}${targetPrintParts(vv.portionsCount,vv.gramsPerPortion)}</div><table><thead><tr><th>Ingrediente</th><th style="text-align:right">Quantità</th><th style="text-align:right">%</th></tr></thead><tbody>${rows}</tbody></table>${steps}<div style="margin-top:40px;font-size:11px;color:#ccc;border-top:1px solid #eee;padding-top:12px">Generato da Khub</div></body></html>`;
+  const h=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${recipe.name} — ${vv.name}</title><style>*{box-sizing:border-box}body{font-family:Georgia,serif;max-width:700px;margin:40px auto;padding:0 20px;color:#222;font-size:14px;line-height:1.6}h1{font-size:24px;margin-bottom:4px;letter-spacing:-0.3px}table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}th{text-align:left;border-bottom:2px solid #333;padding:8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em}td{padding:6px 6px;border-bottom:1px solid #ddd}tr:last-child td{border-bottom:none}.meta{color:#888;font-size:12px;margin:6px 0 24px}.badge{background:#C85A1E;color:white;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;margin-left:8px;vertical-align:middle}.steps-list{margin-top:8px;padding-left:20px}.steps-list li{margin-bottom:8px;line-height:1.6}@media print{body{margin:16px;-webkit-print-color-adjust:exact}@page{margin:1.5cm}.badge{-webkit-print-color-adjust:exact}}</style></head><body><h1>${recipe.name}<span class="badge">${vv.name}</span></h1><div class="meta">Validata il ${vv.validatedAt}${targetPrintParts(vv.portionsCount,vv.gramsPerPortion)}</div><table><thead><tr><th>Ingrediente</th><th style="text-align:right">Quantità</th><th style="text-align:right">% crudo${stima?' (stima)':''}</th></tr></thead><tbody>${rows}</tbody></table>${pesiRiga}${steps}<div style="margin-top:40px;font-size:11px;color:#ccc;border-top:1px solid #eee;padding-top:12px">Generato da Khub</div></body></html>`;
   const w=window.open('','_blank');
   if(!w){toast('Popup bloccato — consenti i popup per questo sito','ti-alert-circle');return;}
   w.document.write(h);
@@ -8290,6 +8301,8 @@ function closeQuickCalc(){
 function onQuickCalcInput(field,value){
   if(!S.quickCalc||(field!=='portions'&&field!=='gpp'))return;
   S.quickCalc[field]=String(value==null?'':value);
+  // FIX 2C-R1: campi gia' modificati dallo chef (assente = nessuno).
+  (S.quickCalc.touched||(S.quickCalc.touched={}))[field]=true;
   render();
 }
 // Il target temporaneo vive solo dentro la propria Ricetta attiva: cambiando
@@ -8326,7 +8339,16 @@ function renderQuickCalcPanel(recipe,vv){
   var inputStyle='width:110px;background:var(--cream);border:1px solid var(--border);border-radius:var(--r-md);padding:8px 10px;font-family:inherit;font-size:15px;color:var(--dark)';
   var body;
   if(c.error==='invalid_portions'||c.error==='invalid_gpp'){
-    body=`<div class="qc-error" style="font-size:13px;color:#c0392b">${c.error==='invalid_portions'?'Inserisci un numero di porzioni maggiore di zero.':'Inserisci i grammi finiti per porzione (maggiore di zero).'}</div>`;
+    // FIX 2C-R1: errore solo per un campo non valido gia' modificato dallo chef
+    // (o con testo non valido); campi vuoti mai toccati = suggerimento neutro.
+    var touched=q.touched||{};
+    var bad=function(f){var raw=String(q[f]==null?'':q[f]);return parseQuickCalcNumber(raw)==null&&(touched[f]===true||raw.trim()!=='');};
+    var errori=[];
+    if(bad('portions'))errori.push('Inserisci un numero di porzioni maggiore di zero.');
+    if(bad('gpp'))errori.push('Inserisci i grammi finiti per porzione (maggiore di zero).');
+    body=errori.length
+      ?`<div class="qc-error" style="font-size:13px;color:#c0392b">${errori.join('<br>')}</div>`
+      :`<div class="qc-hint" style="font-size:13px;color:var(--mid)">Inserisci porzioni e grammi per porzione per calcolare.</div>`;
   }else if(c.error==='missing_conversions'){
     body=`<div class="qc-missing" style="font-size:13px;color:var(--dark);display:flex;flex-direction:column;gap:6px">
       <div>Per calcolare servono le conversioni in grammi di:</div>
