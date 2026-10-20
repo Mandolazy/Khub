@@ -2890,8 +2890,7 @@ async function confirmValidate(){
     S.view='ricetta-madre-v2';
     S.mode='produzione';
     S.selectedVariantId=null;
-    S.justValidated={recipeId:id,variantId:nv.id}; // conferma discreta e riga evidenziata nella Scheda
-    toast('"'+nv.name+'" è pronta.','ti-circle-check');
+    S.justValidated={recipeId:id,variantId:nv.id}; // conferma discreta e riga evidenziata nella Scheda (nessun messaggio a comparsa)
     render();
   }
 }

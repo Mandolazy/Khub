@@ -498,6 +498,7 @@ const sha = s => crypto.createHash('sha256').update(s).digest('hex').slice(0, 16
     c.onValidate(); await c.confirmValidate(); await tick();
     const dbDopo = clone([fake.tables.variants, fake.tables.ingredients, fake.tables.variant_families, fake.tables.production_sessions]);
     const nome = rec(c).validatedVariants.find(v => v.id === 'lvB').name;
+    assert.ok(!c.log.toasts.some(t => /è pronta/.test(t)), 'nessun messaggio a comparsa «è pronta»: ' + c.log.toasts);
     let h = c.renderRicettaMadreV2(rec(c));
     const conta = t => h.split(t).length - 1;
     assert.strictEqual(conta('class="si-conferma-validazione"'), 1);
