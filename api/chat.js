@@ -864,6 +864,45 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // UX dopo la validazione: correzione del nome di una Ricetta validata
+    // (anche Attiva). PATCH mirata e condizionata: aggiorna SOLO name e label
+    // della riga identificata da id E recipe_id, e solo se status=validated.
+    // Mai il salvataggio completo: formulazione, procedimento e altre versioni
+    // non vengono toccati. Successo solo con esattamente una riga aggiornata.
+    if (body.supabaseAction === 'updateVariantName') {
+      const variantId = typeof body.variantId === 'string' ? body.variantId : '';
+      const recipeId = typeof body.recipeId === 'string' ? body.recipeId : '';
+      const name = typeof body.name === 'string' ? body.name.replace(/\s+/g, ' ').trim() : '';
+      if (!variantId || !recipeId) {
+        return res.status(200).json({ error: 'updateVariantName: Ricetta non identificata', code: 'invalid' });
+      }
+      if (!name || name.length > 120) {
+        return res.status(200).json({ error: 'updateVariantName: nome non valido', code: 'invalid' });
+      }
+      const cols = 'id,recipe_id,status,active,name,label';
+      const filter = 'id=eq.' + encodeURIComponent(variantId) + '&recipe_id=eq.' + encodeURIComponent(recipeId) + '&status=eq.validated';
+      const pr = await fetch(SB + '/rest/v1/variants?' + filter + '&select=' + cols, {
+        method: 'PATCH', headers: { ...SH_READ, 'Prefer': 'return=representation' },
+        body: JSON.stringify({ name: name, label: name })
+      });
+      if (!pr.ok) {
+        const detail = await pr.text().catch(() => '');
+        console.error('Supabase error [variants name]:', pr.status, detail);
+        return res.status(200).json({ error: detail || ('HTTP ' + pr.status), code: 'db', status: pr.status });
+      }
+      const rows = await pr.json().catch(() => null);
+      if (Array.isArray(rows) && rows.length === 1) return res.status(200).json({ ok: true, row: rows[0] });
+      if (!Array.isArray(rows) || rows.length > 1) {
+        return res.status(200).json({ error: 'updateVariantName: righe aggiornate ' + (Array.isArray(rows) ? rows.length : '?') + ' (attesa 1)', code: 'db' });
+      }
+      const rr = await fetch(SB + '/rest/v1/variants?id=eq.' + encodeURIComponent(variantId) + '&select=id,recipe_id,status', { headers: SH_READ });
+      const found = rr.ok ? await rr.json().catch(() => null) : null;
+      if (!Array.isArray(found)) return res.status(200).json({ error: 'updateVariantName: nessuna riga aggiornata', code: 'db' });
+      if (found.length === 0) return res.status(200).json({ error: 'updateVariantName: Ricetta non trovata', code: 'not_found' });
+      if (found[0].recipe_id !== recipeId) return res.status(200).json({ error: 'updateVariantName: la Ricetta non appartiene a questa Scheda', code: 'recipe_mismatch' });
+      return res.status(200).json({ error: 'updateVariantName: la Ricetta non e\' validata', code: 'not_validated', status: found[0].status });
+    }
+
     if (body.mode === 'm1') {
       const userMessage = buildM1UserMessage(body);
       const response = await fetch('https://api.anthropic.com/v1/messages', {

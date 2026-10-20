@@ -1358,6 +1358,170 @@ function retireVariant(recipeId,variantId){
   render();
 }
 
+// ══ UX dopo la validazione ══
+// Ricetta pronta = validata, non attiva, non archiviata. Si riapre nel LAB
+// sullo stesso id (nessuna copia) solo se non e' mai stata attivata: nessuna
+// Sessione di Produzione la usa e nessuna attivazione nella cronologia; mai
+// se e' usata come mattoncino da altre Schede.
+function prontaRiapribileMotivo(recipe,vv){
+  if(!recipe||!vv)return'Ricetta non trovata.';
+  if(vv.status==='retired')return'Questa Ricetta è archiviata.';
+  if(vv.active===true)return'Questa Ricetta è attiva: la formulazione è protetta. Crea una nuova bozza per modificarla.';
+  if((S.variantHistory[vv.id]||[]).some(function(h){return h.event==='attivata';}))return'Questa Ricetta è già stata attivata: per correggerla crea una nuova bozza.';
+  var dip=findDependentsOfVariant(vv.id);
+  if(dip.length)return'Questa Ricetta è usata come mattoncino in altre Schede: per correggerla crea una nuova bozza.';
+  return null;
+}
+function rendiAttivaPronta(recipeId,variantId){
+  var r=R(recipeId);var vv=r&&r.validatedVariants.find(function(x){return x.id===variantId;});
+  if(!vv||vv.status==='retired'||vv.active===true)return;
+  S.justValidated=null;
+  toggleActiveV2(recipeId,variantId,false); // flusso di attivazione esistente: nessuna Sessione
+}
+async function riapriProntaInLab(recipeId,variantId){
+  if(S.riaperturaInCorso)return;
+  var recipe=R(recipeId);var vv=recipe&&recipe.validatedVariants.find(function(x){return x.id===variantId;});
+  var motivo=prontaRiapribileMotivo(recipe,vv);
+  if(motivo){toast(motivo,'ti-alert-circle');return;}
+  // Verifiche in sola lettura: Sessioni che usano la Ricetta e riga attuale nel
+  // DB (stato e dati MichelinAI non tenuti in memoria per le validate).
+  S.riaperturaInCorso=true;
+  var sessioni=null,riga=null;
+  try{
+    var rs=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'loadProductionSessions'})});
+    var ds=await rs.json().catch(function(){return null;});
+    if(rs.ok&&ds&&Array.isArray(ds.sessions))sessioni=ds.sessions.filter(function(x){return x.source_variant_id===variantId;}).length;
+    var rl=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'load'})});
+    var dl=await rl.json().catch(function(){return null;});
+    if(rl.ok&&dl&&Array.isArray(dl.variants))riga=dl.variants.find(function(x){return x.id===variantId;})||null;
+  }catch(e){}
+  S.riaperturaInCorso=false;
+  if(sessioni===null||!riga){toast('Impossibile verificare la Ricetta: riprova.','ti-alert-circle');return;}
+  if(sessioni>0){toast('Questa Ricetta è già stata usata in Produzione: per correggerla crea una nuova bozza.','ti-alert-circle');return;}
+  if(riga.status!=='validated'||riga.active===true){toast('La Ricetta è cambiata nel frattempo: ricarica la pagina.','ti-alert-circle');return;}
+  recipe=R(recipeId);vv=recipe&&recipe.validatedVariants.find(function(x){return x.id===variantId;});
+  motivo=prontaRiapribileMotivo(recipe,vv);
+  if(motivo){toast(motivo,'ti-alert-circle');return;}
+  if(!confirm('Riaprire "'+vv.name+'" nel LAB per correggerla? Tornerà una bozza e potrai validarla di nuovo: non verrà creata una copia.'))return;
+  var bozza=Object.assign({
+    id:vv.id,label:vv.persistedLabel!=null?vv.persistedLabel:vv.name,name:vv.name,note:vv.persistedNote!=null?vv.persistedNote:'',
+    originVariantId:vv.originVariantId||null,contenutoModificatoIl:riga.contenuto_modificato_il||null,
+    portionsCount:vv.portionsCount,gramsPerPortion:vv.gramsPerPortion,portionSize:vv.portionSize,portionUnit:vv.portionUnit||'g',
+    ingredients:(vv.ingredients||[]).map(function(i){return Object.assign({},i);}), // stessi ingredienti, stessi id
+    steps:[].concat(vv.steps||[]),stepsV2:getStructuredSteps(vv.steps,vv.stepsV2).map(function(x){return Object.assign({},x);}),
+    mediaUrl:vv.mediaUrl||null,videoUrl:vv.videoUrl||null,active:false,
+    primoConsulto:riga.primo_consulto||null,m1ReadingText:riga.m1_reading_text||null, // dal DB: mai azzerati
+    l2Items:vv.l2Items||[],intentionInitial:vv.intentionInitial||null,intentionCurrent:vv.intentionCurrent||null,
+    criteriaInitial:vv.criteriaInitial||null,criteriaCurrent:vv.criteriaCurrent||null,
+  },copyDeclaredYield(vv));
+  S.recipes=S.recipes.map(function(r){
+    if(r.id!==recipeId)return r;
+    var lv=r.labVersions.filter(function(x){return x.id!==variantId;}).concat([bozza]);
+    return Object.assign({},r,{validatedVariants:r.validatedVariants.filter(function(x){return x.id!==variantId;}),labVersions:lv,currentLabIdx:lv.length-1});
+  });
+  delete _persistedValidatedSig[variantId]; // alla nuova validazione la Ricetta viene inviata di nuovo
+  addHistory(variantId,'riaperta nel LAB',vv.name||'');
+  S.justValidated=null;
+  var ok=await saveToSupabase(R(recipeId));
+  if(!ok)toast('Riaperta nel LAB, ma il salvataggio non è riuscito: riprova a salvare.','ti-alert-circle');
+  else toast('"'+vv.name+'" riaperta nel LAB: correggila e validala di nuovo.','ti-flask');
+  S.selectedId=recipeId;S.view='recipe';S.mode='lab';S.selectedVariantId=null;
+  render();
+}
+// Bozza vuota (quella creata in automatico quando una Scheda non ha bozze).
+function bozzaVuota(v){
+  return!!v&&!(v.ingredients||[]).length&&!(v.steps||[]).some(function(x){return x&&String(x).trim();})&&!(v.l2Items||[]).length
+    &&v.declaredYieldQty==null&&v.declaredYieldUnit==null;
+}
+// Nuova bozza dal contenuto di una Ricetta validata (Attiva o gia' attivata):
+// mai una pagina vuota. Una bozza in corso non vuota si apre e basta; una
+// bozza vuota viene riempita sul posto (nessuna riga orfana); senza bozze si
+// usa creaBozzaDaSorgente come prima.
+function nuovaBozzaDaRicetta(recipeId,variantId){
+  var recipe=R(recipeId);var vv=recipe&&recipe.validatedVariants.find(function(x){return x.id===variantId;});
+  if(!recipe||!vv)return;
+  var cur=curLab(recipe);
+  if(cur&&!bozzaVuota(cur)){S.view='recipe';S.mode='lab';S.selectedVariantId=null;render();return;}
+  if(!cur)creaBozzaDaSorgente(recipeId,vv);
+  else upLab(recipeId,function(lv){
+    return Object.assign({},lv,{name:vv.name||recipe.name,note:'Nuova bozza da "'+(vv.name||recipe.name)+'"',
+      portionsCount:vv.portionsCount,gramsPerPortion:vv.gramsPerPortion,portionSize:vv.portionSize||vv.gramsPerPortion,portionUnit:vv.portionUnit||'g',
+      ingredients:(vv.ingredients||[]).map(function(i){return Object.assign({},i,{id:'li'+uid()});}),
+      steps:[].concat(vv.steps||[]),stepsV2:getStructuredSteps(vv.steps,vv.stepsV2).map(function(x){return Object.assign({},x);}),
+      originVariantId:vv.id},copyDeclaredYield(vv));
+  });
+  S.selectedId=recipeId;S.view='recipe';S.mode='lab';S.selectedVariantId=null;
+  render();
+}
+// Azioni verso il LAB nella vista di una Ricetta validata: mai una pagina
+// vuota o una bozza diversa da quella attesa (il nome della bozza e' visibile).
+function renderAzioniLabRicetta(recipe,vv){
+  var pronta=vv.status!=='retired'&&vv.active!==true;
+  var cur=curLab(recipe);
+  var b=pronta?`<button class="btn btn-sm" id="btn-rendi-attiva" style="background:var(--sage,#3d7a5c);color:#fff;border:none" onclick="rendiAttivaPronta('${recipe.id}','${vv.id}')"><i class="ti ti-circle-check"></i> Rendi attiva</button>
+      <button class="btn btn-ghost btn-sm" id="btn-correggi-lab" onclick="riapriProntaInLab('${recipe.id}','${vv.id}')"><i class="ti ti-flask"></i> Correggi nel LAB</button>`:'';
+  b+=cur&&!bozzaVuota(cur)
+    ?`<button class="btn btn-ghost btn-sm" id="btn-apri-bozza" onclick="S.mode='lab';S.selectedVariantId=null;render()"><i class="ti ti-flask"></i> Apri la bozza in LAB: ${escAttr(cur.label||cur.name||'Bozza')}</button>`
+    :`<button class="btn btn-ghost btn-sm" id="btn-nuova-bozza" onclick="nuovaBozzaDaRicetta('${recipe.id}','${vv.id}')"><i class="ti ti-copy"></i> Nuova bozza da questa Ricetta</button>`;
+  return`<div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">${b}</div>`;
+}
+
+// Correzioni anagrafiche. Nome della Scheda: salvataggio della Scheda, che non
+// rimanda le Ricette validate non modificate (LAB FIX 1). Nome di una Ricetta
+// validata, anche Attiva: azione server dedicata che aggiorna solo name/label.
+function apriRinomina(kind,recipeId,variantId){S.renameEdit={kind:kind,recipeId:recipeId,variantId:variantId||null,error:null,loading:false};render();}
+function confermaRinominaScheda(recipeId){
+  var el=document.getElementById('rename-input');
+  var name=String(el?el.value:'').replace(/\s+/g,' ').trim();
+  if(!name){S.renameEdit.error='Il nome non può essere vuoto.';render();return;}
+  S.renameEdit=null;
+  onRecipeNameChange(recipeId,name);
+  toast('Nome della Scheda aggiornato','ti-circle-check');
+}
+async function confermaRinominaRicetta(recipeId,variantId){
+  var e=S.renameEdit;if(!e||e.loading)return;
+  var el=document.getElementById('rename-input');
+  var name=String(el?el.value:'').replace(/\s+/g,' ').trim();
+  var r=R(recipeId);var vvOld=r&&r.validatedVariants.find(function(x){return x.id===variantId;});
+  if(!vvOld||vvOld.status==='retired'){S.renameEdit=null;render();return;}
+  if(!name||name.length>120){e.error=!name?'Il nome non può essere vuoto.':'Nome troppo lungo (massimo 120 caratteri).';render();return;}
+  if(name===vvOld.name&&(vvOld.persistedLabel==null||vvOld.persistedLabel===name)){S.renameEdit=null;render();return;}
+  e.loading=true;e.error=null;render();
+  var data=null;
+  try{
+    var res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'updateVariantName',recipeId:recipeId,variantId:variantId,name:name})});
+    data=await res.json().catch(function(){return null;});
+    if(!res.ok)data={error:'HTTP '+res.status,code:'db'};
+  }catch(err){data={error:String(err),code:'network'};}
+  if(S.renameEdit!==e)return;
+  var row=data&&data.ok===true&&data.row&&data.row.id===variantId&&data.row.recipe_id===recipeId?data.row:null;
+  if(!row){e.loading=false;e.error='Nome non salvato: riprova.';render();return;}
+  // Memoria allineata al DB senza salvataggio completo: formulazione e procedimento non vengono riscritti.
+  r=R(recipeId);vvOld=r&&r.validatedVariants.find(function(x){return x.id===variantId;});
+  if(vvOld){
+    var eraSincronizzata=_persistedValidatedSig[vvOld.id]===buildValidatedVariantPayload(recipeId,vvOld).sig;
+    var vvNew=Object.assign({},vvOld,{name:row.name,persistedLabel:row.label});
+    S.recipes=S.recipes.map(function(rr){
+      if(rr.id!==recipeId)return rr;
+      return Object.assign({},rr,{validatedVariants:rr.validatedVariants.map(function(x){return x.id===vvNew.id?vvNew:x;})});
+    });
+    if(eraSincronizzata)_persistedValidatedSig[vvNew.id]=buildValidatedVariantPayload(recipeId,vvNew).sig;
+  }
+  S.renameEdit=null;
+  toast('Nome della Ricetta aggiornato','ti-circle-check');
+}
+function renderRinominaForm(kind,recipeId,variantId,valore){
+  var e=S.renameEdit;
+  var azione=kind==='scheda'?`confermaRinominaScheda('${recipeId}')`:`confermaRinominaRicetta('${recipeId}','${variantId}')`;
+  return`<div class="rename-form" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0">
+    <input id="rename-input" type="text" maxlength="120" value="${escAttr(valore)}" ${e&&e.loading?'disabled':''} style="flex:1;min-width:180px;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:14px"
+      onkeydown="if(event.key==='Enter'){${azione}}">
+    <button class="si-riga-btn" id="rename-save" onclick="${azione}" ${e&&e.loading?'disabled':''}>${e&&e.loading?'Salvataggio…':'Salva'}</button>
+    <button class="si-riga-btn" onclick="S.renameEdit=null;render()">Annulla</button>
+    ${e&&e.error?`<div style="width:100%;font-size:12px;color:#c0392b">${escAttr(e.error)}</div>`:''}
+  </div>`;
+}
+
 function uid(){return 'id'+Date.now()+Math.random().toString(36).slice(2,7);}
 function cnum(n){return isNaN(parseFloat(n))?0:parseFloat(n);}
 // Normalizzazione centralizzata del nome ingrediente per le conversioni
@@ -2648,7 +2812,9 @@ function onValidate(){
   S.pendingValidatedVariant=nv;
   S.pendingValidatedRecipeId=id;
   S.pendingValidatedFromBozzaId=v.id;
-  S.pendingFamilies=suggestFamilies(recipe,name);
+  // Tag gia' salvati per questa Ricetta (es. dopo una correzione nel LAB): conservati.
+  var famiglieEsistenti=S.variantFamilies[v.id];
+  S.pendingFamilies=famiglieEsistenti&&famiglieEsistenti.length?[...famiglieEsistenti]:suggestFamilies(recipe,name);
   S.pendingNewFamily='';
   S.showFamilyPicker=true;
   render();
@@ -2693,6 +2859,7 @@ async function confirmValidate(){
     S.view='ricetta-madre-v2';
     S.mode='produzione';
     S.selectedVariantId=null;
+    S.justValidated={recipeId:id,variantId:nv.id}; // riquadro: Rendi attiva / Correggi nel LAB
     toast('"'+nv.name+'" è pronta.','ti-circle-check');
     render();
   }
@@ -7665,7 +7832,8 @@ function renderRicettaMadreV2(recipe){
   const zonaIdentita=`
     <button class="si-back" onclick="S.view='home';render()"><i class="ti ti-arrow-left"></i> Schede</button>
     <div class="si-identita">
-      <div class="si-nome">${recipe.name}</div>
+      ${S.renameEdit&&S.renameEdit.kind==='scheda'&&S.renameEdit.recipeId===recipe.id?renderRinominaForm('scheda',recipe.id,null,recipe.name)
+        :`<div class="si-nome">${recipe.name} <button class="si-riga-btn" id="btn-rinomina-scheda" style="font-size:11px;vertical-align:middle" onclick="apriRinomina('scheda','${recipe.id}')" title="Correggi il nome della Scheda">Rinomina</button></div>`}
       <div class="si-meta">${recipe.category}${recipe.department?' · '+recipe.department:''} — ${nRic} RIC · ${nAtt} ATT</div>
       ${famiglieRicettaNomi.length?`<div class="si-famiglie">${famiglieRicettaNomi.map(n=>`<span class="si-famiglia-tag">${n}</span>`).join('')}</div>`:''}
     </div>`;
@@ -7694,8 +7862,10 @@ function renderRicettaMadreV2(recipe){
         </button>
         <div class="si-riga-azioni">
           <button class="si-riga-btn" onclick="S.rmv2AttivaEspansa['${v.id}']=!S.rmv2AttivaEspansa['${v.id}'];render()">${espansa?'Chiudi':'Contenuto'}</button>
+          <button class="si-riga-btn" onclick="apriRinomina('ricetta','${recipe.id}','${v.id}')" title="Correggi il nome (la formulazione non cambia)">Rinomina</button>
           <button class="si-riga-btn" onclick="toggleActiveV2('${recipe.id}','${v.id}',true)" title="Disattiva per la produzione">Disattiva</button>
         </div>
+        ${S.renameEdit&&S.renameEdit.kind==='ricetta'&&S.renameEdit.variantId===v.id?renderRinominaForm('ricetta',recipe.id,v.id,v.name):''}
         ${espansa?`<div class="si-riga-dettaglio">${renderContenutoVariante(v)}${renderActiveYieldSection(recipe,v)}</div>`:''}
       </div>`;
     }).join('')}`:'';
@@ -7718,10 +7888,26 @@ function renderRicettaMadreV2(recipe){
         <span class="si-riga-sub">Pronta il ${v.validatedAt}</span>
       </button>
       <div class="si-riga-azioni">
-        <button class="si-riga-btn" onclick="toggleActiveV2('${recipe.id}','${v.id}',false)">Attiva</button>
+        <button class="si-riga-btn" onclick="rendiAttivaPronta('${recipe.id}','${v.id}')" title="Disponibile in Produzione: non avvia nessuna Sessione">Rendi attiva</button>
+        <button class="si-riga-btn" onclick="riapriProntaInLab('${recipe.id}','${v.id}')" title="Riapre questa Ricetta nel LAB, senza creare una copia">Correggi nel LAB</button>
+        <button class="si-riga-btn" onclick="apriRinomina('ricetta','${recipe.id}','${v.id}')" title="Correggi il nome">Rinomina</button>
         <button class="si-riga-btn" onclick="retireVariant('${recipe.id}','${v.id}')" title="Archivia Ricetta">Archivia</button>
       </div>
+      ${S.renameEdit&&S.renameEdit.kind==='ricetta'&&S.renameEdit.variantId===v.id?renderRinominaForm('ricetta',recipe.id,v.id,v.name):''}
     </div>`).join('')}`:'';
+
+  // Riquadro subito dopo la validazione: i due passi successivi, espliciti.
+  const appenaValidata=S.justValidated&&S.justValidated.recipeId===recipe.id?pronte.find(v=>v.id===S.justValidated.variantId):null;
+  const zonaDopoValidazione=appenaValidata?`
+    <div class="si-dopo-validazione" style="margin:12px 0;padding:14px 16px;border:1.5px solid var(--sage,#3d7a5c);border-radius:var(--r-md);background:var(--white)">
+      <div style="font-size:15px;font-weight:700;color:var(--dark)">«${escAttr(appenaValidata.name)}» è pronta.</div>
+      <div style="font-size:13px;color:var(--mid);margin-top:4px">Rendila attiva per usarla in Produzione (non avvia nessuna Sessione), oppure riaprila nel LAB per correggerla.</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="si-btn-principale" id="btn-dopo-rendi-attiva" onclick="rendiAttivaPronta('${recipe.id}','${appenaValidata.id}')"><i class="ti ti-circle-check"></i> Rendi attiva</button>
+        <button class="si-riga-btn" id="btn-dopo-correggi" onclick="riapriProntaInLab('${recipe.id}','${appenaValidata.id}')">Correggi nel LAB</button>
+        <button class="si-riga-btn" onclick="S.justValidated=null;render()">Più tardi</button>
+      </div>
+    </div>`:'';
 
   const oggiVuoto=attive.length===0&&inLab.length===0&&pronte.length===0;
   const zonaOggi=`
@@ -7762,6 +7948,7 @@ function renderRicettaMadreV2(recipe){
 
   return `<div class="si-env">
     ${zonaIdentita}
+    ${zonaDopoValidazione}
     ${zonaAzionePrincipale}
     ${zonaOggi}
     ${zonaStoria}
@@ -8073,7 +8260,12 @@ function renderLabProductionTarget(recipe,v){
 }
 
 function renderLabRecipe(recipe){
-  const v=curLab(recipe);if(!v)return'';
+  const v=curLab(recipe);
+  if(!v)return`<div class="card lab-empty" style="text-align:center;padding:32px">
+    <div style="font-size:15px;color:var(--dark);font-weight:600">Nessuna bozza in LAB per questa Scheda</div>
+    <div style="font-size:13px;color:var(--mid);margin-top:6px">Le Ricette validate restano nella Scheda. Crea una nuova bozza per lavorare nel LAB.</div>
+    <button class="btn btn-lab" style="margin-top:14px" onclick="duplicaVersioneLAB('${recipe.id}')"><i class="ti ti-plus"></i> Nuova Ricetta in LAB</button>
+  </div>`;
   // LAB FIX 2B I5: pesi in grammi (conversioni + rese), mai somme di unita' diverse
   const pesiLab=computeFormulationWeights(v.ingredients);
   const sectionsOpen=ensureLabSectionsOpen(recipe,v);
@@ -8666,9 +8858,7 @@ function renderProdRecipe(recipe){
       <button class="btn btn-ghost btn-sm" onclick="exportPDF('${recipe.id}','${vv.id}')" title="Scarica PDF"><i class="ti ti-file-type-pdf"></i> PDF</button>
       <button class="btn btn-ghost-danger btn-sm" style="margin-left:auto" onclick="deleteVariant('${recipe.id}','${vv.id}')" title="Elimina Ricetta"><i class="ti ti-trash"></i> Elimina</button>
     </div>
-    <div style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
-      <button class="btn btn-ghost btn-sm" onclick="S.mode='lab';S.selectedVariantId=null;render()"><i class="ti ti-flask"></i> Vai in LAB</button>
-    </div>
+    ${renderAzioniLabRicetta(recipe,vv)}
   </div>
 
   ${qcOpen?renderQuickCalcPanel(recipe,vv):''}
