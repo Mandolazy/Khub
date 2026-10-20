@@ -149,7 +149,7 @@ const SRC = [
   'function computeFormulationWeights(ingredients,resolveFact)', 'function deriveYieldPerUnit(weights,declared)', 'function formatQtyDisplay(value)',
   'function targetFromDb(value)', 'function targetForDb(value)', 'function declaredYieldFromRow(row)', 'function copyDeclaredYield(src)', 'function declaredYieldPayload(v)', 'function declaredYieldState(v)',
   'function declaredYieldInputText(raw)', 'function declaredYieldErrorMessage(error)', 'function onLabDeclaredYield(recipeId,field,value)',
-  'function discardLabDeclaredYieldInput(recipeId)', 'function labGrams(x)', 'function renderLabWeightsPanel(recipe,v,w)',
+  'function discardLabDeclaredYieldInput(recipeId)', 'function labGrams(x)', 'function labWeightsStima(w)', 'function renderLabFormulationBand(recipe,v,w)', 'function renderLabWeightsPanel(recipe,v,w)',
   'function validateLabProductionTarget(field,value)', 'function setLabProductionTarget(recipeId,field,rawValue)', 'function onLabTargetPortions(recipeId,val)',
   'function onIngQty(recipeId,ingId,val)',
   'function uid()', 'function normalizeIngredientName(name)', 'function conversionFactSourcePriority(sourceType)',
@@ -176,7 +176,7 @@ function makeClient(fetchImpl, unitWeights = {}) {
     function autosave(id){log.autosaves.push(id);}
     function toast(msg){log.toasts.push(msg);render();}
     ${SRC}
-    return {S, loadFromSupabase, saveToSupabase, onLabDeclaredYield, discardLabDeclaredYieldInput, renderLabWeightsPanel, computeFormulationWeights,
+    return {S, loadFromSupabase, saveToSupabase, onLabDeclaredYield, discardLabDeclaredYieldInput, renderLabWeightsPanel: (r, v, w) => renderLabFormulationBand(r, v, w) + renderLabWeightsPanel(r, v, w), computeFormulationWeights,
       onLabTargetPortions, onIngQty, buildValidatedVariantPayload, getSig: id => _persistedValidatedSig[id]};
   `)(fetchImpl, log, unitWeights);
   c.log = log;
@@ -216,7 +216,7 @@ const box = (h, cls) => { const m = h.match(new RegExp('class="' + cls + '"[^>]*
     assert.deepStrictEqual(box(h, 'lab-w-raw'), ['Peso a crudo totale', '900 g']);
     assert.deepStrictEqual(box(h, 'lab-w-finished'), ['Peso finito teorico', '630 g']);
     assert.deepStrictEqual(box(h, 'lab-w-raw-unit'), ['Crudo per unità di resa', '—']);
-    assert.ok(/Indica la resa per calcolare i pesi per unità/.test(text(h)));
+    assert.ok(/Indica la resa nella fascia in alto per calcolare i pesi per unità/.test(text(h)));
   });
 
   await test('U2. resa 30 bignè: 30 g crudi e 21 g finiti per bignè; salvata subito, ingredienti invariati', async () => {
@@ -372,8 +372,8 @@ const box = (h, cls) => { const m = h.match(new RegExp('class="' + cls + '"[^>]*
     assert.ok(!/Stima peso finito/.test(lab));
     assert.ok(!/reduce\(\(s,i\)=>s\+cnum\(i\.qty\)/.test(lab), 'nessuna somma diretta delle quantita\'');
     assert.ok(lab.includes("pesiLab.byId[ing.id].rawGrams/pesiLab.raw*100"));
-    // LAB FIX 2C (C2): l'Obiettivo e' reso da renderLabProductionTarget, sempre separato dal pannello
-    assert.ok(lab.includes('${renderLabProductionTarget(recipe,v)}') && /id="lab-production-target"/.test(extractFunction('function renderLabProductionTarget(recipe,v)')), 'Obiettivo di Produzione separato');
+    // FIX 2D: la fascia verde mostra la formulazione (pesi e resa); l'Obiettivo di Produzione non e' piu' nel LAB
+    assert.ok(lab.includes('${renderLabFormulationBand(recipe,v,pesiLab)}') && !lab.includes('renderLabProductionTarget('), 'fascia della formulazione, nessun Obiettivo');
   });
 
   // ── Firma del contenuto e data di ultima modifica (trigger di Supabase) ──

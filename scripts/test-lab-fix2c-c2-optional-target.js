@@ -294,7 +294,8 @@ const total = h => { const m = h.match(/class="scale-total lab-target-total">([^
     const r = extractFunction('function renderLabProductionTarget(recipe,v)');
     assert.ok(r.includes(`onchange="onLabTargetPortions('\${recipe.id}',this.value)"`) && r.includes(`onchange="onLabTargetGpp('\${recipe.id}',this.value)"`));
     assert.ok(!/type="number"/.test(r) && /type="text"/.test(r));
-    assert.ok(extractFunction('function renderLabRecipe(recipe)').includes('${renderLabProductionTarget(recipe,v)}'));
+    // FIX 2D: i campi dell'Obiettivo non sono piu' mostrati nel LAB; i gestori restano compatibili con i dati salvati.
+    assert.ok(!extractFunction('function renderLabRecipe(recipe)').includes('renderLabProductionTarget('));
     const handlers = ['function validateLabProductionTarget(field,value)', 'function setLabProductionTarget(recipeId,field,rawValue)'].map(extractFunction).join('\n');
     assert.ok(!/ingredients|Math\.round|toFixed|ratio/.test(handlers));
   });
