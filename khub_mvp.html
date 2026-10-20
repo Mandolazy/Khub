@@ -7860,7 +7860,22 @@ function renderLoad(){
 
 function renderPreview(){
   const p=S.loadPreview;if(!p)return'';
-  const tot=p.ingredients.reduce((s,i)=>s+cnum(i.qty),0);
+  // Percentuali sul peso a crudo dopo le conversioni (computeFormulationWeights,
+  // stesse regole di Produzione e stampa): mai somme di quantita' in unita'
+  // diverse. Pesi di riferimento non confermati = stima; conversioni mancanti
+  // o dati non validi = "—" con la spiegazione.
+  const pesiPrev=computeFormulationWeights(p.ingredients);
+  const pesiPrevOk=pesiPrev.status==='complete'&&pesiPrev.raw>0;
+  const stimaPrev=pesiPrevOk?pesiPrev.referenceDataUsed:[];
+  const pctPrev=(ing,idx)=>{
+    const b=pesiPrevOk&&pesiPrev.byId[ing.id!=null?ing.id:idx];
+    if(!b)return'—';
+    return String(Math.round(b.rawGrams/pesiPrev.raw*1000)/10)+'%'+(stimaPrev.some(x=>String(x.id)===String(ing.id!=null?ing.id:idx))?' *':'');
+  };
+  const notaPesiPrev=!p.ingredients.length?''
+    :pesiPrevOk?(stimaPrev.length?'Percentuali stimate: pesi di riferimento non confermati per '+stimaPrev.map(x=>'* '+escAttr(x.name)+' ('+escAttr(x.unit)+')').join(', ')+'.':'')
+    :pesiPrev.status==='incomplete'?'Percentuali non calcolabili: mancano le conversioni in grammi di '+pesiPrev.missing.map(m=>escAttr(m.name)+' ('+escAttr(m.unit)+')').join(', ')+'.'
+    :'Percentuali non disponibili.';
   const destinazioneEsistente=S.loadDestinazione==='esistente';
   const schedaScelta=destinazioneEsistente?R(S.loadDestinazioneSchedaId):null;
   return `<div class="card">
@@ -7898,8 +7913,9 @@ function renderPreview(){
       <select class="preview-ing-unit" data-prev-ing="${idx}" data-field="unit">
         ${UNITS.map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}
       </select>
-      <span style="font-size:11px;color:var(--light);min-width:35px;text-align:right">${tot>0?(cnum(ing.qty)/tot*100).toFixed(0):'0'}%</span>
+      <span class="preview-ing-pct" style="font-size:11px;color:var(--light);min-width:35px;text-align:right" title="Quota del peso a crudo">${pctPrev(ing,idx)}</span>
     </div>`).join('')}
+    ${notaPesiPrev?`<div class="preview-weights-note" style="font-size:11px;color:var(--mid);margin-top:6px">${notaPesiPrev}</div>`:''}
     ${p.steps&&p.steps.length?`
     <div class="card-label" style="margin-top:18px"><i class="ti ti-list-numbers"></i> Procedimento</div>
     <div class="preview-steps">

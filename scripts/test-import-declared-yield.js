@@ -169,7 +169,10 @@ const SRC = [
   // Importazione della resa dichiarata: dipendenze di estrazione, anteprima e salvataggio.
   'function escAttr(s)', 'function formatQtyDisplay(value)', 'function declaredYieldErrorMessage(error)', 'function importYieldText(t)',
   'function importDeclaredYield(raw,fonte)', 'function importYieldFields(value)', 'function importYieldNote(note,dy)', 'function renderImportYieldFields(dy,prefix,label)',
-].map(extractFunction).concat([html.match(/var IMPORT_YIELD_PORTION_ALIASES=\[[^\]]*\];/)[0], 
+  // Percentuali dell'anteprima: pesi in grammi con le regole condivise.
+  'function computeFormulationWeights(ingredients,resolveFact)', 'function sessionScalingUnitFamily(unit)', 'function sessionScalingGenericFamilyTable(family)',
+  'function resolveSessionScalingConversionToGrams(unit,conversionFact)', 'function chooseConversionAskUnit(unit)', 'function resolveKnownProductionConversionFact(normalizedName,unit)',
+].map(extractFunction).concat(html.match(/var SESSION_SCALING_[A-Z_]+=\{[^}]*\};/g), [html.match(/var IMPORT_YIELD_PORTION_ALIASES=\[[^\]]*\];/)[0], 
   html.match(/var DECLARED_YIELD_UNIT_MAX_LENGTH=\d+;/)[0], html.match(/var DECLARED_YIELD_MEASURE_UNITS=\{[\s\S]*?\n\};/)[0],
   html.match(/var DECLARED_YIELD_UNSUPPORTED_UNITS=\[[^\]]*\];/)[0], html.match(/var LAB_TARGET_PORTIONS_MAX=\d+;/)[0], html.match(/const UNITS = \[[^\]]*\];/)[0],
 ]).join('\n');
