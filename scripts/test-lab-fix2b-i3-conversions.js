@@ -164,7 +164,9 @@ const SRC = [
   'function onIngQty(recipeId,ingId,val)', 'function labUnitAnchorKey(recipeId,labVersionId,ingId)',
   'function resolveConfirmedLabConversionFact(normalizedName,unit)', 'function referenceConversionProposal(normalizedName,unit)',
   'function computeLabUnitConversion(ing,toUnit,anchor,resolveFact)', 'function onIngUnit(recipeId,ingId,val)',
-  'async function confirmLabConversion(rawValue)', 'function cancelLabConversion()',
+  'async function confirmLabConversion(rawValue)',
+  // Conversioni per nomi equivalenti: funzioni di supporto.
+  'function conversionNameGroup(normalizedName)', 'function conversionNameAliases(normalizedName)', 'function conversionNameGroupMarker(normalizedName)', 'function conversionConflictKey(normalizedName,fromUnit,toUnit)', 'function selectConversionFacts(conversions)', 'function conversionConflictNote(key)', 'function formatQtyDisplay(value)', 'function cancelLabConversion()',
   'function labConversionQuestion(p)', 'function renderLabConversionModal()',
   // load / save reali
   'function uid()', 'function normalizeIngredientName(name)', 'function conversionFactSourcePriority(sourceType)',
@@ -400,14 +402,16 @@ function makeClient(fetchImpl) {
       'function resolveSessionScalingConversionToGrams(unit,conversionFact)': '91673d43a7c3bd35', 'function computeSessionScaling(input)': 'ddfc1febb5010cdc',
       'function chooseConversionAskUnit(unit)': 'ed754d663dbc6ebf', 'function resolveKnownProductionConversionFact(normalizedName,unit)': '5b0be8c06a5e4919',
       'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)': '9df6758db87b12b1',
-      'function findMissingProductionConversions(preparedInput)': 'ad0ecd9f8e506dce', 'async function confirmConversionPreflightStep(rawValue)': 'e2aae961c47a7615',
+      'function findMissingProductionConversions(preparedInput)': 'ad0ecd9f8e506dce', 'async function confirmConversionPreflightStep(rawValue)': '680244a1d503acb7',
       // LAB FIX 2C (C4): computeRecipeWeightSummary usa di proposito computeFormulationWeights
       // (pesi senza obiettivo salvato); la parita' con la versione precedente e' verificata
       // in test-lab-fix2c-c4-weight-summary.js. Impronta aggiornata solo per questa funzione.
       'function computeRecipeWeightSummary(recipe,vv)': 'beac67cc93eee93b',
       'async function saveIngredientConversion(ingredientName,fromUnit,toUnit,factor,sourceType,sourceDetail)': 'e3916db5353173da',
       'function onVarIngUnit(recipeId,varId,ingId,val)': 'bd2537533a1563d7',
-      'async function loadFromSupabase()': '41eb85ed926af59c', 'async function saveToSupabase(recipe)': '42a1765ea7f27644',
+      // Conversioni per nomi equivalenti (approvato): loadFromSupabase usa selectConversionFacts e
+      // confirmConversionPreflightStep salva il marcatore di gruppo; impronte aggiornate solo per queste due funzioni.
+      'async function loadFromSupabase()': '978ff5e7d1c09e7b', 'async function saveToSupabase(recipe)': '42a1765ea7f27644',
     };
     // LAB FIX 2B I4 aggiunge a load/save SOLO righe della resa dichiarata:
     // tolte quelle righe, le due funzioni sono identiche a main.

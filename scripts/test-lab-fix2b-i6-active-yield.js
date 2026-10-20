@@ -188,7 +188,9 @@ const SRC = [
   'function isBetterConversionFact(candidate,current)', 'function buildKnownIngredientIds(ingredientRows)',
   'function computeIngredientDeletions(knownByVariant,currentByVariant)',
   'function updateKnownIngredientIds(knownByVariant,currentByVariant,deleted)', 'function firmaContenutoBozza(v)',
-  'async function loadFromSupabase()', 'function parseSteps(raw)', 'function getStructuredSteps(legacySteps,stepsV2)',
+  'async function loadFromSupabase()',
+  // Conversioni per nomi equivalenti: funzioni di supporto.
+  'function conversionNameGroup(normalizedName)', 'function conversionNameAliases(normalizedName)', 'function conversionNameGroupMarker(normalizedName)', 'function conversionConflictKey(normalizedName,fromUnit,toUnit)', 'function selectConversionFacts(conversions)', 'function conversionConflictNote(key)', 'function parseSteps(raw)', 'function getStructuredSteps(legacySteps,stepsV2)',
   'function stepsV2ToLegacyArray(stepsV2)', 'function makeDefaultLab(recipeId,name)', 'function buildValidatedVariantPayload(recipeId,vv)', 'async function saveToSupabase(recipe)',
 ].map(extractFunction).concat(html.match(/var SESSION_SCALING_[A-Z_]+=\{[^}]*\};/g), [
   html.match(/var DECLARED_YIELD_UNIT_MAX_LENGTH=\d+;/)[0], html.match(/var DECLARED_YIELD_MEASURE_UNITS=\{[\s\S]*?\n\};/)[0],
@@ -458,7 +460,9 @@ const text = h => h.replace(/<[^>]+>/g, ' ').replace(/&#39;/g, "'").replace(/\s+
       // LAB FIX 2C (C4): computeRecipeWeightSummary usa di proposito computeFormulationWeights
       // (pesi senza obiettivo salvato); la parita' con la versione precedente e' verificata
       // in test-lab-fix2c-c4-weight-summary.js. Impronta aggiornata solo per questa funzione.
-      'function computeRecipeWeightSummary(recipe,vv)': 'beac67cc93eee93b', 'async function confirmConversionPreflightStep(rawValue)': 'e2aae961c47a7615',
+      'function computeRecipeWeightSummary(recipe,vv)': 'beac67cc93eee93b',
+      // Conversioni per nomi equivalenti (approvato): marcatore di gruppo nella conferma; impronta aggiornata solo qui.
+      'async function confirmConversionPreflightStep(rawValue)': '680244a1d503acb7',
     };
     for (const [m, h] of Object.entries(expect)) assert.strictEqual(sha(extractFunction(m)), h, 'cambiato: ' + m);
     const chat = fs.readFileSync(path.join(ROOT, 'api/chat.js'), 'utf8');

@@ -164,7 +164,9 @@ const CLIENT_SRC = [
   'function isBetterConversionFact(candidate,current)', 'function buildKnownIngredientIds(ingredientRows)',
   'function computeIngredientDeletions(knownByVariant,currentByVariant)',
   'function updateKnownIngredientIds(knownByVariant,currentByVariant,deleted)', 'function firmaContenutoBozza(v)',
-  'async function loadFromSupabase()', 'function parseSteps(raw)', 'function getStructuredSteps(legacySteps,stepsV2)',
+  'async function loadFromSupabase()',
+  // Conversioni per nomi equivalenti: funzioni di supporto.
+  'function conversionNameGroup(normalizedName)', 'function conversionNameAliases(normalizedName)', 'function conversionNameGroupMarker(normalizedName)', 'function conversionConflictKey(normalizedName,fromUnit,toUnit)', 'function selectConversionFacts(conversions)', 'function conversionConflictNote(key)', 'function escAttr(s)', 'function parseSteps(raw)', 'function getStructuredSteps(legacySteps,stepsV2)',
   // LAB FIX 2B I4: resa dichiarata (caricamento, salvataggio, copie)
   'function targetFromDb(value)', 'function targetForDb(value)', 'function declaredYieldFromRow(row)', 'function copyDeclaredYield(src)', 'function declaredYieldPayload(v)', 'function stepsV2ToLegacyArray(stepsV2)', 'function makeDefaultLab(recipeId,name)', 'function buildValidatedVariantPayload(recipeId,vv)', 'async function saveToSupabase(recipe)',
 ].map(extractFunction).join('\n');

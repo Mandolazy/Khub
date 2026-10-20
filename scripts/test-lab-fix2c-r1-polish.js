@@ -83,7 +83,9 @@ const CLIENT_SRC = [
   'function openMandaInProduzione(recipeId,variantId,target)', 'function onMandaInProduzioneField(field,val)', 'async function confirmMandaInProduzione()',
   'function renderMandaInProduzioneModal()',
   'async function saveIngredientConversion(ingredientName,fromUnit,toUnit,factor,sourceType,sourceDetail)',
-  'async function confirmConversionPreflightStep(rawValue)', 'function cancelConversionPreflight()',
+  'async function confirmConversionPreflightStep(rawValue)',
+  // Conversioni per nomi equivalenti: funzioni di supporto.
+  'function conversionNameGroup(normalizedName)', 'function conversionNameAliases(normalizedName)', 'function conversionNameGroupMarker(normalizedName)', 'function conversionConflictKey(normalizedName,fromUnit,toUnit)', 'function selectConversionFacts(conversions)', 'function conversionConflictNote(key)', 'function cancelConversionPreflight()',
   // Calcolo rapido
   'function parseQuickCalcNumber(text)', 'function computeQuickCalc(recipe,vv,portionsText,gppText)', 'function formatQuickCalcQty(qty,unit)',
   'function openQuickCalc(recipeId,variantId)', 'function closeQuickCalc()', 'function onQuickCalcInput(field,value)', 'function syncQuickCalcScope()',

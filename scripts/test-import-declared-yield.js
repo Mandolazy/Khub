@@ -163,6 +163,8 @@ const SRC = [
   'function uid()', 'function normalizeIngredientName(name)', 'function conversionFactSourcePriority(sourceType)', 'function isBetterConversionFact(candidate,current)',
   'function buildKnownIngredientIds(ingredientRows)', 'function computeIngredientDeletions(knownByVariant,currentByVariant)',
   'function updateKnownIngredientIds(knownByVariant,currentByVariant,deleted)', 'function firmaContenutoBozza(v)', 'async function loadFromSupabase()',
+  // Conversioni per nomi equivalenti: funzioni di supporto.
+  'function conversionNameGroup(normalizedName)', 'function conversionNameAliases(normalizedName)', 'function conversionNameGroupMarker(normalizedName)', 'function conversionConflictKey(normalizedName,fromUnit,toUnit)', 'function selectConversionFacts(conversions)', 'function conversionConflictNote(key)',
   'function parseSteps(raw)', 'function getStructuredSteps(legacySteps,stepsV2)', 'function stepsV2ToLegacyArray(stepsV2)', 'function makeDefaultLab(recipeId,name)',
   'function buildValidatedVariantPayload(recipeId,vv)', 'async function saveToSupabase(recipe)',
   'async function extractRecipe()', 'function savePreview()', 'function renderPreview()',
@@ -189,7 +191,8 @@ const SAVE_HANDLER = extractSaveHandler();
 const PROTETTE = {
   "function firmaContenutoBozza(v)": "9426d786f4588837",
   "async function saveToSupabase(recipe)": "e3c83f1bdb507136",
-  "async function loadFromSupabase()": "20cca9a5a143d96c",
+  // Conversioni per nomi equivalenti (approvato): caricamento con selectConversionFacts; impronta aggiornata solo qui.
+  "async function loadFromSupabase()": "115ba063990470c0",
   "function buildValidatedVariantPayload(recipeId,vv)": "4186aeae0c1330e6",
   "function declaredYieldFromRow(row)": "1a670be06f8aeba4",
   "function copyDeclaredYield(src)": "f990f25c54e140b4",

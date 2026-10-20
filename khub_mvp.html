@@ -1366,6 +1366,90 @@ function cnum(n){return isNaN(parseFloat(n))?0:parseFloat(n);}
 // unico punto deterministico invece di essere ripetuto inline.
 function normalizeIngredientName(name){return(name||'').toLowerCase().trim();}
 
+// Nomi equivalenti per le conversioni (elenco esplicito approvato; nessuna
+// regola generica singolare/plurale; i calibri come "uova medie"/"uova
+// grandi" restano distinti). Gruppo di un nome normalizzato, o null.
+function conversionNameGroup(normalizedName){
+  var gruppi={'uovo':'uovo','uova':'uovo','uovo intero':'uovo','uova intere':'uovo','tuorlo':'tuorlo','tuorli':'tuorlo','albume':'albume','albumi':'albume'};
+  var c=String(normalizedName==null?'':normalizedName).replace(/\s+/g,' ');
+  return Object.prototype.hasOwnProperty.call(gruppi,c)?gruppi[c]:null;
+}
+// Nomi sotto cui la conoscenza di una conversione e' disponibile: tutti i nomi
+// del gruppo, oppure solo il nome stesso fuori dai gruppi.
+function conversionNameAliases(normalizedName){
+  var g=conversionNameGroup(normalizedName);
+  if(g==='uovo')return['uovo','uova','uovo intero','uova intere'];
+  if(g==='tuorlo')return['tuorlo','tuorli'];
+  if(g==='albume')return['albume','albumi'];
+  return[normalizedName];
+}
+// Marcatore (source_detail) di una conferma valida per un intero gruppo; null fuori dai gruppi.
+function conversionNameGroupMarker(normalizedName){var g=conversionNameGroup(normalizedName);return g?'equivalenze:'+g:null;}
+// Chiave dei conflitti: per gruppo nei gruppi, per nome altrove.
+function conversionConflictKey(normalizedName,fromUnit,toUnit){return(conversionNameGroup(normalizedName)||normalizedName)+'|'+fromUnit+'|'+toUnit;}
+
+// Conversioni vincenti dalle righe di ingredient_conversions (pura).
+// Fuori dai gruppi: invariato (isBetterConversionFact: confermata > riferimento,
+// poi la piu' recente). Nei gruppi di nomi equivalenti, per ogni coppia di unita':
+//  - se esiste una conferma di gruppo (source_detail = equivalenze:<gruppo>)
+//    vince la piu' recente di queste;
+//  - altrimenti conferme storiche dei singoli nomi: l'ultima di ciascun nome;
+//    se coincidono si riusano, se sono discordanti e' un CONFLITTO: nessuna
+//    conversione e nessun peso di riferimento finche' lo chef non decide;
+//  - pesi di riferimento discordanti fra nomi equivalenti = nessun riferimento.
+// Il vincitore di un gruppo vale per tutti i suoi nomi.
+// Esito: {byName (n->g), byKey (altre unita'), conflicts, suspended}; le
+// chiavi di conflicts/suspended sono "<gruppo>|<da>|<a>".
+function selectConversionFacts(conversions){
+  var byName={},byKey={},conflicts={},suspended={},gruppi={};
+  (conversions||[]).forEach(function(c){
+    var name=normalizeIngredientName(c.ingredient_name);
+    var key=name+'|'+c.from_unit+'|'+c.to_unit;
+    var cand={factor:c.factor,confirmedAt:c.confirmed_at,id:c.id,sourceType:c.source_type,sourceDetail:c.source_detail!=null?c.source_detail:null};
+    var g=conversionNameGroup(name);
+    if(g){var gk=g+'|'+c.from_unit+'|'+c.to_unit;(gruppi[gk]=gruppi[gk]||{group:g,from:c.from_unit,to:c.to_unit,rows:[]}).rows.push({raw:name.replace(/\s+/g,' '),fact:cand});return;}
+    if(c.from_unit!=='n'){if(isBetterConversionFact(cand,byKey[key]))byKey[key]=cand;}
+    if(c.from_unit!=='n'||c.to_unit!=='g')return;
+    if(isBetterConversionFact(cand,byName[name]))byName[name]=cand;
+  });
+  var piuRecente=function(list){return list.reduce(function(a,f){return!a||new Date(f.confirmedAt)>new Date(a.confirmedAt)?f:a;},null);};
+  var perNome=function(rows){var m={};rows.forEach(function(r){if(!m[r.raw]||new Date(r.fact.confirmedAt)>new Date(m[r.raw].fact.confirmedAt))m[r.raw]=r;});return Object.keys(m).map(function(k){return m[k];});};
+  var discordanti=function(rows){return rows.map(function(r){return parseFloat(r.fact.factor);}).filter(function(v,i,a){return a.indexOf(v)===i;}).length>1;};
+  Object.keys(gruppi).forEach(function(gk){
+    var g=gruppi[gk],marker='equivalenze:'+g.group,winner=null;
+    var confermate=g.rows.filter(function(r){return r.fact.sourceType==='chef_confirmed';});
+    var diGruppo=confermate.filter(function(r){return r.fact.sourceDetail===marker;}).map(function(r){return r.fact;});
+    if(diGruppo.length)winner=piuRecente(diGruppo);
+    else if(confermate.length){
+      var ultime=perNome(confermate);
+      if(discordanti(ultime)){
+        conflicts[gk]=ultime.map(function(r){return{name:r.raw,factor:parseFloat(r.fact.factor),confirmedAt:r.fact.confirmedAt};});
+        return;
+      }
+      winner=piuRecente(ultime.map(function(r){return r.fact;}));
+    }else{
+      var rif=perNome(g.rows);
+      if(discordanti(rif)){suspended[gk]=true;return;}
+      winner=piuRecente(rif.map(function(r){return r.fact;}));
+    }
+    if(!winner)return;
+    conversionNameAliases(g.group).forEach(function(n){
+      if(g.from!=='n')byKey[n+'|'+g.from+'|'+g.to]=winner;
+      else if(g.to==='g')byName[n]=winner;
+    });
+  });
+  return{byName:byName,byKey:byKey,conflicts:conflicts,suspended:suspended};
+}
+// Riga del riquadro di conferma quando le conferme storiche di nomi
+// equivalenti sono discordanti (nessun valore precompilato).
+function conversionConflictNote(key){
+  var c=(S.conversionConflicts||{})[key];
+  if(!c)return'';
+  return'<div class="conversion-conflict-note" style="font-size:12px;color:#854F0B;background:#FFF8E1;border:1px solid #F0C040;border-radius:var(--r-md);padding:8px 10px;margin-bottom:12px">Conferme precedenti discordanti per ingredienti equivalenti: '
+    +c.map(function(x){return escAttr(x.name)+' '+escAttr(formatQtyDisplay(x.factor))+' g ('+escAttr(new Date(x.confirmedAt).toLocaleDateString('it-IT'))+')';}).join(', ')
+    +'. Indica il peso da usare: varrà per tutti i nomi equivalenti.</div>';
+}
+
 // Reliable Reference Engine (A5.16) — gerarchia frozen fra fact
 // ingredient-specific persistite in ingredient_conversions, per la STESSA
 // coppia ingredient_name/from_unit/to_unit:
@@ -1780,32 +1864,20 @@ async function loadFromSupabase(){
       const rc=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'loadConversions'})});
       const cd=await rc.json();
       if(Array.isArray(cd.conversions)){
-        const latestByName={};
-        // Micro-Step 9b (corretta): cache generica "fact vincente" per
-        // qualunque coppia from_unit/to_unit DIVERSA da 'n' (es. ml->g),
-        // sugli STESSI dati gia' ricevuti in questa risposta — nessuna
-        // richiesta Supabase aggiuntiva. Usata solo dal preflight
-        // conversioni di "Manda in Produzione". Il caso n->g resta
-        // interamente nella logica S.unitWeights/S.unitWeightFacts qui
-        // sotto (unica fonte, condivisa col vecchio flusso): non viene
-        // duplicato qui, altrimenti esisterebbero due copie della stessa
-        // conoscenza per lo stesso ingrediente.
-        const latestByKey={};
-        cd.conversions.forEach(function(c){
-          var name=normalizeIngredientName(c.ingredient_name);
-          var sourceDetail=c.source_detail!=null?c.source_detail:null;
-          if(c.from_unit!=='n'){
-            var key=name+'|'+c.from_unit+'|'+c.to_unit;
-            var candidateKey={factor:c.factor,confirmedAt:c.confirmed_at,id:c.id,sourceType:c.source_type,sourceDetail:sourceDetail};
-            if(isBetterConversionFact(candidateKey,latestByKey[key])){
-              latestByKey[key]=candidateKey;
-            }
-          }
-          if(c.from_unit!=='n'||c.to_unit!=='g')return; // Micro-Step 2: solo n->g
-          var candidateName={factor:c.factor,confirmedAt:c.confirmed_at,id:c.id,sourceType:c.source_type,sourceDetail:sourceDetail};
-          if(isBetterConversionFact(candidateName,latestByName[name])){
-            latestByName[name]=candidateName;
-          }
+        // Fact vincenti (stessa precedenza di sempre fuori dai gruppi di nomi
+        // equivalenti; regole di gruppo e conflitti in selectConversionFacts).
+        const sel=selectConversionFacts(cd.conversions);
+        const latestByName=sel.byName,latestByKey=sel.byKey;
+        S.conversionConflicts=sel.conflicts;
+        // Conflitto o riferimenti discordanti in un gruppo: nessuna conversione
+        // e nessun peso di riferimento (nemmeno quello predefinito), per tutti
+        // i nomi del gruppo, finche' lo chef non conferma un valore.
+        Object.keys(sel.conflicts).concat(Object.keys(sel.suspended)).forEach(function(gk){
+          var parts=gk.split('|');
+          conversionNameAliases(parts[0]).forEach(function(n){
+            if(parts[1]==='n'&&parts[2]==='g'){delete S.unitWeights[n];delete S.unitWeightFacts[n];}
+            else delete S.productionConversionFacts[n+'|'+parts[1]+'|'+parts[2]];
+          });
         });
         Object.keys(latestByName).forEach(function(name){
           S.unitWeights[name]=parseFloat(latestByName[name].factor);
@@ -2898,16 +2970,20 @@ async function confirmLabConversion(rawValue){
   p.value=String(rawValue!=null?rawValue:p.value);
   p.loading=true;p.error=null;render();
   var normName=normalizeIngredientName(p.ingName);
-  var conv=await saveIngredientConversion(normName,p.askUnit,'g',factor,'chef_confirmed');
+  var conv=await saveIngredientConversion(normName,p.askUnit,'g',factor,'chef_confirmed',conversionNameGroupMarker(normName));
   if(conv){
     // Salvata: disponibile subito, anche se nel frattempo la finestra e'
-    // stata chiusa (il dato e' gia' nel database).
-    if(p.askUnit==='n'){
-      S.unitWeights[normName]=conv.factor;
-      S.unitWeightFacts[normName]={id:conv.id,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null};
-    }else{
-      S.productionConversionFacts[normName+'|'+p.askUnit+'|g']={id:conv.id,factor:conv.factor,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null,confirmedAt:conv.confirmed_at};
-    }
+    // stata chiusa (il dato e' gia' nel database). Nei gruppi di nomi
+    // equivalenti vale per tutti i nomi e chiude un eventuale conflitto.
+    if(S.conversionConflicts)delete S.conversionConflicts[conversionConflictKey(normName,p.askUnit,'g')];
+    conversionNameAliases(normName).forEach(function(n){
+      if(p.askUnit==='n'){
+        S.unitWeights[n]=conv.factor;
+        S.unitWeightFacts[n]={id:conv.id,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null};
+      }else{
+        S.productionConversionFacts[n+'|'+p.askUnit+'|g']={id:conv.id,factor:conv.factor,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null,confirmedAt:conv.confirmed_at};
+      }
+    });
   }
   if(S.pendingLabConversion!==p)return; // annullata nel frattempo: nessuna conversione
   if(!conv){
@@ -4196,7 +4272,7 @@ async function confirmConversionPreflightStep(rawValue){
 
   var normName=normalizeIngredientName(current.ingredientName);
   var askUnit=chooseConversionAskUnit(current.currentUnit);
-  var conv=await saveIngredientConversion(normName,askUnit,'g',factor,'chef_confirmed');
+  var conv=await saveIngredientConversion(normName,askUnit,'g',factor,'chef_confirmed',conversionNameGroupMarker(normName));
   if(!conv){
     // Errore di persistenza: non si procede alla conversione successiva,
     // nessuna Sessione viene creata, il passaggio corrente resta attivo.
@@ -4216,13 +4292,16 @@ async function confirmConversionPreflightStep(rawValue){
   // non la richiede più nella stessa sessione applicativa). Per qualunque
   // altra unità (oggi solo volume->g) l'unica fonte resta
   // S.productionConversionFacts.
-  if(askUnit==='n'){
-    S.unitWeights[normName]=conv.factor;
-    S.unitWeightFacts[normName]={id:conv.id,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null};
-  }else{
-    var key=normName+'|'+askUnit+'|g';
-    S.productionConversionFacts[key]={id:conv.id,factor:conv.factor,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null,confirmedAt:conv.confirmed_at};
-  }
+  // Nomi equivalenti: la conferma vale per tutti i nomi del gruppo e chiude un eventuale conflitto.
+  if(S.conversionConflicts)delete S.conversionConflicts[conversionConflictKey(normName,askUnit,'g')];
+  conversionNameAliases(normName).forEach(function(n){
+    if(askUnit==='n'){
+      S.unitWeights[n]=conv.factor;
+      S.unitWeightFacts[n]={id:conv.id,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null};
+    }else{
+      S.productionConversionFacts[n+'|'+askUnit+'|g']={id:conv.id,factor:conv.factor,sourceType:conv.source_type,sourceDetail:conv.source_detail!=null?conv.source_detail:null,confirmedAt:conv.confirmed_at};
+    }
+  });
 
   var recipe=R(pf.recipeId);
   var vv=recipe&&recipe.validatedVariants.find(function(v){return v.id===pf.variantId;});
@@ -4297,6 +4376,7 @@ function renderConversionPreflightModal(){
     <div style="background:var(--white);border-radius:var(--r-lg);padding:24px;width:100%;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
       <div style="font-size:14px;color:var(--mid);margin-bottom:4px">Per calcolare correttamente la produzione${progresso}</div>
       <div style="font-size:16px;font-weight:700;color:var(--dark);margin-bottom:18px">${domanda}</div>
+      ${conversionConflictNote(conversionConflictKey(normalizeIngredientName(current.ingredientName),askUnit,'g'))}
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
         <input id="conv-preflight-input" type="number" min="0" step="any" placeholder="es. 55" value="${pf.value}"
           style="flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:16px;color:var(--dark);outline:none"
@@ -8927,6 +9007,7 @@ function renderLabConversionModal(){
       <div style="font-size:16px;font-weight:700;color:var(--dark);margin-bottom:6px">Conversione da confermare</div>
       <div style="font-size:13px;color:var(--mid);margin-bottom:6px">Da ${escAttr(p.fromUnit)} a ${escAttr(p.toUnit)}: serve un dato di questo ingrediente.</div>
       <div style="font-size:14px;color:var(--dark);margin-bottom:14px">${labConversionQuestion(p)}</div>
+      ${conversionConflictNote(conversionConflictKey(normalizeIngredientName(p.ingName),p.askUnit,'g'))}
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:${p.isReference?'8':'16'}px">
         <input id="lab-conv-input" type="text" inputmode="decimal" autocomplete="off" placeholder="es. 55" value="${escAttr(p.value)}" ${p.loading?'disabled':''}
           style="flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:16px;color:var(--dark);outline:none"
