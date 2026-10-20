@@ -2132,7 +2132,11 @@ async function extractRecipe(){
   S.isLoading=true;render();
   try{
     let messages=[];
-    const PROMPT=`Estrai la ricetta e rispondi SOLO con JSON valido. La fonte può essere in qualsiasi lingua (francese, inglese, spagnolo, ecc.): TRADUCI SEMPRE in italiano il nome della ricetta, i nomi degli ingredienti e i passi del procedimento, anche se il testo originale è in un'altra lingua. Converti unità di misura locali (es. cuillère à soupe, cup, oz) nel loro equivalente in g/ml quando possibile. Elenca TUTTI gli ingredienti uno per uno con quantità numeriche esatte. Formato: {"name":"nome","category":"Dolci|Salato|Basi|Altro","portionsCount":null,"gramsPerPortion":null,"ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo 1"],"subRecipes":[{"name":"Nome Prep","ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo"]}]}. Unità: g,ml,kg,l,n,tbsp,tsp,cl. Gli ingredienti nella ricetta principale devono avere quantità reali anche se appartengono a sub-preparazioni. portionsCount (numero intero di porzioni) e gramsPerPortion (grammi per porzione) vanno indicati SOLO se la fonte li riporta esplicitamente; se la fonte non li fornisce usa null. Non stimarli, non calcolarli dagli ingredienti e non trasformare una resa (per esempio "30 bignè" o "1 torta") in porzioni o grammi per porzione.`;
+    // Resa dichiarata: testo della fonte su cui verificare la citazione
+    // (testo, pagina del link); foto e video non verificabili ("da verificare");
+    // link senza testo letto: nessuna fonte, nessuna resa.
+    let fonteResa={text:null,verifiable:false,none:false};
+    const PROMPT=`Estrai la ricetta e rispondi SOLO con JSON valido. La fonte può essere in qualsiasi lingua (francese, inglese, spagnolo, ecc.): TRADUCI SEMPRE in italiano il nome della ricetta, i nomi degli ingredienti e i passi del procedimento, anche se il testo originale è in un'altra lingua. Converti unità di misura locali (es. cuillère à soupe, cup, oz) nel loro equivalente in g/ml quando possibile. Elenca TUTTI gli ingredienti uno per uno con quantità numeriche esatte. Formato: {"name":"nome","category":"Dolci|Salato|Basi|Altro","portionsCount":null,"gramsPerPortion":null,"declaredYield":{"qty":null,"unit":null,"range":null,"source":null},"ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo 1"],"subRecipes":[{"name":"Nome Prep","declaredYield":{"qty":null,"unit":null,"range":null,"source":null},"ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo"]}]}. Unità: g,ml,kg,l,n,tbsp,tsp,cl. Gli ingredienti nella ricetta principale devono avere quantità reali anche se appartengono a sub-preparazioni. portionsCount (numero intero di porzioni) e gramsPerPortion (grammi per porzione) vanno indicati SOLO se la fonte li riporta esplicitamente; se la fonte non li fornisce usa null. Non stimarli, non calcolarli dagli ingredienti e non trasformare una resa (per esempio "30 bignè", "1 torta" o "per 6 persone") in porzioni o grammi per porzione. declaredYield è la resa dichiarata nella fonte (quanto produce la ricetta): compilala SOLO se la fonte la indica esplicitamente (per esempio "per 6 persone", "dosi per 4", "produce 30 bignè", "per 2 teglie", "makes", "serves", "yield"), altrimenti usa null. qty è il numero; unit è l'unità tradotta in italiano (persone e coperti diventano "porzioni"); source è la frase della fonte copiata esattamente, nella lingua originale e senza tradurla. Se la fonte indica un intervallo (per esempio "4-6 persone" o "20-24 bignè") usa qty null e range {"min":4,"max":6}: non scegliere un numero. Non calcolare mai la resa dagli ingredienti e non stimarla. Ogni elemento di subRecipes ha la propria declaredYield, solo se la fonte la indica per quella preparazione.`;
 
     if(type==='foto'&&S.loadImageB64){
       messages=[{role:'user',content:[
@@ -2140,6 +2144,7 @@ async function extractRecipe(){
         {type:'text',text:'Estrai la ricetta da questa immagine. '+PROMPT}
       ]}];
     }else if(type==='testo'&&S.loadText.trim()){
+      fonteResa={text:S.loadText,verifiable:true,none:false};
       messages=[{role:'user',content:`Estrai la ricetta dal seguente testo. ${PROMPT}\n\nTESTO:\n${S.loadText}`}];
     }else if(type==='link'&&S.loadUrl.trim()){
       let pageText='';
@@ -2148,6 +2153,7 @@ async function extractRecipe(){
         const pd=await pr.json();
         if(pd.html){const t=document.createElement('div');t.innerHTML=pd.html;t.querySelectorAll('script,style,nav,header,footer,aside').forEach(el=>el.remove());pageText=(t.innerText||t.textContent||'').replace(/\s+/g,' ').trim().slice(0,6000);}
       }catch(e){}
+      fonteResa=pageText?{text:pageText,verifiable:true,none:false}:{text:null,verifiable:false,none:true};
       if(pageText){messages=[{role:'user',content:`Estrai la ricetta dal testo (fonte: ${S.loadUrl}). ${PROMPT}\n\nTESTO:\n${pageText}`}];}
       else{messages=[{role:'user',content:`Estrai la ricetta da questo URL: ${S.loadUrl}. Usa il nome nell\\'URL per dedurre la ricetta. ${PROMPT}`}];}
     }else if(type==='video'&&S.loadVideoUrl.trim()){
@@ -2173,8 +2179,9 @@ async function extractRecipe(){
     parsed.steps=parsed.steps||[];
     parsed.portionsCount=importTargetValue('portions',parsed.portionsCount);
     parsed.gramsPerPortion=importTargetValue('gpp',parsed.gramsPerPortion);
+    parsed.declaredYield=importDeclaredYield(parsed.declaredYield,fonteResa);
     parsed.subRecipes=(parsed.subRecipes||[]).map(sr=>({
-      ...sr,portionsCount:importTargetValue('portions',sr.portionsCount),gramsPerPortion:importTargetValue('gpp',sr.gramsPerPortion),ingredients:(sr.ingredients||[]).map(i=>({...i,id:uid(),qty:parseFloat(i.qty)||0,unit:UNITS.includes(i.unit)?i.unit:'g'}))
+      ...sr,declaredYield:importDeclaredYield(sr.declaredYield,fonteResa),portionsCount:importTargetValue('portions',sr.portionsCount),gramsPerPortion:importTargetValue('gpp',sr.gramsPerPortion),ingredients:(sr.ingredients||[]).map(i=>({...i,id:uid(),qty:parseFloat(i.qty)||0,unit:UNITS.includes(i.unit)?i.unit:'g'}))
     }));
     S.loadPreview=parsed;
     S.view='preview';
@@ -2187,7 +2194,8 @@ function savePreview(){
   const ts=Date.now();
 
   const buildLabVersion=note=>({
-    id:'lv'+ts,label:p.name||'Nuova Scheda',name:p.name||'Nuova Scheda',note,originVariantId:null,
+    id:'lv'+ts,label:p.name||'Nuova Scheda',name:p.name||'Nuova Scheda',note:importYieldNote(note,p.declaredYield),originVariantId:null,
+    ...importYieldFields(p.declaredYieldValue), // resa confermata in anteprima; assente = non impostata
     portionsCount:importTargetValue('portions',p.portionsCount),gramsPerPortion:importTargetValue('gpp',p.gramsPerPortion),portionSize:importTargetValue('gpp',p.gramsPerPortion),portionUnit:'g',
     ingredients:p.ingredients.map(i=>({...i,id:uid()})),
     steps:p.steps||[],mediaUrl:null,videoUrl:null,active:false,
@@ -2200,7 +2208,8 @@ function savePreview(){
     p.subRecipes.forEach((sr,i)=>{
       const srId='r'+(ts+i+1);
       const srLab={
-        id:'lv'+(ts+i+1),label:sr.name||'Bozza 1',note:'Da '+p.name,
+        id:'lv'+(ts+i+1),label:sr.name||'Bozza 1',note:importYieldNote('Da '+p.name,sr.declaredYield),
+        ...importYieldFields(sr.declaredYieldValue), // resa propria della sotto-ricetta
         portionsCount:importTargetValue('portions',sr.portionsCount),gramsPerPortion:importTargetValue('gpp',sr.gramsPerPortion), // FIX 2C (C5): mai somme di ingredienti
         ingredients:sr.ingredients.map(x=>({...x,id:uid()})),
         steps:sr.steps||[],mediaUrl:null,videoUrl:null,
@@ -2699,6 +2708,76 @@ function validateLabProductionTarget(field,value){
 function importTargetValue(field,value){
   var r=validateLabProductionTarget(field,value);
   return r.ok?r.value:0;
+}
+// Resa dichiarata dalla fonte importata. Mai calcolata ne' inventata: serve
+// una citazione della fonte, verificata nel testo quando la fonte e' testo o
+// la pagina di un link; per foto e video la resa e' proposta "da verificare".
+// Persone/coperti -> "porzioni" (solo all'importazione). Un intervallo non
+// viene mai ridotto a un numero: quantita' vuota e intervallo mostrato.
+// Esito per l'anteprima: {qty,unit,source,range,toVerify} come testo dei
+// campi; nessuna resa = tutto vuoto. Non tocca l'Obiettivo di Produzione.
+var IMPORT_YIELD_PORTION_ALIASES=['persona','persone','porzione','porzioni','coperto','coperti','pax','people','person','persons','serving','servings','serves','portion','portions','personne','personnes','personas','raciones','ración','racion'];
+function importYieldText(t){return String(t==null?'':t).toLowerCase().replace(/[\u2010-\u2015\u2212]/g,'-').replace(/[«»“”"'’]/g,'').replace(/\s+/g,' ').trim();}
+function importDeclaredYield(raw,fonte){
+  var vuota={qty:'',unit:'',source:'',range:null,toVerify:false};
+  if(!raw||typeof raw!=='object'||!fonte||fonte.none)return vuota;
+  var source=typeof raw.source==='string'?raw.source.replace(/\s+/g,' ').trim():'';
+  if(!source)return vuota;
+  if(fonte.verifiable&&importYieldText(fonte.text).indexOf(importYieldText(source))===-1)return vuota;
+  var unit=typeof raw.unit==='string'?raw.unit.replace(/\s+/g,' ').trim():'';
+  if(IMPORT_YIELD_PORTION_ALIASES.indexOf(unit.toLowerCase())!==-1)unit='porzioni';
+  var out={qty:'',unit:'',source:source,range:null,toVerify:!fonte.verifiable};
+  var r=raw.range;
+  if(r&&typeof r==='object'){
+    var min=parseLocaleNumber(r.min),max=parseLocaleNumber(r.max);
+    if(!(isFinite(min)&&isFinite(max)&&min>0&&min<max)||!unit)return vuota;
+    out.range={min:min,max:max,unit:normalizeDeclaredYield(min,unit).ok?normalizeDeclaredYield(min,unit).value.unit:unit};
+    return out; // quantita' e unita' vuote: lo chef sceglie min, max, un valore o nulla
+  }
+  if(raw.qty==null||raw.qty==='')return vuota;
+  var n=normalizeDeclaredYield(typeof raw.qty==='number'?raw.qty:String(raw.qty),unit);
+  if(n.ok&&n.value){out.qty=String(n.value.qty);out.unit=n.value.unit;return out;}
+  if(n.ok)return vuota;
+  out.qty=String(raw.qty);out.unit=unit; // non valida: mostrata in anteprima, lo chef corregge o svuota
+  return out;
+}
+// Campi della bozza: solo una resa confermata; assente = chiavi non inviate (NULL).
+function importYieldFields(value){return value?{declaredYieldQty:value.qty,declaredYieldUnit:value.unit}:{};}
+// Nota della nuova bozza: l'intervallo originale viene conservato, in coda alla nota.
+function importYieldNote(note,dy){
+  if(!dy||!dy.range)return note;
+  var testo='Resa nella fonte (intervallo): '+formatQtyDisplay(dy.range.min)+'–'+formatQtyDisplay(dy.range.max)+' '+dy.range.unit+' — «'+dy.source+'»'+(dy.toVerify?' — da verificare':'');
+  return note?note+' · '+testo:testo;
+}
+// Anteprima: campi della resa (ricetta o sotto-ricetta) con citazione e intervallo.
+function renderImportYieldFields(dy,prefix,label){
+  dy=dy||{qty:'',unit:'',source:'',range:null,toVerify:false};
+  var inp='width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:14px;background:var(--white)';
+  var info='';
+  if(dy.source){
+    info=`<div class="import-yield-source" style="font-size:12px;color:var(--mid);margin-top:6px">Dalla fonte: «${escAttr(dy.source)}»${dy.toVerify?' — <strong class="import-yield-verify">da verificare</strong>':''}`;
+    if(dy.range){
+      var a=formatQtyDisplay(dy.range.min),b=formatQtyDisplay(dy.range.max),u=escAttr(dy.range.unit);
+      info+=` — la fonte indica un intervallo.<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center">
+        <button type="button" class="btn btn-outline btn-sm import-yield-min" data-qty="${escAttr(String(dy.range.min))}" data-unit="${u}" onclick="useImportYieldRange('${prefix}',this.dataset.qty,this.dataset.unit)">Usa ${a} ${u}</button>
+        <button type="button" class="btn btn-outline btn-sm import-yield-max" data-qty="${escAttr(String(dy.range.max))}" data-unit="${u}" onclick="useImportYieldRange('${prefix}',this.dataset.qty,this.dataset.unit)">Usa ${b} ${u}</button>
+        <span>oppure scrivi un valore, o lascia vuoto</span></div>`;
+    }
+    info+='</div>';
+  }
+  return`<div class="import-yield" data-yield-prefix="${prefix}" style="margin-bottom:14px">
+    <label class="form-label">${label}</label>
+    <div style="display:flex;gap:8px">
+      <input class="form-input" id="${prefix}-qty" type="text" inputmode="decimal" autocomplete="off" placeholder="—" value="${escAttr(dy.qty)}" style="${inp};max-width:110px">
+      <input class="form-input" id="${prefix}-unit" type="text" maxlength="${DECLARED_YIELD_UNIT_MAX_LENGTH}" autocomplete="off" placeholder="es. porzioni, bignè, teglie" value="${escAttr(dy.unit)}" style="${inp}">
+    </div>${info}
+  </div>`;
+}
+// Pulsanti "Usa min/max": riempiono solo i campi modificabili (nessun render).
+function useImportYieldRange(prefix,qty,unit){
+  var q=document.getElementById(prefix+'-qty'),u=document.getElementById(prefix+'-unit');
+  if(q)q.value=qty;
+  if(u)u.value=unit;
 }
 // Valore di un campo dell'obiettivo: vuoto se non impostato (0), mai "0".
 function labTargetIsSet(value){var n=parseLocaleNumber(value);return isFinite(n)&&n>0;}
@@ -7810,6 +7889,7 @@ function renderPreview(){
       <div class="form-group"><label class="form-label">Porzioni</label><input class="form-input" type="text" inputmode="numeric" autocomplete="off" id="prev-portions" value="${labTargetInputValue(p.portionsCount)}"></div>
       <div class="form-group"><label class="form-label">G/Porzione</label><input class="form-input" type="text" inputmode="decimal" autocomplete="off" id="prev-gpp" value="${labTargetInputValue(p.gramsPerPortion)}"></div>
     </div>
+    ${renderImportYieldFields(p.declaredYield,'prev-yield','Resa dichiarata · quanto produce la ricetta (non è l\'Obiettivo di Produzione)')}
     <div class="card-label"><i class="ti ti-list-details"></i> Ingredienti (${p.ingredients.length})</div>
     ${p.ingredients.map((ing,idx)=>`
     <div class="preview-ing-row">
@@ -7828,7 +7908,8 @@ function renderPreview(){
     ${p.subRecipes&&p.subRecipes.length?`
     <div style="margin-top:16px;background:var(--lab-light);border:1px solid var(--lab-border);border-radius:var(--r-md);padding:10px 14px;font-size:12px;color:var(--lab)">
       <i class="ti ti-sparkles"></i> Verranno create anche: <strong>${p.subRecipes.map(s=>s.name).join(', ')}</strong>
-    </div>`:''}
+    </div>
+    <div style="margin-top:12px">${p.subRecipes.map((sr,i)=>renderImportYieldFields(sr.declaredYield,'prev-sr-yield-'+i,'Resa dichiarata di '+escAttr(sr.name||'preparazione '+(i+1)))).join('')}</div>`:''}
 
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
       <div class="card-label" style="margin-bottom:10px"><i class="ti ti-folder"></i> Destinazione</div>
@@ -9513,6 +9594,19 @@ function bindEvents(){
     const vg=pg?validateLabProductionTarget('gpp',pg.value):null;
     if(vp&&!vp.ok){toast(vp.error,'ti-alert-circle');return;}
     if(vg&&!vg.ok){toast(vg.error,'ti-alert-circle');return;}
+    // Resa dichiarata: campi vuoti = non impostata; valore non valido = salvataggio bloccato.
+    const leggiResa=(prefix,nome)=>{
+      const q=document.getElementById(prefix+'-qty'),u=document.getElementById(prefix+'-unit');
+      if(!q&&!u)return{ok:true,value:null};
+      const r=normalizeDeclaredYield(q?q.value:'',u?u.value:'');
+      return r.ok?r:{ok:false,error:(nome?nome+': ':'')+declaredYieldErrorMessage(r.error)};
+    };
+    const resaMain=leggiResa('prev-yield','');
+    if(!resaMain.ok){toast(resaMain.error,'ti-alert-circle');return;}
+    const reseSr=((S.loadPreview&&S.loadPreview.subRecipes)||[]).map((sr,i)=>leggiResa('prev-sr-yield-'+i,sr.name||'Preparazione '+(i+1)));
+    const resaErr=reseSr.find(r=>!r.ok);
+    if(resaErr){toast(resaErr.error,'ti-alert-circle');return;}
+    if(S.loadPreview){S.loadPreview.declaredYieldValue=resaMain.value;reseSr.forEach((r,i)=>{S.loadPreview.subRecipes[i].declaredYieldValue=r.value;});}
     if(vp&&S.loadPreview)S.loadPreview.portionsCount=vp.value;
     if(vg&&S.loadPreview)S.loadPreview.gramsPerPortion=vg.value;
     // Aggiorna ingredienti preview
