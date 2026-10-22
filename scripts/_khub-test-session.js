@@ -26,9 +26,14 @@ function loadMiddleware() {
   return middlewarePromise;
 }
 
+// Chiave Supabase finta nel formato secret: le suite usano un fetch simulato,
+// nessuna chiamata reale.
+const TEST_SUPABASE_SECRET_KEY = 'sb_secret_test_only_not_a_real_key';
+
 function ensureTestEnv() {
   if (!process.env.KHUB_SESSION_SECRET) process.env.KHUB_SESSION_SECRET = TEST_SECRET;
   if (!process.env.KHUB_ACCESS_PASSWORD) process.env.KHUB_ACCESS_PASSWORD = TEST_PASSWORD;
+  if (!process.env.SUPABASE_SECRET_KEY) process.env.SUPABASE_SECRET_KEY = TEST_SUPABASE_SECRET_KEY;
 }
 
 async function testSessionCookie() {

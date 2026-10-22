@@ -10,31 +10,33 @@
  * (cleanup in finally, ordine rispettoso delle FK RESTRICT:
  * l3_items -> l2_items -> variants -> recipes).
  *
- * Richiede in ambiente: SUPABASE_URL, SUPABASE_ANON_KEY
- * (le stesse due variabili gia' usate da api/chat.js in produzione —
- * vedi Vercel: Project Settings -> Environment Variables).
+ * Richiede in ambiente: SUPABASE_URL, SUPABASE_SECRET_KEY (sb_secret_...)
+ * (le stesse due variabili usate da api/chat.js — vedi Vercel: Project
+ * Settings -> Environment Variables). La chiave secret va SOLO nell'header
+ * apikey, come in api/chat.js. Scrive righe di test sul database reale:
+ * eseguirlo solo su autorizzazione.
  *
  * Uso:
- *   SUPABASE_URL=https://xxx.supabase.co SUPABASE_ANON_KEY=xxx \
+ *   SUPABASE_URL=https://xxx.supabase.co SUPABASE_SECRET_KEY=sb_secret_xxx \
  *     node scripts/test-supabase-roundtrip.js
  * oppure:
  *   npm run test:supabase   (con le env var gia' esportate nella shell)
  */
 const SB = process.env.SUPABASE_URL;
-const SK = process.env.SUPABASE_ANON_KEY;
+const SK = process.env.SUPABASE_SECRET_KEY;
 
-if (!SB || !SK) {
-  console.error('Mancano SUPABASE_URL e/o SUPABASE_ANON_KEY nell\'ambiente.');
+if (!SB || !SK || !SK.startsWith('sb_secret_')) {
+  console.error('Mancano SUPABASE_URL e/o SUPABASE_SECRET_KEY (sb_secret_...) nell\'ambiente.');
   console.error('Recuperale da Vercel (Project Settings -> Environment Variables,');
   console.error('sono le stesse due variabili gia\' usate da api/chat.js) ed esportale');
   console.error('nella shell prima di rilanciare, es.:');
-  console.error('  SUPABASE_URL=... SUPABASE_ANON_KEY=... node scripts/test-supabase-roundtrip.js');
+  console.error('  SUPABASE_URL=... SUPABASE_SECRET_KEY=... node scripts/test-supabase-roundtrip.js');
   process.exit(2);
 }
 
-const SH_READ = { apikey: SK, Authorization: 'Bearer ' + SK, 'Content-Type': 'application/json' };
-const SH_WRITE = { apikey: SK, Authorization: 'Bearer ' + SK, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
-const SH_DEL = { apikey: SK, Authorization: 'Bearer ' + SK };
+const SH_READ = { apikey: SK, 'Content-Type': 'application/json' };
+const SH_WRITE = { apikey: SK, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
+const SH_DEL = { apikey: SK };
 
 const ts = Date.now();
 const REC = 'sprint1test_recipe_' + ts;

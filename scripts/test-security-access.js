@@ -74,7 +74,7 @@ function fakeRes() {
     return { ok: true, status: 200, json: async () => [], text: async () => '' };
   };
   process.env.SUPABASE_URL = 'https://fake.supabase';
-  process.env.SUPABASE_ANON_KEY = 'anon';
+  process.env.SUPABASE_SECRET_KEY = 'sb_secret_test_only_not_a_real_key';
 
   const validCookie = async (secret) => '__Host-khub_session=' + await mw.createSessionToken(secret || SECRET, now());
 
