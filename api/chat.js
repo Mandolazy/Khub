@@ -1,3 +1,5 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
+
 // ══════════════════════════════════════════════════════════
 // M1 — PRIMO CONSULTO
 // Contratto cognitivo congelato (D1): sostituisce l'unico Primo Consulto
@@ -255,18 +257,164 @@ function normalizeActualYield(y) {
 // applicativo, validato anche dal client; nessun vincolo nel DB.
 const SESSION_NOTE_MAX_LENGTH = 2000;
 
+// ══════════════════════════════════════════════════════════
+// ACCESSO PRIVATO — secondo controllo, indipendente da middleware.js.
+// Se il middleware mancasse o venisse aggirato, l'API resta chiusa: prima
+// di qualsiasi azione (Supabase, fetchUrl, Anthropic) si richiede un cookie
+// di sessione valido firmato con KHUB_SESSION_SECRET e una richiesta
+// same-origin. Fail-closed: variabili assenti o deboli -> 503. Il formato
+// del token deve restare identico a quello di middleware.js (verificato da
+// scripts/test-security-access.js). Codice inline: questo file non importa
+// moduli locali (i test lo caricano come modulo data:).
+// ══════════════════════════════════════════════════════════
+const KHUB_SESSION_COOKIE = '__Host-khub_session';
+const KHUB_SESSION_TTL_SECONDS = 30 * 24 * 60 * 60;
+const KHUB_SESSION_CLOCK_SKEW_SECONDS = 300;
+
+function khubHeader(req, name) {
+  const v = req && req.headers ? req.headers[name] : undefined;
+  return Array.isArray(v) ? v[0] : (typeof v === 'string' ? v : '');
+}
+
+function khubReadCookie(req, name) {
+  for (const part of khubHeader(req, 'cookie').split(';')) {
+    const i = part.indexOf('=');
+    if (i !== -1 && part.slice(0, i).trim() === name) return part.slice(i + 1).trim();
+  }
+  return '';
+}
+
+// Stesso HMAC-SHA256 di middleware.js, calcolato in modo sincrono con
+// node:crypto (questa funzione gira sempre nel runtime Node.js).
+function khubVerifySession(token, secret) {
+  const m = /^v1\.(\d{1,12})\.([A-Za-z0-9_-]{43})$/.exec(token);
+  if (!m) return false;
+  const exp = Number(m[1]);
+  const now = Date.now() / 1000;
+  if (!(exp > now) || exp > now + KHUB_SESSION_TTL_SECONDS + KHUB_SESSION_CLOCK_SKEW_SECONDS) return false;
+  const sig = Buffer.from(m[2], 'base64url');
+  const expected = createHmac('sha256', secret).update('khub-session.v1.' + exp).digest();
+  return sig.length === expected.length && timingSafeEqual(sig, expected);
+}
+
+function khubIsSameOrigin(req) {
+  const host = khubHeader(req, 'x-forwarded-host') || khubHeader(req, 'host');
+  const origin = khubHeader(req, 'origin');
+  if (origin) {
+    try { return !!host && new URL(origin).host === host; } catch (e) { return false; }
+  }
+  return khubHeader(req, 'sec-fetch-site') === 'same-origin';
+}
+
+// null se la richiesta puo' proseguire, altrimenti { status, error }.
+function khubAccessDenied(req) {
+  const secret = process.env.KHUB_SESSION_SECRET || '';
+  const password = process.env.KHUB_ACCESS_PASSWORD || '';
+  if (secret.length < 32 || password.length < 16) return { status: 503, error: 'Accesso non configurato' };
+  let valid = false;
+  try { valid = khubVerifySession(khubReadCookie(req, KHUB_SESSION_COOKIE), secret); } catch (e) { valid = false; }
+  if (!valid) return { status: 401, error: 'Accesso non autorizzato' };
+  if (!khubIsSameOrigin(req)) return { status: 403, error: 'Origine non consentita' };
+  return null;
+}
+
+// ══════════════════════════════════════════════════════════
+// SUPABASE — chiave secret, SOLO lato server
+// La chiave (SUPABASE_SECRET_KEY, formato sb_secret_...) agisce come
+// service_role: ignora RLS e raggiunge anche i servizi amministrativi del
+// progetto (Auth, Storage). Per questo:
+//   - va inviata SOLO nell'header apikey (in Authorization Supabase la
+//     rifiuterebbe: non e' un JWT) e mai restituita al browser;
+//   - fail-closed: chiave assente o non secret, o SUPABASE_URL non valido ->
+//     nessuna chiamata al database (503), mai un ripiego su altre chiavi;
+//   - il percorso /rest/v1/<tabella> non e' mai costruito da valori del client:
+//     solo le tabelle note, e le azioni generiche update/delete hanno
+//     un'allowlist esplicita di tabelle, colonne e valori.
+// ══════════════════════════════════════════════════════════
+function supabaseConfig() {
+  const key = process.env.SUPABASE_SECRET_KEY || '';
+  if (!/^sb_secret_[A-Za-z0-9_-]{8,}$/.test(key)) return null;
+  let u;
+  try { u = new URL(process.env.SUPABASE_URL || ''); } catch (e) { return null; }
+  if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash || (u.pathname !== '/' && u.pathname !== '')) return null;
+  return { url: u.origin, key };
+}
+
+// Le sole tabelle che il server legge o scrive (schema public).
+const SB_TABLES = ['recipes', 'variants', 'ingredients', 'l2_items', 'l3_items', 'families', 'variant_families',
+  'ingredient_conversions', 'm2_turns', 'production_sessions', 'session_ingredient_state', 'session_step_state', 'session_notes'];
+
+// Azione generica 'update': usata dal client SOLO per creare una Sessione di
+// produzione (createProductionSession). Ammesse solo queste tabelle, queste
+// colonne e i valori di una Sessione appena creata (fixed).
+const GENERIC_UPDATE_RULES = {
+  production_sessions: {
+    many: false,
+    cols: ['id', 'recipe_id', 'source_variant_id', 'status', 'snapshot_version', 'snapshot', 'target_finished_total',
+      'started_at', 'completed_at', 'actual_yield_qty', 'actual_yield_unit'],
+    required: ['id'],
+    fixed: { status: 'pending', started_at: null, completed_at: null, actual_yield_qty: null, actual_yield_unit: null },
+  },
+  session_ingredient_state: {
+    many: true,
+    cols: ['id', 'session_id', 'item_key', 'checked', 'checked_at'],
+    required: ['id', 'session_id', 'item_key'],
+    fixed: { checked: false, checked_at: null },
+  },
+  session_step_state: {
+    many: true,
+    cols: ['id', 'session_id', 'item_key', 'checked', 'checked_at', 'timer_started_at', 'timer_actual_seconds'],
+    required: ['id', 'session_id', 'item_key'],
+    fixed: { checked: false, checked_at: null, timer_started_at: null, timer_actual_seconds: null },
+  },
+};
+// Azione generica 'delete': eliminazione di Scheda/Ricetta e pulizia di una
+// Sessione appena creata (solo se ancora pending, vedi sotto).
+const GENERIC_DELETE_TABLES = ['recipes', 'variants', 'production_sessions'];
+const SB_ID_MAX_LENGTH = 200;
+const GENERIC_UPDATE_MAX_ROWS = 1000;
+
+function isPlainObject(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
+function isValidId(v) { return typeof v === 'string' && v.length > 0 && v.length <= SB_ID_MAX_LENGTH; }
+
+// null se (table, data) e' ammesso per l'azione 'update', altrimenti il motivo.
+function genericUpdateProblem(table, data) {
+  if (typeof table !== 'string' || !Object.prototype.hasOwnProperty.call(GENERIC_UPDATE_RULES, table)) return 'tabella non ammessa';
+  const rule = GENERIC_UPDATE_RULES[table];
+  if (Array.isArray(data) && !rule.many) return 'e\' ammessa una sola riga';
+  const rows = Array.isArray(data) ? data : [data];
+  if (rows.length === 0 || rows.length > GENERIC_UPDATE_MAX_ROWS) return 'numero di righe non valido';
+  for (const row of rows) {
+    if (!isPlainObject(row)) return 'riga non valida';
+    for (const k of Object.keys(row)) if (!rule.cols.includes(k)) return 'colonna non ammessa: ' + k;
+    for (const k of rule.required) if (!isValidId(row[k])) return 'campo obbligatorio non valido: ' + k;
+    for (const k of Object.keys(rule.fixed)) {
+      if (Object.prototype.hasOwnProperty.call(row, k) && row[k] !== rule.fixed[k]) return 'valore non ammesso per ' + k;
+    }
+  }
+  return null;
+}
+
 export default async function handler(req, res) {
+  const denied = khubAccessDenied(req);
+  if (denied) return res.status(denied.status).json({ error: denied.error });
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   try {
     const body = req.body;
-    const SB = process.env.SUPABASE_URL;
-    const SK = process.env.SUPABASE_ANON_KEY;
+    const sbConfig = supabaseConfig();
+    const SB = sbConfig ? sbConfig.url : '';
+    const SK = sbConfig ? sbConfig.key : '';
+    // Fail-closed: nessuna azione sul database senza una chiave secret valida.
+    if (body && body.supabaseAction && !sbConfig) {
+      return res.status(503).json({ error: 'Database non configurato', code: 'db_config' });
+    }
 
-    const SH_READ = { apikey: SK, Authorization: 'Bearer ' + SK, 'Content-Type': 'application/json' };
-    const SH_WRITE = { apikey: SK, Authorization: 'Bearer ' + SK, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
-    const SH_DEL = { apikey: SK, Authorization: 'Bearer ' + SK };
+    const SH_READ = { apikey: SK, 'Content-Type': 'application/json' };
+    const SH_WRITE = { apikey: SK, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
+    const SH_DEL = { apikey: SK };
 
     async function sbPost(table, data) {
+      if (!SB_TABLES.includes(table)) return { error: 'tabella non ammessa', status: 400 };
       const r = await fetch(SB + '/rest/v1/' + table, {
         method: 'POST', headers: SH_WRITE, body: JSON.stringify(data)
       });
@@ -289,6 +437,7 @@ export default async function handler(req, res) {
     const SB_PAGE_SIZE = 1000;
     async function sbSelectAll(path) {
       const table = path.split('?')[0];
+      if (!SB_TABLES.includes(table)) throw new Error('Supabase read: tabella non ammessa');
       const rows = [];
       for (;;) {
         const r = await fetch(SB + '/rest/v1/' + path + '&limit=' + SB_PAGE_SIZE + '&offset=' + rows.length, { headers: SH_READ });
@@ -363,8 +512,11 @@ export default async function handler(req, res) {
 
     if (body.supabaseAction === 'saveVariantFamilies') {
       const { variantId, familyIds } = body;
+      if (!isValidId(variantId) || (familyIds != null && (!Array.isArray(familyIds) || !familyIds.every(isValidId)))) {
+        return res.status(400).json({ error: 'saveVariantFamilies: parametri non validi', code: 'invalid' });
+      }
       // Elimina relazioni esistenti per questa variante
-      await fetch(SB + '/rest/v1/variant_families?variant_id=eq.' + variantId, {
+      await fetch(SB + '/rest/v1/variant_families?variant_id=eq.' + encodeURIComponent(variantId), {
         method: 'DELETE', headers: SH_DEL
       });
       // Inserisci nuove relazioni
@@ -852,13 +1004,25 @@ export default async function handler(req, res) {
       return res.status(200).json({ error: 'updateDeclaredYield: la Ricetta non e\' attiva', code: 'not_active', status: found[0].status, active: found[0].active });
     }
 
+    // Azioni generiche: tabella, colonne, valori e id verificati prima di
+    // qualsiasi chiamata (con la chiave secret RLS non fa da rete).
     if (body.supabaseAction === 'update') {
+      const problem = genericUpdateProblem(body.table, body.data);
+      if (problem) return res.status(400).json({ error: 'update: ' + problem, code: 'not_allowed' });
       const ru = await sbPost(body.table, body.data);
       return res.status(200).json(ru);
     }
 
     if (body.supabaseAction === 'delete') {
-      await fetch(SB + '/rest/v1/' + body.table + '?id=eq.' + body.id, {
+      const table = body.table;
+      if (typeof table !== 'string' || !GENERIC_DELETE_TABLES.includes(table)) {
+        return res.status(400).json({ error: 'delete: tabella non ammessa', code: 'not_allowed' });
+      }
+      if (!isValidId(body.id)) return res.status(400).json({ error: 'delete: id non valido', code: 'invalid' });
+      // Una Sessione si elimina solo come pulizia di una creazione fallita,
+      // quando e' ancora pending: mai una Sessione avviata o completata.
+      const onlyPending = table === 'production_sessions' ? '&status=eq.pending' : '';
+      await fetch(SB + '/rest/v1/' + table + '?id=eq.' + encodeURIComponent(body.id) + onlyPending, {
         method: 'DELETE', headers: SH_DEL
       });
       return res.status(200).json({ ok: true });

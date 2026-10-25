@@ -113,7 +113,7 @@ function makeFakeSupabase() {
 }
 
 async function loadHandler() {
-  return (await import('data:text/javascript;base64,' + Buffer.from(chatSrc).toString('base64'))).default;
+  return require('./_khub-test-session').withTestSession((await import('data:text/javascript;base64,' + Buffer.from(chatSrc).toString('base64'))).default);
 }
 
 // ══════════════════════════════════════════════════════════
