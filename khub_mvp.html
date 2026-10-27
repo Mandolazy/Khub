@@ -600,6 +600,13 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
   padding:6px 4px;min-height:36px;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:background 90ms;
 }
 .schede-accesso:hover,.schede-accesso:active{background:var(--dpop-carta-toccata);}
+.schede-accesso.attivo{background:var(--dpop-inchiostro-testo);color:var(--dpop-carta-0-foglio);}
+.schede-accessi{flex-wrap:wrap;}
+.schede-alfabetica{border-top:1px solid var(--dpop-filetto-riga);}
+.schede-riga-cat{display:block;font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:500;letter-spacing:0.04em;text-transform:uppercase;color:var(--dpop-grigio-dato);margin-top:2px;}
+.si-categoria{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-left:16px;margin-top:8px;}
+.si-categoria label{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.04em;text-transform:uppercase;color:var(--dpop-grigio-dato);}
+.si-categoria input{font-family:inherit;font-size:14px;padding:6px 10px;border:1px solid var(--dpop-filetto-riga);border-radius:var(--r-sm);background:var(--dpop-carta-0-foglio);color:var(--dpop-inchiostro-testo);width:220px;max-width:100%;}
 
 .schede-count-globale{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:0.10em;color:var(--dpop-grigio-dato);padding:0 22px 18px;}
 
@@ -2385,7 +2392,7 @@ async function extractRecipe(){
     // (testo, pagina del link); foto e video non verificabili ("da verificare");
     // link senza testo letto: nessuna fonte, nessuna resa.
     let fonteResa={text:null,verifiable:false,none:false};
-    const PROMPT=`Estrai la ricetta e rispondi SOLO con JSON valido. La fonte può essere in qualsiasi lingua (francese, inglese, spagnolo, ecc.): TRADUCI SEMPRE in italiano il nome della ricetta, i nomi degli ingredienti e i passi del procedimento, anche se il testo originale è in un'altra lingua. Converti unità di misura locali (es. cuillère à soupe, cup, oz) nel loro equivalente in g/ml quando possibile. Elenca TUTTI gli ingredienti uno per uno con quantità numeriche esatte. Formato: {"name":"nome","category":"Dolci|Salato|Basi|Altro","portionsCount":null,"gramsPerPortion":null,"declaredYield":{"qty":null,"unit":null,"range":null,"source":null},"ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo 1"],"subRecipes":[{"name":"Nome Prep","declaredYield":{"qty":null,"unit":null,"range":null,"source":null},"ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo"]}]}. Unità: g,ml,kg,l,n,tbsp,tsp,cl. Gli ingredienti nella ricetta principale devono avere quantità reali anche se appartengono a sub-preparazioni. portionsCount (numero intero di porzioni) e gramsPerPortion (grammi per porzione) vanno indicati SOLO se la fonte li riporta esplicitamente; se la fonte non li fornisce usa null. Non stimarli, non calcolarli dagli ingredienti e non trasformare una resa (per esempio "30 bignè", "1 torta" o "per 6 persone") in porzioni o grammi per porzione. declaredYield è la resa dichiarata nella fonte (quanto produce la ricetta): compilala SOLO se la fonte la indica esplicitamente (per esempio "per 6 persone", "dosi per 4", "produce 30 bignè", "per 2 teglie", "makes", "serves", "yield"), altrimenti usa null. qty è il numero; unit è l'unità tradotta in italiano (persone e coperti diventano "porzioni"); source è la frase della fonte copiata esattamente, nella lingua originale e senza tradurla. Se la fonte indica un intervallo (per esempio "4-6 persone" o "20-24 bignè") usa qty null e range {"min":4,"max":6}: non scegliere un numero. Non calcolare mai la resa dagli ingredienti e non stimarla. Ogni elemento di subRecipes ha la propria declaredYield, solo se la fonte la indica per quella preparazione.`;
+    const PROMPT=`Estrai la ricetta e rispondi SOLO con JSON valido. La fonte può essere in qualsiasi lingua (francese, inglese, spagnolo, ecc.): TRADUCI SEMPRE in italiano il nome della ricetta, i nomi degli ingredienti e i passi del procedimento, anche se il testo originale è in un'altra lingua. Converti unità di misura locali (es. cuillère à soupe, cup, oz) nel loro equivalente in g/ml quando possibile. Elenca TUTTI gli ingredienti uno per uno con quantità numeriche esatte. Formato: {"name":"nome","category":"categoria suggerita, breve, in italiano (preferisci una di quelle gia' usate: ${categorieUsate().join(', ')||'nessuna'}); stringa vuota se non e' chiara","portionsCount":null,"gramsPerPortion":null,"declaredYield":{"qty":null,"unit":null,"range":null,"source":null},"ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo 1"],"subRecipes":[{"name":"Nome Prep","declaredYield":{"qty":null,"unit":null,"range":null,"source":null},"ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo"]}]}. Unità: g,ml,kg,l,n,tbsp,tsp,cl. Gli ingredienti nella ricetta principale devono avere quantità reali anche se appartengono a sub-preparazioni. portionsCount (numero intero di porzioni) e gramsPerPortion (grammi per porzione) vanno indicati SOLO se la fonte li riporta esplicitamente; se la fonte non li fornisce usa null. Non stimarli, non calcolarli dagli ingredienti e non trasformare una resa (per esempio "30 bignè", "1 torta" o "per 6 persone") in porzioni o grammi per porzione. declaredYield è la resa dichiarata nella fonte (quanto produce la ricetta): compilala SOLO se la fonte la indica esplicitamente (per esempio "per 6 persone", "dosi per 4", "produce 30 bignè", "per 2 teglie", "makes", "serves", "yield"), altrimenti usa null. qty è il numero; unit è l'unità tradotta in italiano (persone e coperti diventano "porzioni"); source è la frase della fonte copiata esattamente, nella lingua originale e senza tradurla. Se la fonte indica un intervallo (per esempio "4-6 persone" o "20-24 bignè") usa qty null e range {"min":4,"max":6}: non scegliere un numero. Non calcolare mai la resa dagli ingredienti e non stimarla. Ogni elemento di subRecipes ha la propria declaredYield, solo se la fonte la indica per quella preparazione.`;
 
     if(type==='foto'&&S.loadImageB64){
       messages=[{role:'user',content:[
@@ -2486,7 +2493,7 @@ function savePreview(){
   }else{
     const mainId='r'+ts;
     const mainRecipe={
-      id:mainId,name:p.name||'Nuova Scheda',category:p.category||'Altro',department:'Cucina',
+      id:mainId,name:p.name||'Nuova Scheda',category:normalizzaCategoria(p.category),department:'Cucina',
       validatedVariants:[],currentLabIdx:0,
       labVersions:[buildLabVersion('Importata')],mediaUrl:null,videoUrl:null,notes:'',
     };
@@ -7166,7 +7173,7 @@ async function runPrimoConsulto(recipeId){
     +'- Ogni osservazione deve avere una motivazione (reason): perché lo dici, non solo cosa dici.\n'
     +'- Scrivi ogni osservazione come parlerebbe un collega esperto: diretto, semplice, mai burocratico.\n'
     +'- Dichiara il livello di certezza con onestà: fatto_verificato solo per tecnica/scienza alimentare consolidata o dati espliciti nella Scheda; ipotesi o dati_insufficienti quando la Scheda è nuova e non hai storia su cui basarti. source deve essere scheda_corrente se il dato viene da questa ricetta, conoscenza_universale se viene da nozioni generali di cucina/scienza alimentare.\n\n'
-    +'RICETTA: '+recipe.name+' ('+recipe.category+')\n'
+    +'RICETTA: '+recipe.name+(categoriaVisibile(recipe.category)?' ('+categoriaVisibile(recipe.category)+')':'')+'\n'
     +'INGREDIENTI:\n'+ingList+'\n'
     +'PROCEDIMENTO:\n'+(proc||'non ancora scritto')+'\n\n'
     +'CONTROLLI GIÀ FATTI DA KHUB (contesto, non ripeterli):\n'+controlliText+'\n\n'
@@ -7915,6 +7922,66 @@ function exportPDF(recipeId,variantId){
 // ══════════════════════════════════════════════════════════
 function catEmoji(cat){return CAT_EMOJI[cat]||'📋';}
 
+// Schede — categorie facoltative e personalizzabili: testo libero nella
+// colonna esistente recipes.category (NOT NULL, default 'Altro'), nessuna
+// tabella, nessuna migrazione. "Altro" e' il valore tecnico quando lo chef
+// non sceglie: mai presentato come scelta obbligatoria. Le categorie gia'
+// salvate non vengono mai cambiate automaticamente.
+var CATEGORIA_TECNICA='Altro';
+var CATEGORIA_MAX_LENGTH=40;
+// Ordine alfabetico italiano: maiuscole/minuscole e accenti non contano,
+// numeri in ordine naturale ("Torta 2" prima di "Torta 10").
+var SCHEDE_COLLATOR=new Intl.Collator('it',{sensitivity:'base',numeric:true});
+function confrontaNomiIt(a,b){
+  a=a==null?'':String(a);b=b==null?'':String(b);
+  return SCHEDE_COLLATOR.compare(a,b)||(a<b?-1:a>b?1:0);
+}
+// Categoria da mostrare: '' per il valore tecnico o per un valore vuoto.
+function categoriaVisibile(cat){
+  var c=typeof cat==='string'?cat.trim():'';
+  return c&&SCHEDE_COLLATOR.compare(c,CATEGORIA_TECNICA)!==0?c:'';
+}
+// Categorie gia' usate dalle Schede (suggerimenti), senza il valore tecnico.
+function categorieUsate(){
+  var out=[];
+  S.recipes.filter(function(r){return!r.parentRecipeId;}).forEach(function(r){
+    var c=categoriaVisibile(r.category);
+    if(c&&!out.some(function(x){return SCHEDE_COLLATOR.compare(x,c)===0;}))out.push(c);
+  });
+  return out.sort(confrontaNomiIt);
+}
+// Valore da salvare per una scelta dello chef: vuoto -> valore tecnico; una
+// categoria gia' usata scritta in altro modo ("dolci") riprende la grafia
+// esistente, cosi' non nascono doppioni.
+function normalizzaCategoria(raw){
+  var t=String(raw==null?'':raw).replace(/\s+/g,' ').trim().slice(0,CATEGORIA_MAX_LENGTH).trim();
+  if(!t||SCHEDE_COLLATOR.compare(t,CATEGORIA_TECNICA)===0)return CATEGORIA_TECNICA;
+  return categorieUsate().find(function(c){return SCHEDE_COLLATOR.compare(c,t)===0;})||t;
+}
+function datalistCategorie(id){
+  return`<datalist id="${id}">${categorieUsate().map(function(c){return'<option value="'+escAttr(c)+'">';}).join('')}</datalist>`;
+}
+// Cambio della categoria dalla Scheda: solo il campo category della Scheda.
+function onSchedaCategoryChange(recipeId,val){
+  var r=R(recipeId);if(!r)return;
+  var cat=normalizzaCategoria(val);
+  if(cat===r.category||(cat===CATEGORIA_TECNICA&&!categoriaVisibile(r.category))){render();return;}
+  upRec(recipeId,function(x){return Object.assign({},x,{category:cat});});
+}
+// Vista dell'elenco Schede: 'alfabetica' (predefinita) o 'categorie'.
+// Preferenza di chi consulta, solo su questo dispositivo.
+function schedeVista(){
+  if(S.schedeVista)return S.schedeVista;
+  try{var v=localStorage.getItem('khub_schede_vista');if(v==='categorie'||v==='alfabetica')return v;}catch(e){}
+  return'alfabetica';
+}
+function setSchedeVista(v){
+  if(v!=='categorie'&&v!=='alfabetica')return;
+  S.schedeVista=v;
+  try{localStorage.setItem('khub_schede_vista',v);}catch(e){}
+  render();
+}
+
 function renderSidebar(){
   // Shell v3 — stesse 3 destinazioni della bottom bar mobile: Produzione,
   // Schede, LAB. MichelinAI e Profilo scollegate dalla navigazione primaria
@@ -8071,7 +8138,8 @@ function renderRicettaMadreV2(recipe){
     <div class="si-identita">
       ${S.renameEdit&&S.renameEdit.kind==='scheda'&&S.renameEdit.recipeId===recipe.id?renderRinominaForm('scheda',recipe.id,null,recipe.name)
         :`<div class="si-nome">${recipe.name} <button class="si-riga-btn" id="btn-rinomina-scheda" style="font-size:11px;vertical-align:middle" onclick="apriRinomina('scheda','${recipe.id}')" title="Correggi il nome della Scheda">Rinomina</button></div>`}
-      <div class="si-meta">${recipe.category}${recipe.department?' · '+recipe.department:''} — ${nRic} RIC · ${nAtt} ATT</div>
+      <div class="si-meta">${categoriaVisibile(recipe.category)?escAttr(categoriaVisibile(recipe.category))+' · ':''}${recipe.department||''} — ${nRic} RIC · ${nAtt} ATT</div>
+      <div class="si-categoria"><label for="si-categoria-input">Categoria</label><input id="si-categoria-input" type="text" list="si-categorie" maxlength="${CATEGORIA_MAX_LENGTH}" autocomplete="off" placeholder="Nessuna (facoltativa)" value="${escAttr(categoriaVisibile(recipe.category))}" onchange="onSchedaCategoryChange('${recipe.id}',this.value)" title="Facoltativa: scegli una categoria già usata o scrivine una nuova">${datalistCategorie('si-categorie')}</div>
       ${famiglieRicettaNomi.length?`<div class="si-famiglie">${famiglieRicettaNomi.map(n=>`<span class="si-famiglia-tag">${n}</span>`).join('')}</div>`:''}
     </div>`;
 
@@ -8207,26 +8275,33 @@ function renderHome(){
     :mainRecipesComplete;
   const famigliaAttivaNome=famigliaAttivaId?(S.families.find(f=>f.id===famigliaAttivaId)?.name||''):null;
 
-  // Raggruppamento per categoria, ordine alfabetico
+  // Elenco alfabetico A-Z (predefinito) oppure raggruppato per categoria
+  // (facoltativo); in entrambi i casi Schede in ordine alfabetico italiano.
+  const vista=schedeVista();
+  const ordinate=[...mainRecipes].sort((a,b)=>confrontaNomiIt(a.name,b.name));
   const perCategoria={};
-  mainRecipes.forEach(r=>{
-    const cat=r.category||'Altro';
-    if(!perCategoria[cat])perCategoria[cat]=[];
-    perCategoria[cat].push(r);
+  ordinate.forEach(r=>{
+    const cat=categoriaVisibile(r.category)||CATEGORIA_TECNICA;
+    const key=Object.keys(perCategoria).find(k=>SCHEDE_COLLATOR.compare(k,cat)===0)||cat;
+    if(!perCategoria[key])perCategoria[key]=[];
+    perCategoria[key].push(r);
   });
-  const categorie=Object.keys(perCategoria).sort((a,b)=>a.localeCompare(b));
+  // "Altro" (valore tecnico) sempre in fondo
+  const categorie=Object.keys(perCategoria).sort((a,b)=>(a===CATEGORIA_TECNICA)-(b===CATEGORIA_TECNICA)||confrontaNomiIt(a,b));
 
   const totRicette=mainRecipes.reduce((s,r)=>s+(r.labVersions||[]).length+(r.validatedVariants||[]).length,0);
 
   const headerHtml=`<div class="schede-header">
     <div class="schede-title">Schede</div>
     <div class="schede-accessi">
-      <button class="schede-accesso" id="schede-btn-filtra">FILTRA</button>
+      <button class="schede-accesso${vista==='alfabetica'?' attivo':''}" id="schede-vista-az" aria-pressed="${vista==='alfabetica'}" onclick="setSchedeVista('alfabetica')">A–Z</button>
       <span class="schede-accessi-sep"></span>
-      <button class="schede-accesso" id="schede-btn-famiglie">FAMIGLIE</button>
+      <button class="schede-accesso${vista==='categorie'?' attivo':''}" id="schede-vista-cat" aria-pressed="${vista==='categorie'}" onclick="setSchedeVista('categorie')">PER CATEGORIA</button>
+      <span class="schede-accessi-sep"></span>
+      <button class="schede-accesso" id="schede-btn-famiglie" title="Filtra le Schede per Famiglia Ricetta">FILTRA PER FAMIGLIA</button>
     </div>
   </div>
-  <div class="schede-count-globale">${categorie.length} CATEGORI${categorie.length===1?'A':'E'} · ${mainRecipes.length} SCHED${mainRecipes.length===1?'A':'E'} · ${totRicette} RICETT${totRicette===1?'A':'E'}</div>
+  <div class="schede-count-globale">${vista==='categorie'?`${categorie.length} CATEGORI${categorie.length===1?'A':'E'} · `:''}${mainRecipes.length} SCHED${mainRecipes.length===1?'A':'E'} · ${totRicette} RICETT${totRicette===1?'A':'E'}</div>
   ${famigliaAttivaNome?`<div class="schede-filtro-attivo">FAMIGLIA: ${famigliaAttivaNome} <button onclick="S.selectedFamily=null;render()">✕</button></div>`:''}`;
 
   if(mainRecipesComplete.length===0){
@@ -8240,32 +8315,39 @@ function renderHome(){
     </div>`;
   }
 
+  const riga=(r,conCategoria)=>{
+    const{nRic,nAtt}=censimento(r);
+    const cat=conCategoria?categoriaVisibile(r.category):'';
+    return `<button class="schede-riga" data-nav="${r.id}">
+            <span class="schede-riga-nome">${r.name}${cat?`<span class="schede-riga-cat">${escAttr(cat)}</span>`:''}</span>
+            <span class="schede-riga-censimento"><span class="schede-ric">${nRic} RIC</span> · <span class="schede-att ${nAtt>0?'attivo':'zero'}">${nAtt} ATT</span></span>
+          </button>`;
+  };
+  if(vista==='alfabetica'){
+    return `<div class="schede-env">${headerHtml}
+    <div class="schede-alfabetica">${ordinate.map(r=>riga(r,true)).join('')}</div>
+  </div>`;
+  }
   return `<div class="schede-env">${headerHtml}
     ${categorie.map(cat=>{
       const righe=perCategoria[cat];
       return `<div class="schede-cesura">
           <span class="schede-cesura-tacca"></span>
-          <span class="schede-cesura-nome">${cat.toUpperCase()}</span>
+          <span class="schede-cesura-nome">${escAttr(cat.toUpperCase())}</span>
           <span class="schede-cesura-conteggio">${righe.length} SCHED${righe.length===1?'A':'E'}</span>
         </div>
-        ${righe.map(r=>{
-          const{nRic,nAtt}=censimento(r);
-          return `<button class="schede-riga" data-nav="${r.id}">
-            <span class="schede-riga-nome">${r.name}</span>
-            <span class="schede-riga-censimento"><span class="schede-ric">${nRic} RIC</span> · <span class="schede-att ${nAtt>0?'attivo':'zero'}">${nAtt} ATT</span></span>
-          </button>`;
-        }).join('')}`;
+        ${righe.map(r=>riga(r,false)).join('')}`;
     }).join('')}
-    <div class="schede-fine">FINE PATRIMONIO</div>
   </div>`;
 }
+
 
 // Picker Famiglie/Filtra per l'ambiente Schede — D-POP v2.2. Riusa dati e stato
 // già esistenti (S.families, S.variantFamilies, S.selectedFamily): nessuna
 // nuova business logic, solo una presentazione coerente col Visual System al
-// posto dello schermo legacy separato. "Filtra" e "Famiglie" aprono oggi lo
-// stesso pannello: l'unico criterio di filtro reale disponibile sulle Schede
-// è la Famiglia — non ho inventato un secondo criterio che non esiste.
+// posto dello schermo legacy separato. Un solo accesso, "Filtra per
+// famiglia": la Famiglia e' l'unico criterio di filtro reale sulle Schede
+// (le categorie sono un'altra cosa: raggruppamento facoltativo, vista A-Z).
 function renderSchedeFamigliePicker(){
   return `<div class="overlay">
     <div class="modal modal-split" style="max-width:420px">
@@ -8390,12 +8472,10 @@ function renderPreview(){
         <input class="form-input" id="prev-name" value="${p.name||''}">
       </div>
       <div class="form-group">
-        <label class="form-label">${destinazioneEsistente?'Categoria della Scheda':'Categoria'}</label>
+        <label class="form-label">${destinazioneEsistente?'Categoria della Scheda':'Categoria (facoltativa)'}</label>
         ${destinazioneEsistente?
           `<div class="form-input" style="background:var(--cream);color:var(--mid);cursor:not-allowed">${schedaScelta?schedaScelta.category:'—'}</div>`
-          :`<select class="form-input" id="prev-cat">
-            ${['Dolci','Salato','Basi','Altro'].map(c=>`<option ${p.category===c?'selected':''}>${c}</option>`).join('')}
-          </select>`}
+          :`<input class="form-input" id="prev-cat" type="text" list="prev-categorie" maxlength="${CATEGORIA_MAX_LENGTH}" autocomplete="off" placeholder="Nessuna (facoltativa)" value="${escAttr(categoriaVisibile(p.category))}">${datalistCategorie('prev-categorie')}`}
       </div>
     </div>
     <div class="form-row" style="margin-bottom:16px">
@@ -9640,19 +9720,14 @@ function renderProductionHomeRecipesBlock(){
 function renderAllActiveRecipes(){
   var all=activeRecipeEntries(S.recipes);
   if(!all.length)return'<div class="ph-empty">Nessuna Ricetta attiva disponibile.</div>';
-  var found=filterActiveRecipeEntries(all,S.produzioneHome.recipeQuery);
-  var perCategoria={};
-  found.forEach(function(e){var cat=e.recipe.category||'Altro';(perCategoria[cat]=perCategoria[cat]||[]).push(e);});
-  var categorie=Object.keys(perCategoria).sort(function(a,b){return a.localeCompare(b);});
+  // Un unico elenco A-Z (ordine alfabetico italiano): Ricetta, poi Scheda.
+  var found=filterActiveRecipeEntries(all,S.produzioneHome.recipeQuery).slice().sort(function(a,b){
+    return confrontaNomiIt(a.variant.name,b.variant.name)||confrontaNomiIt(a.recipe.name,b.recipe.name);
+  });
   return renderProductionRecipeSearch()
     +`<div class="prod-count">${found.length} RICETT${found.length===1?'A ATTIVA':'E ATTIVE'}</div>`
     +(!found.length?'<div class="ph-empty">Nessuna Ricetta attiva trovata.</div>':'')
-    +categorie.map(function(cat){
-      return`<div class="prod-cesura">
-          <span class="prod-cesura-notch"></span>
-          <span class="prod-cesura-nome">${escAttr(cat.toUpperCase())}</span>
-        </div>`+perCategoria[cat].map(function(e){return renderActiveRecipeRow(e,true);}).join('');
-    }).join('');
+    +found.map(function(e){return renderActiveRecipeRow(e,true);}).join('');
 }
 
 function renderAttive(){
@@ -10038,7 +10113,7 @@ function bindEvents(){
   if(btnNew)btnNew.addEventListener('click',()=>{
     const id='r'+Date.now();
     const lab=makeDefaultLab(id,'Nuova Scheda');
-    const r={id,name:'Nuova Scheda',category:'Dolci',department:'Cucina',validatedVariants:[],currentLabIdx:0,labVersions:[lab],mediaUrl:null,videoUrl:null,notes:''};
+    const r={id,name:'Nuova Scheda',category:CATEGORIA_TECNICA,department:'Cucina',validatedVariants:[],currentLabIdx:0,labVersions:[lab],mediaUrl:null,videoUrl:null,notes:''};
     S.recipes=[...S.recipes,r];S.selectedId=id;S.view='recipe';S.mode='lab';render();
     saveToSupabase(r);
   });
@@ -10130,7 +10205,7 @@ function bindEvents(){
     const pp=document.getElementById('prev-portions');
     const pg=document.getElementById('prev-gpp');
     if(pn&&S.loadPreview)S.loadPreview.name=pn.value||S.loadPreview.name;
-    if(pc&&S.loadPreview)S.loadPreview.category=pc.value;
+    if(pc&&S.loadPreview)S.loadPreview.category=normalizzaCategoria(pc.value);
     // FIX 2C (C5): vuoto = non impostato; un valore non valido blocca il salvataggio.
     const vp=pp?validateLabProductionTarget('portions',pp.value):null;
     const vg=pg?validateLabProductionTarget('gpp',pg.value):null;
@@ -10265,8 +10340,6 @@ function bindEvents(){
 
   // Schede — Filtra/Famiglie (D-POP v2.2): oggi aprono lo stesso pannello,
   // l'unico criterio di filtro reale disponibile è la Famiglia.
-  const schedeBtnFiltra=document.getElementById('schede-btn-filtra');
-  if(schedeBtnFiltra)schedeBtnFiltra.addEventListener('click',()=>{S.showSchedeFamiglie=true;render();});
   const schedeBtnFamiglie=document.getElementById('schede-btn-famiglie');
   if(schedeBtnFamiglie)schedeBtnFamiglie.addEventListener('click',()=>{S.showSchedeFamiglie=true;render();});
 

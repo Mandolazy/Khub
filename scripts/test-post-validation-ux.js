@@ -220,9 +220,9 @@ const EXTRA = ['function getStructuredSteps(legacySteps,stepsV2)', 'function par
   'async function confermaRinominaRicetta(recipeId,variantId)', 'function renderRinominaForm(kind,recipeId,variantId,valore)', 'function onRecipeNameChange(recipeId,val)',
   'function renderLabRecipe(recipe)', 'function allVariants(recipe)', 'function findVariantById(variantId)', 'function parseDataItaliana(str)',
   'function labTargetIsSet(value)', 'function targetDisplay(value)', 'function targetSummaryShort(portions,gpp)',
-  'function correggibileInPagina(recipe,vv)', 'function programmaFineEvidenzaValidata(variantId)', 'function renderRicettaMadreV2(recipe)'];
+  'function correggibileInPagina(recipe,vv)', 'function programmaFineEvidenzaValidata(variantId)', 'function confrontaNomiIt(a,b)', 'function categoriaVisibile(cat)', 'function categorieUsate()', 'function datalistCategorie(id)', 'function renderRicettaMadreV2(recipe)'];
 const defined = n => new RegExp('function ' + n.replace(/^(async )?function /, '').split('(')[0] + '\\(').test(SRC);
-const SRC_UX = SRC + '\n' + EXTRA.filter(m => !defined(m)).map(extractFunction).join('\n')
+const SRC_UX = SRC + '\n' + EXTRA.filter(m => !defined(m)).map(extractFunction).join('\n') + '\n' + html.match(/var CATEGORIA_TECNICA='Altro';[\s\S]*?var SCHEDE_COLLATOR=[^\n]*/)[0]
   + '\n' + html.match(/var EVIDENZA_VALIDATA_MS=\d+;/)[0].replace(/\d+/, '30'); // durata ridotta per il test
 function makeClient2(fetchImpl, opts = {}) {
   const log = { toasts: [] };

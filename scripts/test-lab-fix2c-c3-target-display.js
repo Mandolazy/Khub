@@ -160,8 +160,8 @@ const SCHEDA_SRC = [
   'function chooseConversionAskUnit(unit)', 'function resolveKnownProductionConversionFact(normalizedName,unit)', 'function normalizeIngredientName(name)',
   'function normalizeDeclaredYield(qty,unit)', 'function classifyYieldUnit(unit)', 'function computeFormulationWeights(ingredients,resolveFact)', 'function deriveYieldPerUnit(weights,declared)',
   'function formatQtyDisplay(value)', 'function declaredYieldState(v)', 'function declaredYieldInputText(raw)', 'function declaredYieldLabel(qty,unit)', 'function labGrams(x)',
-  'function renderActiveYieldSection(recipe,v)', 'function findDependentsOfVariant(variantId)', 'function prontaRiapribileMotivo(recipe,vv)', 'function correggibileInPagina(recipe,vv)', 'function renderRicettaMadreV2(recipe)',
-].map(extractFunction).concat(html.match(/var SESSION_SCALING_[A-Z_]+=\{[^}]*\};/g), [
+  'function renderActiveYieldSection(recipe,v)', 'function findDependentsOfVariant(variantId)', 'function prontaRiapribileMotivo(recipe,vv)', 'function correggibileInPagina(recipe,vv)', 'function confrontaNomiIt(a,b)', 'function categoriaVisibile(cat)', 'function categorieUsate()', 'function normalizzaCategoria(raw)', 'function datalistCategorie(id)', 'function renderRicettaMadreV2(recipe)',
+].map(extractFunction).concat([html.match(/var CATEGORIA_TECNICA='Altro';[\s\S]*?var SCHEDE_COLLATOR=[^\n]*/)[0]]).concat(html.match(/var SESSION_SCALING_[A-Z_]+=\{[^}]*\};/g), [
   html.match(/var DECLARED_YIELD_UNIT_MAX_LENGTH=\d+;/)[0], html.match(/var DECLARED_YIELD_MEASURE_UNITS=\{[\s\S]*?\n\};/)[0], html.match(/var DECLARED_YIELD_UNSUPPORTED_UNITS=\[[^\]]*\];/)[0],
 ]).join('\n');
 function makeSchedaClient(recipes) {

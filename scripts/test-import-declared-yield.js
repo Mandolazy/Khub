@@ -167,14 +167,14 @@ const SRC = [
   'function conversionNameGroup(normalizedName)', 'function conversionNameAliases(normalizedName)', 'function conversionNameGroupMarker(normalizedName)', 'function conversionConflictKey(normalizedName,fromUnit,toUnit)', 'function selectConversionFacts(conversions)', 'function conversionConflictNote(key)',
   'function parseSteps(raw)', 'function getStructuredSteps(legacySteps,stepsV2)', 'function stepsV2ToLegacyArray(stepsV2)', 'function makeDefaultLab(recipeId,name)',
   'function buildValidatedVariantPayload(recipeId,vv)', 'async function saveToSupabase(recipe)',
-  'async function extractRecipe()', 'function savePreview()', 'function renderPreview()',
+  'function confrontaNomiIt(a,b)', 'function categoriaVisibile(cat)', 'function categorieUsate()', 'function normalizzaCategoria(raw)', 'function datalistCategorie(id)', 'async function extractRecipe()', 'function savePreview()', 'function renderPreview()',
   // Importazione della resa dichiarata: dipendenze di estrazione, anteprima e salvataggio.
   'function escAttr(s)', 'function formatQtyDisplay(value)', 'function declaredYieldErrorMessage(error)', 'function importYieldText(t)',
   'function importDeclaredYield(raw,fonte)', 'function importYieldFields(value)', 'function importYieldNote(note,dy)', 'function renderImportYieldFields(dy,prefix,label)',
   // Percentuali dell'anteprima: pesi in grammi con le regole condivise.
   'function computeFormulationWeights(ingredients,resolveFact)', 'function sessionScalingUnitFamily(unit)', 'function sessionScalingGenericFamilyTable(family)',
   'function resolveSessionScalingConversionToGrams(unit,conversionFact)', 'function chooseConversionAskUnit(unit)', 'function resolveKnownProductionConversionFact(normalizedName,unit)',
-].map(extractFunction).concat(html.match(/var SESSION_SCALING_[A-Z_]+=\{[^}]*\};/g), [html.match(/var IMPORT_YIELD_PORTION_ALIASES=\[[^\]]*\];/)[0], 
+].map(extractFunction).concat([html.match(/var CATEGORIA_TECNICA='Altro';[\s\S]*?var SCHEDE_COLLATOR=[^\n]*/)[0]]).concat(html.match(/var SESSION_SCALING_[A-Z_]+=\{[^}]*\};/g), [html.match(/var IMPORT_YIELD_PORTION_ALIASES=\[[^\]]*\];/)[0], 
   html.match(/var DECLARED_YIELD_UNIT_MAX_LENGTH=\d+;/)[0], html.match(/var DECLARED_YIELD_MEASURE_UNITS=\{[\s\S]*?\n\};/)[0],
   html.match(/var DECLARED_YIELD_UNSUPPORTED_UNITS=\[[^\]]*\];/)[0], html.match(/var LAB_TARGET_PORTIONS_MAX=\d+;/)[0], html.match(/const UNITS = \[[^\]]*\];/)[0],
 ]).join('\n');
@@ -236,7 +236,7 @@ function makeClient(fetchImpl, aiReply, tab = 'testo') {
   c.fillDomFromPreview = () => { // ogni campo dell'anteprima come lo vede il gestore
     const h = c.renderPreview();
     for (const m of h.matchAll(/<input[^>]*\sid="([^"]+)"[^>]*\svalue="([^"]*)"/g)) dom[m[1]] = { value: dec(m[2]) };
-    dom['prev-cat'] = { value: (h.match(/<option selected>([^<]*)<\/option>/) || [, 'Altro'])[1] };
+    dom['prev-cat'] = { value: (h.match(/id="prev-cat"[^>]*value="([^"]*)"/) || [, ''])[1] };
     return h;
   };
   // Pulsanti "Usa min/max" come nel browser: onclick con i data-attributi del pulsante.

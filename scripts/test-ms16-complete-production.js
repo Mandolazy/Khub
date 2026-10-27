@@ -108,7 +108,7 @@ const CLIENT_SRC = [
   'function openProductionHomeSection(section)', 'function closeProductionHomeSection()', 'function onProductionRecipeSearch(value)',
   'function openActiveRecipe(recipeId,variantId)', 'function renderActiveRecipeRow(entry,withShare)',
   'function renderProductionHomeSessionsBlock(section,limit)', 'function renderProductionRecipeSearch()',
-  'function renderProductionHomeRecipesBlock()', 'function renderAllActiveRecipes()', 'function renderAttive()',
+  'function renderProductionHomeRecipesBlock()', 'function confrontaNomiIt(a,b)', 'function categoriaVisibile(cat)', 'function categorieUsate()', 'function normalizzaCategoria(raw)', 'function datalistCategorie(id)', 'function renderAllActiveRecipes()', 'function renderAttive()',
   'async function avviaProduzione(sessionId)', 'function applySessionLifecycleRow(sess,row)', 'function apriSessioneOperativa(sessionId,returnView)',
   // MS12/MS13/MS14
   'async function loadSessionIngredientState(sessionId)', 'async function toggleSessionIngredient(sessionId,itemKey)',
@@ -130,7 +130,7 @@ const CLIENT_SRC = [
   'function onSessionYieldInput(sessionId,field,value)', 'function requestCompleteSession(sessionId)', 'function cancelCompleteSession(sessionId)',
   'async function confirmCompleteSession(sessionId)', 'function renderSessionCompletionSection(sess)',
   'function goToNewProductionSession(sessionId)', 'function isHighlightedProductionSession(id)', 'function revealProductionHighlight()',
-].map(extractFunction).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0], html.match(/var PRODUCTION_HOME_LIMIT=\d+;/)[0]]).join('\n');
+].map(extractFunction).concat([html.match(/var CATEGORIA_TECNICA='Altro';[\s\S]*?var SCHEDE_COLLATOR=[^\n]*/)[0]]).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0], html.match(/var PRODUCTION_HOME_LIMIT=\d+;/)[0]]).join('\n');
 
 const SNAPSHOT = {
   snapshotVersion: 1, recipe: { recipeName: 'Risotto', variantName: 'Porcini' },

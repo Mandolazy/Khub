@@ -97,11 +97,11 @@ const CLIENT_SRC = [
   'function renderPendingSessionCard(sess)', 'function renderInProgressSessionCard(sess)', 'function selectProductionHomeSessions(sessions,section,context)',
   'function activeRecipeEntries(recipes)', 'function rankActiveRecipeEntries(entries,sessions)', 'function filterActiveRecipeEntries(entries,query)',
   'function renderActiveRecipeRow(entry,withShare)', 'function renderProductionHomeSessionsBlock(section,limit)', 'function renderProductionRecipeSearch()',
-  'function renderProductionHomeRecipesBlock()', 'function renderAllActiveRecipes()', 'function renderAttive()', 'function openProductionHomeSection(section)',
+  'function renderProductionHomeRecipesBlock()', 'function confrontaNomiIt(a,b)', 'function categoriaVisibile(cat)', 'function categorieUsate()', 'function normalizzaCategoria(raw)', 'function datalistCategorie(id)', 'function renderAllActiveRecipes()', 'function renderAttive()', 'function openProductionHomeSection(section)',
   'function closeProductionHomeSection()', 'function syncProductionHomeLoad()', 'async function avviaProduzione(sessionId)', 'function applySessionLifecycleRow(sess,row)',
   'function apriSessioneOperativa(sessionId,returnView)',
   'function goToNewProductionSession(sessionId)', 'function isHighlightedProductionSession(id)', 'function revealProductionHighlight()',
-].map(extractFunction).concat(html.match(/var SESSION_SCALING_[A-Z_]+=\{[^}]*\};/g)).concat([html.match(/var PRODUCTION_HOME_LIMIT=\d+;/)[0]]).join('\n');
+].map(extractFunction).concat([html.match(/var CATEGORIA_TECNICA='Altro';[\s\S]*?var SCHEDE_COLLATOR=[^\n]*/)[0]]).concat(html.match(/var SESSION_SCALING_[A-Z_]+=\{[^}]*\};/g)).concat([html.match(/var PRODUCTION_HOME_LIMIT=\d+;/)[0]]).join('\n');
 
 
 function recipes() {

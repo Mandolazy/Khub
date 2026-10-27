@@ -94,7 +94,7 @@ const CLIENT_SRC = [
   'function openProductionHomeSection(section)', 'function closeProductionHomeSection()', 'function onProductionRecipeSearch(value)',
   'function openActiveRecipe(recipeId,variantId)', 'function renderActiveRecipeRow(entry,withShare)',
   'function renderProductionHomeSessionsBlock(section,limit)', 'function renderProductionRecipeSearch()',
-  'function renderProductionHomeRecipesBlock()', 'function renderAllActiveRecipes()',
+  'function renderProductionHomeRecipesBlock()', 'function confrontaNomiIt(a,b)', 'function categoriaVisibile(cat)', 'function categorieUsate()', 'function normalizzaCategoria(raw)', 'function datalistCategorie(id)', 'function renderAllActiveRecipes()',
   'async function avviaProduzione(sessionId)', 'function applySessionLifecycleRow(sess,row)', 'function apriSessioneOperativa(sessionId,returnView)',
   'async function loadSessionIngredientState(sessionId)', 'async function toggleSessionIngredient(sessionId,itemKey)',
   'async function loadSessionStepState(sessionId)', 'async function toggleSessionStep(sessionId,itemKey)', 'function formatStepDurationLabel(seconds)',
@@ -122,7 +122,7 @@ const CLIENT_SRC = [
   'function formatHistoryWhen(iso)', 'function historyVariantAddsInfo(recipeName,variantName)', // MS17b.1
   'function renderHistoryCount(count)', 'function renderHistoryCard(r)', 'function renderStoricoProduzioni()',
   'function goToNewProductionSession(sessionId)', 'function isHighlightedProductionSession(id)', 'function revealProductionHighlight()',
-].map(extractFunction).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0], html.match(/var PRODUCTION_HOME_LIMIT=\d+;/)[0]]).join('\n');
+].map(extractFunction).concat([html.match(/var CATEGORIA_TECNICA='Altro';[\s\S]*?var SCHEDE_COLLATOR=[^\n]*/)[0]]).concat([html.match(/var SESSION_NOTE_MAX_LENGTH=\d+;/)[0], html.match(/var PRODUCTION_HOME_LIMIT=\d+;/)[0]]).join('\n');
 
 // "Adesso" per lo Storico: 7 ottobre 2026, 12:00 a Roma.
 const NOW = new Date('2026-10-07T10:00:00.000Z');
