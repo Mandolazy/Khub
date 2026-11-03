@@ -410,7 +410,8 @@ const box = (h, cls) => { const m = h.match(new RegExp('class="' + cls + '"[^>]*
       'function onLabDeclaredYield(recipeId,field,value)': '7bbbd369b9438f26', 'function toggleActiveV2(recipeId,variantId,currentActive)': 'ca8f22881e9ba641',
       'async function confirmValidate()': '84c902e4f4cba6ae', 'function validateLabProductionTarget(field,value)': 'fefbd04eed656496',
       'function computeRecipeWeightSummary(recipe,vv)': 'beac67cc93eee93b', 'function onIngUnit(recipeId,ingId,val)': '9839d1f8237ed53e',
-      'function renderProdRecipe(recipe)': '8a9ec67ee54bfdd4', 'function computeLabUnitConversion(ing,toUnit,anchor,resolveFact)': 'dbf8adeb56a128a8',
+      // Finalizzazione D3: solo il ramo S.uiD3 di "Elimina" (classico identico a main, test-preview-direzione-3 P10).
+      'function renderProdRecipe(recipe)': '3c3eaeaff0e02ea8', 'function computeLabUnitConversion(ing,toUnit,anchor,resolveFact)': 'dbf8adeb56a128a8',
       'function convertIngredientQty(qty,fromUnit,toUnit,ingredientName,resolveFact)': 'a112b9ab70b1c60c', 'function resolveConfirmedLabConversionFact(normalizedName,unit)': 'abae9dfb0a09fae3', 'async function confirmLabConversion(rawValue)': '5eaca20d0914bdc8', 'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)': '9df6758db87b12b1',
     };
     for (const [m, h] of Object.entries(PROTETTE)) assert.strictEqual(sha(extractFunction(m)), h, m);

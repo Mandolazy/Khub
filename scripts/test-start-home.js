@@ -28,7 +28,7 @@ function extractFunction(startMarker) {
 
 (async () => {
   await test('onboarding: "Inizia" chiude il popup, ricorda l\'onboarding e porta alla Home (app-home)', () => {
-    const markup = new Function(extractFunction('function renderOnboarding()') + '\nreturn renderOnboarding();')();
+    const markup = new Function('S', extractFunction('function renderOnboarding()') + '\nreturn renderOnboarding();')({ uiD3: false });
     const m = markup.match(/<button[^>]*onclick="([^"]*)"[^>]*>\s*Inizia/);
     assert.ok(m, 'pulsante Inizia trovato');
     const S = { view: 'app-home', showOnboarding: true };

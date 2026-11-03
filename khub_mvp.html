@@ -1244,6 +1244,70 @@ body.ui-d3 :is(.prod-header [onclick^="openMandaInProduzione"],[onclick^="confir
 /* Finestre e messaggi */
 body.ui-d3 .modal{border-radius:14px;border:1px solid var(--d3-bordo);}
 body.ui-d3 :is(.toast,.toast-action){background:var(--d3-ink);font-family:inherit;}
+/* Finalizzazione — pulsanti principali nel colore dell'ambiente in cui si trovano
+   (LAB verde, Schede ocra, Produzione terracotta: contrasto col bianco >= 4.5:1) */
+body.ui-d3{--d3-primario:var(--d3-terra);}
+body.ui-d3[data-d3-amb="lab"]{--d3-primario:var(--d3-amb-lab);}
+body.ui-d3[data-d3-amb="schede"]{--d3-primario:var(--d3-amb-schede);}
+body.ui-d3[data-d3-amb="produzione"]{--d3-primario:var(--d3-amb-produzione);}
+body.ui-d3 .d3-btn-primary{background:var(--d3-primario);border-color:var(--d3-primario);}
+body.ui-d3 .d3-btn-primary:is(:hover,:active){background:var(--d3-primario);border-color:var(--d3-primario);filter:brightness(.88);}
+body.ui-d3 .btn-primary:not(.d3-lab *){background:var(--d3-primario);}
+/* Selettore LAB / Produzione della Ricetta aperta: colori dei due ambienti */
+body.ui-d3 .mode-switcher{background:var(--d3-card);border-color:var(--d3-bordo);}
+body.ui-d3 .mode-btn{font-family:inherit;font-size:13px;font-weight:600;color:var(--d3-ink2);min-height:32px;}
+body.ui-d3 .mode-btn.lab-active{background:var(--d3-amb-lab);color:#fff;}
+body.ui-d3 .mode-btn.prod-active{background:var(--d3-amb-produzione);color:#fff;}
+/* Confronta Ricette */
+.d3-confronto-testa{display:flex;flex-direction:column;gap:6px;margin-bottom:18px;}
+.d3-confronto-sub{font-size:14px;color:var(--d3-ink2);}
+body.ui-d3 .confronto-select{background:var(--d3-card);border:1.5px solid var(--d3-bordo);border-radius:8px;font-size:15px;color:var(--d3-ink);min-height:44px;}
+body.ui-d3 .confronto-select:focus{border-color:var(--d3-ink);}
+body.ui-d3 .confronto-col{background:var(--d3-card);border:1px solid var(--d3-bordo);border-radius:12px;}
+body.ui-d3 .confronto-col-header,body.ui-d3 .confronto-col-header:is(.col-a,.col-b){font-family:'Newsreader',Georgia,serif;font-size:19px;font-weight:500;background:var(--d3-bar);color:var(--d3-ink);border-bottom:1px solid var(--d3-bordo);padding:14px 16px;}
+body.ui-d3 .confronto-ing-row{font-size:14px;padding:10px 16px;border-bottom-color:var(--d3-bordo);}
+body.ui-d3 .confronto-ing-name{color:var(--d3-ink);}
+body.ui-d3 .confronto-ing-qty{color:var(--d3-ink2);font-variant-numeric:tabular-nums;}
+body.ui-d3 .confronto-ing-pct{color:var(--d3-grigio);font-size:12px;font-variant-numeric:tabular-nums;}
+body.ui-d3 .confronto-ing-row.diff{background:var(--d3-amb-schede-tinta);}
+body.ui-d3 .confronto-ing-row.diff .confronto-ing-qty{color:var(--d3-amb-schede);}
+body.ui-d3 .confronto-legend{font-size:13px;color:var(--d3-ink2);}
+body.ui-d3 .confronto-legend-dot{background:var(--d3-amb-schede-tinta);border-color:var(--d3-amb-schede);}
+body.ui-d3 .confronto-empty{color:var(--d3-ink2);font-size:14px;}
+/* Ricerca globale */
+.d3-ricerca-lista{padding:0;overflow:hidden;}
+.d3-ricerca-riga{display:flex;align-items:center;gap:14px;width:100%;background:none;border:none;border-bottom:1px solid var(--d3-bordo);padding:14px 18px;min-height:60px;text-align:left;font:inherit;color:var(--d3-ink);cursor:pointer;}
+.d3-ricerca-riga:last-child{border-bottom:none;}
+.d3-ricerca-riga:hover{background:var(--d3-sabbia);}
+.d3-ricerca-ricetta{padding-left:68px;}
+.d3-ric-icona{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--amb-tinta);color:var(--amb);flex-shrink:0;}
+.d3-ric-icona svg{width:20px;height:20px;}
+.d3-ricerca-testo{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px;}
+.d3-ricerca-titolo{font-family:'Newsreader',Georgia,serif;font-size:19px;line-height:1.2;}
+.d3-ricerca-meta{font-size:13px;color:var(--d3-ink2);display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.d3-ricerca-freccia{color:var(--d3-grigio);font-size:22px;line-height:1;}
+@media(max-width:600px){.d3-ricerca-riga{padding:12px 14px;gap:12px;}.d3-ricerca-ricetta{padding-left:14px;}}
+/* Benvenuto */
+body.ui-d3 .onboarding-modal.d3-benvenuto{background:var(--d3-card);border:1px solid var(--d3-bordo);border-radius:14px;padding:28px;max-width:420px;font-family:inherit;}
+.d3-benvenuto-titolo{font-size:32px;font-weight:500;line-height:1.15;color:var(--d3-ink);text-align:center;margin:0;}
+.d3-benvenuto-sub{text-align:center;color:var(--d3-ink2);font-size:14px;margin:6px 0 20px;}
+.d3-benvenuto-passo{display:flex;gap:14px;align-items:flex-start;padding:12px 0;border-top:1px solid var(--d3-bordo);}
+.d3-benvenuto-passo strong{display:block;font-size:15px;color:var(--amb);margin-bottom:2px;}
+.d3-benvenuto-passo>span:last-child>span{display:block;font-size:14px;line-height:1.4;color:var(--d3-ink2);}
+.d3-benvenuto-icona{width:40px;height:40px;border-radius:10px;background:var(--amb-tinta);color:var(--amb);display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.d3-benvenuto-icona svg{width:22px;height:22px;}
+.d3-benvenuto-inizia{width:100%;margin-top:16px;min-height:48px;font-size:16px;}
+/* Ricetta in Produzione: l'eliminazione della Ricetta e' separata dalle azioni di produzione */
+.d3-prod-gestione{display:flex;align-items:center;justify-content:space-between;gap:8px 16px;flex-wrap:wrap;margin-top:16px;padding-top:10px;border-top:1px solid var(--d3-bordo);font-size:12px;color:var(--d3-ink2);}
+.d3-testo-pericolo{color:#9B2C1F;font-size:13px;}
+/* Segnaposto Profilo e MichelinAI */
+body.ui-d3 .d3-segnaposto{background:var(--d3-card);border:1px solid var(--d3-bordo);border-radius:12px;}
+body.ui-d3 .d3-segnaposto>div:first-of-type{font-family:'Newsreader',Georgia,serif;font-size:30px !important;font-weight:500 !important;color:var(--d3-ink) !important;}
+body.ui-d3 .d3-segnaposto>div:last-of-type{font-size:14px !important;color:var(--d3-ink2) !important;}
+/* Schede del LAB scorrevoli: sfumatura sul lato dove c'e' altro contenuto */
+.d3-scorre-dx{-webkit-mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(to right,#000 calc(100% - 40px),transparent);}
+.d3-scorre-sx{-webkit-mask-image:linear-gradient(to right,transparent,#000 40px);mask-image:linear-gradient(to right,transparent,#000 40px);}
+.d3-scorre-sx.d3-scorre-dx{-webkit-mask-image:linear-gradient(to right,transparent,#000 40px,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(to right,transparent,#000 40px,#000 calc(100% - 40px),transparent);}
 @media(max-width:768px){
   body.ui-d3 .shell{grid-template-rows:52px auto minmax(0,1fr) 56px;}
   body.ui-d3 .d3-home-grid{grid-template-columns:1fr;gap:10px;}
@@ -8459,12 +8523,18 @@ function renderConfronto(recipe){
     </div>`;
   }
 
+  const intestazione=S.uiD3
+    ?`<div class="d3-confronto-testa">
+    <div class="d3-crumb"><button onclick="S.view='home';render()">Schede</button> › <button onclick="S.view='ricetta-madre-v2';render()">${d3Esc(recipe.name)}</button></div>
+    <h1 class="d3-h1 d3-serif">Confronta Ricette</h1>
+    <div class="d3-confronto-sub">${varianti.length} Ricett${varianti.length===1?'a':'e'} della Scheda · ★ = Attiva</div>
+  </div>`:null;
   return `
-  <div class="confronto-header">
+  ${intestazione||`<div class="confronto-header">
     <button onclick="S.view='ricetta-madre-v2';render()" style="background:rgba(255,255,255,0.15);border:none;color:white;border-radius:var(--r-sm);padding:5px 10px;font-family:inherit;font-size:12px;cursor:pointer;margin-bottom:12px"><i class="ti ti-arrow-left"></i> ${recipe.name}</button>
     <div class="confronto-title"><i class="ti ti-columns"></i> Confronta Ricette attive</div>
     <div class="confronto-sub">${varianti.length} Ricett${varianti.length===1?'a attiva':'e attive'} disponibili</div>
-  </div>
+  </div>`}
 
   <div class="confronto-selectors">
     <select class="confronto-select" onchange="S.confrontoA=this.value||null;render()">
@@ -8797,6 +8867,14 @@ function renderSchedeFamigliePicker(){
   </div>`;
 }
 
+// Destinazione di un risultato della ricerca globale (grafica classica e Direzione 3).
+function searchResultOnclick(r){
+  return r.type==="family"
+    ? `S.selectedFamily='${r.id}';S.homeTab='prod';S.showSearch=false;S.searchQuery='';S.view='home';render()`
+    : r.type==="variant"
+      ? `S.selectedId='${r.id}';S.selectedVariantId='${r.variantId}';S.mode='produzione';S.view='recipe';S.showSearch=false;S.searchQuery='';render()`
+      : `S.selectedId='${r.id}';S.view='ricetta-madre-v2';S.showSearch=false;S.searchQuery='';render()`;
+}
 function renderSearch(query){
   var q=query.toLowerCase();
   var results=[];
@@ -8805,7 +8883,7 @@ function renderSearch(query){
     if(matchRecipe)results.push({type:"recipe",name:r.name,meta:r.category,id:r.id,emoji:catEmoji(r.category)});
     r.validatedVariants.forEach(function(vv){
       if(vv.name.toLowerCase().includes(q)||r.name.toLowerCase().includes(q)){
-        results.push({type:"variant",name:r.name,meta:"Ricetta attiva: "+vv.name,id:r.id,variantId:vv.id,emoji:catEmoji(r.category)});
+        results.push({type:"variant",name:r.name,meta:"Ricetta attiva: "+vv.name,id:r.id,variantId:vv.id,emoji:catEmoji(r.category),variante:vv});
       }
     });
   });
@@ -8815,16 +8893,13 @@ function renderSearch(query){
   // Deduplica
   var seen={};
   results=results.filter(function(r){var k=r.type+r.id+(r.variantId||"");if(seen[k])return false;seen[k]=true;return true;});
+  if(S.uiD3)return renderRicercaD3(query,results);
   if(results.length===0)return `<div class="card" style="text-align:center;padding:32px;color:var(--mid)"><i class="ti ti-search" style="font-size:32px;display:block;margin-bottom:12px"></i>Nessun risultato per "<strong>${query}</strong>"</div>`;
   return `<div class="card" style="padding:0;">
     <div class="recipe-list-header">Risultati per "${query}" (${results.length})</div>
     <div class="search-results">
       ${results.map(r=>{
-        var onclick=r.type==="family"
-          ? `S.selectedFamily='${r.id}';S.homeTab='prod';S.showSearch=false;S.searchQuery='';S.view='home';render()`
-          : r.type==="variant"
-            ? `S.selectedId='${r.id}';S.selectedVariantId='${r.variantId}';S.mode='produzione';S.view='recipe';S.showSearch=false;S.searchQuery='';render()`
-            : `S.selectedId='${r.id}';S.view='ricetta-madre-v2';S.showSearch=false;S.searchQuery='';render()`;
+        var onclick=searchResultOnclick(r);
         return `<div class="search-result-item" onclick="${onclick}">
           <div style="width:36px;height:36px;border-radius:50%;background:var(--cream);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">${r.emoji}</div>
           <div style="flex:1"><div class="search-result-name">${r.name}</div><div class="search-result-meta">${r.meta}</div></div>
@@ -9621,9 +9696,10 @@ function renderProdRecipe(recipe){
       <button class="btn btn-ghost btn-sm" onclick="openFamilyManager('${vv.id}')" title="Famiglie di questa Ricetta"><i class="ti ti-tags"></i> Famiglie Ricetta</button>
       <button class="btn btn-ghost btn-sm" onclick="shareVariant('${recipe.id}','${vv.id}')" title="Condividi"><i class="ti ti-share"></i> Condividi</button>
       <button class="btn btn-ghost btn-sm" onclick="exportPDF('${recipe.id}','${vv.id}')" title="Scarica PDF"><i class="ti ti-file-type-pdf"></i> PDF</button>
-      <button class="btn btn-ghost-danger btn-sm" style="margin-left:auto" onclick="deleteVariant('${recipe.id}','${vv.id}')" title="Elimina Ricetta"><i class="ti ti-trash"></i> Elimina</button>
+      ${S.uiD3?'':`<button class="btn btn-ghost-danger btn-sm" style="margin-left:auto" onclick="deleteVariant('${recipe.id}','${vv.id}')" title="Elimina Ricetta"><i class="ti ti-trash"></i> Elimina</button>`}
     </div>
-    ${renderAzioniLabRicetta(recipe,vv)}
+    ${renderAzioniLabRicetta(recipe,vv)}${S.uiD3?`
+    <div class="d3-prod-gestione"><span>Gestione della Ricetta · non riguarda le Sessioni di Produzione</span><button class="d3-btn-text d3-testo-pericolo" onclick="deleteVariant('${recipe.id}','${vv.id}')" title="Elimina questa Ricetta dalla Scheda: le Sessioni di Produzione non vengono toccate">Elimina questa Ricetta</button></div>`:''}
   </div>
 
   ${qcOpen?renderQuickCalcPanel(recipe,vv):''}
@@ -9889,6 +9965,7 @@ function togglePendingFamily(fid){
 }
 
 function renderOnboarding(){
+  if(S.uiD3)return renderOnboardingD3();
   return `<div class="onboarding-overlay">
     <div class="onboarding-modal">
       <div style="text-align:center;margin-bottom:24px">
@@ -9960,7 +10037,7 @@ function renderLabConversionModal(){
   <div id="lab-conversion-modal" style="position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200;display:flex;align-items:center;justify-content:center;padding:24px">
     <div style="background:var(--white);border-radius:var(--r-lg);padding:24px;width:100%;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,0.18)">
       <div style="font-size:16px;font-weight:700;color:var(--dark);margin-bottom:6px">Conversione da confermare</div>
-      <div style="font-size:13px;color:var(--mid);margin-bottom:6px">Da ${escAttr(p.fromUnit)} a ${escAttr(p.toUnit)}: serve un dato di questo ingrediente.</div>
+      <div style="font-size:13px;color:var(--mid);margin-bottom:6px">${S.uiD3?`Da ${escAttr(d3NomeUnita(p.fromUnit))} → ${escAttr(d3NomeUnita(p.toUnit))}`:`Da ${escAttr(p.fromUnit)} a ${escAttr(p.toUnit)}`}: serve un dato di questo ingrediente.</div>
       <div style="font-size:14px;color:var(--dark);margin-bottom:14px">${labConversionQuestion(p)}</div>
       ${conversionConflictNote(conversionConflictKey(normalizeIngredientName(p.ingName),p.askUnit,'g'))}
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:${p.isReference?'8':'16'}px">
@@ -10276,7 +10353,7 @@ function renderAppHome(){
 
 function renderProfiloPlaceholder(){
   return`
-    <div class="card" style="text-align:center;padding:48px 24px">
+    <div class="card${S.uiD3?' d3-segnaposto':''}" style="text-align:center;padding:48px 24px">
       <i class="ti ti-user" style="font-size:40px;color:var(--light);display:block;margin-bottom:12px"></i>
       <div style="color:var(--mid);font-size:15px;font-weight:500">Profilo</div>
       <div style="color:var(--light);font-size:13px;margin-top:6px">In arrivo — impostazioni, account e preferenze.</div>
@@ -10285,7 +10362,7 @@ function renderProfiloPlaceholder(){
 
 function renderMichelinAIGlobalePlaceholder(){
   return`
-    <div class="card" style="text-align:center;padding:48px 24px">
+    <div class="card${S.uiD3?' d3-segnaposto':''}" style="text-align:center;padding:48px 24px">
       <i class="ti ti-chef-hat" style="font-size:40px;color:var(--light);display:block;margin-bottom:12px"></i>
       <div style="color:var(--mid);font-size:15px;font-weight:500">MichelinAI</div>
       <div style="color:var(--light);font-size:13px;margin-top:6px;max-width:320px;margin-left:auto;margin-right:auto">Oggi MichelinAI ti aiuta dentro ogni Scheda, mentre lavori su una ricetta. Un accesso generale, per parlare con lui senza partire da una ricetta specifica, arriva presto.</div>
@@ -10297,22 +10374,28 @@ function renderMichelinAIGlobalePlaceholder(){
 // (vera ultima modifica editoriale, vedi firmaContenutoBozza) — le legacy
 // senza quel dato vanno in fondo, mai una data inventata, mai created_at
 // usato come sostituto.
-function renderLabGlobale(){
-  const mainRecipes=S.recipes.filter(r=>!r.parentRecipeId);
-  const tutteLeBozze=[];
-  mainRecipes.forEach(r=>{
+// Bozze di tutte le Schede principali e criterio «Ultima modifica»: unici per
+// l'elenco LAB classico e per quello della Direzione 3.
+function tutteLeBozzeLab(){
+  const bozze=[];
+  S.recipes.filter(r=>!r.parentRecipeId).forEach(r=>{
     (r.labVersions||[]).forEach(v=>{
-      tutteLeBozze.push({recipeId:r.id,recipeName:r.name,bozza:v});
+      bozze.push({recipeId:r.id,recipeName:r.name,bozza:v});
     });
   });
+  return bozze;
+}
+function confrontaUltimaModificaBozze(a,b){
+  const ta=a.bozza.contenutoModificatoIl,tb=b.bozza.contenutoModificatoIl;
+  if(ta&&tb)return new Date(tb)-new Date(ta); // più recente prima
+  if(ta&&!tb)return -1; // chi ha un dato tracciato viene sempre prima di chi non ce l'ha
+  if(!ta&&tb)return 1;
+  return 0; // entrambe senza dato: nessun criterio inventato, ordine stabile
+}
 
-  tutteLeBozze.sort((a,b)=>{
-    const ta=a.bozza.contenutoModificatoIl,tb=b.bozza.contenutoModificatoIl;
-    if(ta&&tb)return new Date(tb)-new Date(ta); // più recente prima
-    if(ta&&!tb)return -1; // chi ha un dato tracciato viene sempre prima di chi non ce l'ha
-    if(!ta&&tb)return 1;
-    return 0; // entrambe senza dato: nessun criterio inventato, ordine stabile
-  });
+function renderLabGlobale(){
+  const tutteLeBozze=tutteLeBozzeLab();
+  tutteLeBozze.sort(confrontaUltimaModificaBozze);
 
   if(tutteLeBozze.length===0){
     return `<div class="labg-env">
@@ -10445,6 +10528,8 @@ window.addEventListener('popstate',function(e){
 
 function render(){
   document.body.classList.toggle('ui-d3',!!S.uiD3); // Anteprima Direzione 3
+  // Direzione 3: i pulsanti principali prendono il colore dell'ambiente (solo CSS).
+  if(S.uiD3)document.body.setAttribute('data-d3-amb',d3SezioneNav());else document.body.removeAttribute('data-d3-amb');
   // Sidebar
   // Search bar
   var sbc=document.getElementById('search-bar-container');
@@ -10460,9 +10545,9 @@ function render(){
   const shellEl=document.querySelector('.shell');
   // Su desktop, nascondi la sidebar nelle view che non la usano
   if(sidebar){
-    // Direzione 3: stessa barra laterale su tutte le schermate (tranne le due
-    // schermate segnaposto, scollegate dalla navigazione).
-    const hideSidebar=S.uiD3?(S.view==='profilo'||S.view==='michelinai-globale'):(S.view==='attive'||S.view==='profilo'||S.view==='load'||S.view==='preview'||S.view==='michelinai-globale'||S.view==='app-home'||S.view==='lab-globale');
+    // Direzione 3: stessa barra laterale su tutte le schermate, segnaposto
+    // Profilo e MichelinAI compresi (si torna agli ambienti principali).
+    const hideSidebar=S.uiD3?false:(S.view==='attive'||S.view==='profilo'||S.view==='load'||S.view==='preview'||S.view==='michelinai-globale'||S.view==='app-home'||S.view==='lab-globale');
     sidebar.style.display=hideSidebar?'none':'';
     if(!hideSidebar)sidebar.innerHTML=renderSidebar();
     else sidebar.innerHTML=''; // mai lasciare contenuto vecchio nascosto: id duplicati (es. btn-new-recipe) rubano il click a quelli visibili altrove
@@ -10521,7 +10606,7 @@ function render(){
   if(main)main.innerHTML=mainContent+(S.showFamilyPicker?renderFamilyPicker():'')+(S.showMergePicker?renderMergePicker():'')+(S.showMergeConfirm?renderMergeConfirm():'')+(S.uiD3?renderD3Overlays():'')+(S.showSchedeFamiglie?renderSchedeFamigliePicker():'')+(S.showCondividiStaff?renderCondividiStaffModal():'')+(S.showOnboarding?renderOnboarding():'')+(S.toastAction?renderToastAction():S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:'')+renderUnitConversionModal()+renderLabConversionModal()+renderMandaInProduzioneModal()+renderConversionPreflightModal();
 
   if(noteFocus){const ta=document.getElementById(noteFocus.id);if(ta){try{ta.focus();ta.setSelectionRange(noteFocus.s,noteFocus.e);}catch(e){}}}
-  if(S.uiD3){d3Autosize();d3NascondiDuplicati();} // Anteprima Direzione 3: campi alti quanto il testo (Safari); nomi ripetuti nascosti
+  if(S.uiD3){d3Autosize();d3NascondiDuplicati();d3AggiornaScorrimento();} // Anteprima Direzione 3: campi alti quanto il testo (Safari); nomi ripetuti nascosti
 
   // Bottom nav
   const bn=document.getElementById('bottom-nav');
@@ -10828,6 +10913,9 @@ function initUiD3(){
   S.uiD3=v==='d3';
   if(!initUiD3.ascolto){
     initUiD3.ascolto=true;
+    // Schede del LAB: l'indicatore di scorrimento segue la posizione.
+    document.addEventListener('scroll',function(e){var t=e.target;if(t&&t.classList&&(t.classList.contains('d3-secnav')||t.classList.contains('d3-bozze')))d3AggiornaScorrimento();},true);
+    window.addEventListener('resize',function(){if(S.uiD3)d3AggiornaScorrimento();});
     // Tastiera su mobile: mentre si scrive, le barre fisse in basso si nascondono.
     document.addEventListener('focusin',function(){d3SincronizzaTastiera();});
     document.addEventListener('focusout',function(){setTimeout(d3SincronizzaTastiera,0);});
@@ -10905,21 +10993,12 @@ function d3SetLabOrdine(o){
   render();
 }
 function d3GruppiLab(ordine){
-  var bozze=[];
-  S.recipes.filter(function(r){return!r.parentRecipeId;}).forEach(function(r){
-    (r.labVersions||[]).forEach(function(v){bozze.push({recipeId:r.id,recipeName:r.name,bozza:v});});
-  });
+  var bozze=tutteLeBozzeLab();
   var nome=function(b){return b.label||b.name||'Bozza';};
   if(ordine==='alfabetico'){
     bozze.sort(function(a,b){return confrontaNomiIt(a.recipeName,b.recipeName)||(a.recipeId<b.recipeId?-1:a.recipeId>b.recipeId?1:0)||confrontaNomiIt(nome(a.bozza),nome(b.bozza));});
   }else{
-    bozze.sort(function(a,b){
-      var ta=a.bozza.contenutoModificatoIl,tb=b.bozza.contenutoModificatoIl;
-      if(ta&&tb)return new Date(tb)-new Date(ta);
-      if(ta&&!tb)return -1;
-      if(!ta&&tb)return 1;
-      return 0;
-    });
+    bozze.sort(confrontaUltimaModificaBozze);
   }
   var mappa=new Map(),ordineGruppi=[];
   bozze.forEach(function(x){
@@ -10962,7 +11041,7 @@ function d3ConteggiHome(){
   var principali=S.recipes.filter(function(r){return!r.parentRecipeId;});
   var bozze=0,schedeLab=0;
   principali.forEach(function(r){var n=(r.labVersions||[]).length;bozze+=n;if(n)schedeLab++;});
-  return{attive:activeRecipeEntries(S.recipes).length,schede:S.recipes.length,bozze:bozze,schedeLab:schedeLab};
+  return{attive:activeRecipeEntries(S.recipes).length,schede:principali.length,bozze:bozze,schedeLab:schedeLab}; // come l'archivio Schede
 }
 // Icone degli ambienti nel codice (nessuna dipendenza da caratteri esterni).
 var D3_ICONE_AMBIENTE=(function(){
@@ -11005,6 +11084,56 @@ function d3Pill(stato){
   return`<span class="d3-pill ${p[0]}"><span aria-hidden="true">${p[1]}</span> ${p[2]}</span>`;
 }
 function d3Previsto(){return'<span class="d3-previsto">Previsto</span>';}
+// Stato effettivo di una Ricetta validata (stessi campi della Scheda).
+function d3StatoRicetta(v){
+  if(v.status==='retired')return'archiviata';
+  if(v.status==='lab')return'lab';
+  return v.active===true?'attiva':'validata';
+}
+// Ricerca globale: stessi risultati e destinazioni della grafica classica
+// (renderSearch), con icone nel codice e lo stato reale di ogni Ricetta.
+var D3_ICONA_FAMIGLIA='<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12V4h8l9 9-8 8z"/><circle cx="7.5" cy="8.5" r="1.3"/></svg>';
+function renderRicercaD3(query,results){
+  var q=d3Esc(query);
+  if(!results.length)return`<div class="d3-wrap d3-ricerca"><div class="d3-card d3-vuoto">Nessun risultato per «<strong>${q}</strong>».</div></div>`;
+  var riga=function(r){
+    var icona,titolo,meta;
+    if(r.type==='family'){icona=`<span class="d3-ric-icona d3-amb-schede" aria-hidden="true">${D3_ICONA_FAMIGLIA}</span>`;titolo=d3Esc(r.name);meta='Famiglia';}
+    else if(r.type==='variant'){icona='';titolo=d3Esc(r.variante.name);meta=`${d3Pill(d3StatoRicetta(r.variante))} <span>Scheda · ${d3Esc(r.name)}</span>`;}
+    else{icona=`<span class="d3-ric-icona d3-amb-schede" aria-hidden="true">${D3_ICONE_AMBIENTE['ti-book-2']}</span>`;titolo=d3Esc(r.name);meta='Scheda'+(r.meta?' · '+d3Esc(r.meta):'');}
+    return`<button class="d3-ricerca-riga${r.type==='variant'?' d3-ricerca-ricetta':''}" onclick="${searchResultOnclick(r)}">${icona}<span class="d3-ricerca-testo"><span class="d3-ricerca-titolo">${titolo}</span><span class="d3-ricerca-meta">${meta}</span></span><span class="d3-ricerca-freccia" aria-hidden="true">›</span></button>`;
+  };
+  return`<div class="d3-wrap d3-ricerca">
+    <div class="d3-sez-titolo">Risultati per «${q}» <span>${results.length}</span></div>
+    <div class="d3-card d3-ricerca-lista">${results.map(riga).join('')}</div>
+  </div>`;
+}
+// Benvenuto: stesse azioni del classico; terminologia attuale, nessuna emoji.
+function renderOnboardingD3(){
+  var passi=[['lab','ti-flask','LAB','Sperimenta e modifica le tue ricette in libertà.'],
+    ['schede','ti-book-2','Valida','Quando una bozza funziona, salvala come Ricetta Validata nella sua Scheda.'],
+    ['produzione','ti-tools-kitchen-2','Produzione','Usa la Ricetta attiva in cucina, scala le porzioni.']];
+  return`<div class="onboarding-overlay">
+    <div class="onboarding-modal d3-benvenuto" role="dialog" aria-labelledby="d3-benvenuto-titolo">
+      <h2 class="d3-serif d3-benvenuto-titolo" id="d3-benvenuto-titolo">Benvenuto in Khub</h2>
+      <p class="d3-benvenuto-sub">Il tuo laboratorio digitale per ricette professionali</p>
+      ${passi.map(function(p){return`<div class="d3-benvenuto-passo d3-amb-${p[0]}"><span class="d3-benvenuto-icona" aria-hidden="true">${D3_ICONE_AMBIENTE[p[1]]}</span><span><strong>${p[2]}</strong><span>${p[3]}</span></span></div>`;}).join('')}
+      <button class="d3-btn d3-btn-ink d3-benvenuto-inizia" onclick="S.showOnboarding=false;localStorage.setItem('khub_onboarded','1');S.view='app-home';render()">Inizia</button>
+    </div>
+  </div>`;
+}
+// Nomi leggibili delle unità nei testi della Direzione 3 (le unità salvate non cambiano).
+function d3NomeUnita(u){
+  return{n:'pezzi',g:'grammi',kg:'chilogrammi',ml:'millilitri',cl:'centilitri',l:'litri',tbsp:'cucchiai',tsp:'cucchiaini'}[u]||u;
+}
+// Schede del LAB su mobile: una sfumatura discreta indica che si può scorrere.
+function d3AggiornaScorrimento(){
+  document.querySelectorAll('.d3-secnav,.d3-bozze').forEach(function(el){
+    var resto=el.scrollWidth-el.clientWidth-el.scrollLeft;
+    el.classList.toggle('d3-scorre-dx',resto>4);
+    el.classList.toggle('d3-scorre-sx',el.scrollLeft>4);
+  });
+}
 function d3MenuHtml(key,items){
   if(S.d3Menu!==key)return'';
   return`<div class="d3-menu" role="menu">${items.filter(Boolean).map(function(it){

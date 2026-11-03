@@ -232,7 +232,9 @@ const sha = s => crypto.createHash('sha256').update(s).digest('hex').slice(0, 16
 // ══════════════════════════════════════════════════════════
 const D3_START = html.indexOf('// ANTEPRIMA DIREZIONE 3');
 const D3_BLOCK = html.slice(html.lastIndexOf('\n', D3_START), html.lastIndexOf('// ═', html.indexOf('\n// INIT', D3_START)));
-const D3_EXTRA = ['function renderSidebar()', 'function renderBottomNav()', 'function renderAppHome()', 'function renderLabGlobale()', 'function renderAttive()', 'function schedeVista()', 'function setSchedeVista(v)', 'function normalizzaCategoria(raw)', 'function onSchedaCategoryChange(recipeId,val)', 'function exportPDF(recipeId,variantId)'];
+const D3_EXTRA = ['function renderSidebar()', 'function renderBottomNav()', 'function renderAppHome()', 'function renderLabGlobale()', 'function renderAttive()', 'function schedeVista()', 'function setSchedeVista(v)', 'function normalizzaCategoria(raw)', 'function onSchedaCategoryChange(recipeId,val)', 'function exportPDF(recipeId,variantId)',
+  'function tutteLeBozzeLab()', 'function confrontaUltimaModificaBozze(a,b)', 'function searchResultOnclick(r)', 'function renderSearch(query)', 'function renderConfronto(recipe)',
+  'function renderOnboarding()', 'function renderProdRecipe(recipe)', 'function renderLabConversionModal()', 'function renderProfiloPlaceholder()', 'function renderMichelinAIGlobalePlaceholder()'];
 // Chiusura delle dipendenze: funzioni di primo livello di khub_mvp.html
 // richiamate dal codice estratto (tranne quelle simulate dal client).
 const SIMULATE = new Set(['render', 'autosave', 'toast', 'openLabRound', 'closeLabRound']);
@@ -267,9 +269,9 @@ function makeClientD3(fetchImpl, opts = {}, src = SRC_D3) {
   const doc = {
     getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
     addEventListener: (t, f) => { (log.listeners[t] = log.listeners[t] || []).push(f); },
-    body: { classList: { add: c => bodyClasses.add(c), remove: c => bodyClasses.delete(c), toggle: (c, on) => on ? bodyClasses.add(c) : bodyClasses.delete(c), contains: c => bodyClasses.has(c) } },
+    body: { attrs: {}, setAttribute(k, v) { this.attrs[k] = String(v); }, removeAttribute(k) { delete this.attrs[k]; }, classList: { add: c => bodyClasses.add(c), remove: c => bodyClasses.delete(c), toggle: (c, on) => on ? bodyClasses.add(c) : bodyClasses.delete(c), contains: c => bodyClasses.has(c) } },
   };
-  const win = { open: () => { const w = { html: '', document: { write: h => { w.html += h; }, close: () => {} }, focus: () => {}, print: () => {} }; log.opened.push(w); return w; } };
+  const win = { addEventListener: () => {}, open: () => { const w = { html: '', document: { write: h => { w.html += h; }, close: () => {} }, focus: () => {}, print: () => {} }; log.opened.push(w); return w; } };
   const c = new Function('fetch', 'log', 'document', 'confirm', 'localStorage', 'location', 'window', `
     var S=Object.assign(${REAL_S},{recipes:[],selectedId:null,families:[],variantFamilies:{},variantHistory:{},unitWeights:{},unitWeightFacts:{},productionConversionFacts:{},labYieldInput:{},activeYieldEdit:null,
       view:'ricetta-madre-v2',mode:'produzione',selectedVariantId:null,pendingFamilies:[],pendingNewFamily:'',showFamilyPicker:false,familyManagerMode:false,justValidated:null,renameEdit:null,rmv2AttivaEspansa:{},pendingDuplicaSceltaRecipeId:null,confirmDeleteId:null,labRound:null});
@@ -280,7 +282,8 @@ function makeClientD3(fetchImpl, opts = {}, src = SRC_D3) {
     return {S, loadFromSupabase, saveToSupabase, renderLabRecipe, renderRicettaMadreV2, renderHomeD3, renderSchedaD3, renderDatiTecniciD3, renderD3Esporta,
       initUiD3, setUiD3, d3ToggleArrotonda, d3SetLabTab, d3SchedeFiltrate, d3SetQuery, exportPDF, nuovaScheda, R,
       renderSidebar, renderBottomNav, renderAppHome, renderAppHomeD3, renderLabGlobale, renderAttive, d3SezioneNav, d3ConteggiHome,
-      renderLabGlobaleD3, d3GruppiLab, d3SetLabOrdine, d3LabOrdine};
+      renderLabGlobaleD3, d3GruppiLab, d3SetLabOrdine, d3LabOrdine,
+      renderSearch, renderConfronto, renderOnboarding, renderProdRecipe, renderLabConversionModal, renderProfiloPlaceholder, renderMichelinAIGlobalePlaceholder, d3NomeUnita, d3StatoRicetta};
   `)(fetchImpl, log, doc, () => opts.confirm !== false, { getItem: k => (k in storage ? storage[k] : null), setItem: (k, v) => { storage[k] = String(v); } },
     { search: opts.search || '' }, win);
   c.log = log; c.storage = storage; c.bodyClasses = bodyClasses; return c;
@@ -310,10 +313,6 @@ function clientMain(fetchImpl, nomi) {
 }
 
 // Funzioni di khub_mvp.html che cambiano rispetto a main in questa fase.
-// Presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato).
-const CAMBIATE_ATTESE = ['bindEvents', 'confirmMerge', 'deleteRecipe', 'deleteVariant', 'eliminaBozza', 'exportPDF', 'render', 'renderBottomNav', 'renderLabRecipe', 'renderRicettaMadreV2', 'renderSidebar', 'rendiAttiva'];
-// Regola della barra laterale (Direzione 3 / grafica classica).
-const REGOLA_BARRA_LATERALE = "const hideSidebar=S.uiD3?(S.view==='profilo'||S.view==='michelinai-globale'):(S.view==='attive'||S.view==='profilo'||S.view==='load'||S.view==='preview'||S.view==='michelinai-globale'||S.view==='app-home'||S.view==='lab-globale');";
 
 (async () => {
   process.env.SUPABASE_URL = 'https://fake.supabase'; process.env.SUPABASE_ANON_KEY = 'anon';
@@ -349,10 +348,13 @@ const REGOLA_BARRA_LATERALE = "const hideSidebar=S.uiD3?(S.view==='profilo'||S.v
     const a = topLevelFunctions(baseHtml), b = topLevelFunctions(html);
     const cambiate = Object.keys(a).filter(n => n in b && a[n] !== b[n]).sort();
     const rimosse = Object.keys(a).filter(n => !(n in b));
-    assert.deepStrictEqual(cambiate, CAMBIATE_ATTESE.slice().sort(), 'solo le funzioni previste');
+    assert.deepStrictEqual(cambiate, ['bindEvents', 'confirmMerge', 'deleteRecipe', 'deleteVariant', 'eliminaBozza', 'exportPDF', 'render', 'renderBottomNav', 'renderLabRecipe', 'renderRicettaMadreV2', 'renderSidebar', 'rendiAttiva',
+      // Finalizzazione D3: solo presentazione (ramo S.uiD3) e criterio "Ultima modifica" estratto in una funzione condivisa.
+      'renderConfronto', 'renderLabConversionModal', 'renderLabGlobale', 'renderMichelinAIGlobalePlaceholder', 'renderOnboarding', 'renderProdRecipe', 'renderProfiloPlaceholder', 'renderSearch'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato)');
     assert.deepStrictEqual(rimosse, [], 'nessuna funzione rimossa');
     for (const n of ['computeFormulationWeights', 'deriveYieldPerUnit', 'computeLabRounding', 'applyLabRound', 'undoLabRound', 'computeSessionScaling', 'createProductionSession', 'saveToSupabase', 'loadFromSupabase', 'buildValidatedVariantPayload', 'onValidate', 'confirmValidate', 'rendiAttivaPronta', 'riapriProntaInLab', 'onLabDeclaredYield', 'onIngQty', 'onStepText'])
       assert.ok(n in b && a[n] === b[n], 'invariata: ' + n);
+    // Il segnaposto "MichelinAI" e' solo una card di testo (presentazione), non il motore.
     const michelin = Object.keys(a).filter(n => /michelin|m1|m2|primoConsulto/i.test(n) && n !== 'renderMichelinAIGlobalePlaceholder');
     assert.ok(michelin.length > 5);
     michelin.forEach(n => assert.strictEqual(b[n], a[n], 'MichelinAI invariato: ' + n));
@@ -382,7 +384,7 @@ const REGOLA_BARRA_LATERALE = "const hideSidebar=S.uiD3?(S.view==='profilo'||S.v
     const c = await setup(); c.S.uiD3 = true;
     const h = c.renderSchedaD3(rec(c)), t = text(h);
     assert.ok(/Attive\s*3/.test(t) && /Validate\s*1/.test(t) && /In LAB\s*1/.test(t), t.slice(0, 400));
-    assert.strictEqual((h.match(/d3-btn-primary/g) || []).length, 1, 'un solo pulsante terracotta');
+    assert.strictEqual((h.match(/d3-btn-primary/g) || []).length, 1, 'un solo pulsante principale');
     assert.ok(/rendiAttivaPronta\('rB','vaP'\)/.test(h) && /riapriProntaInLab\('rB','vaP'\)/.test(h), 'Validata: Rendi attiva e Torna in LAB (flussi esistenti)');
     assert.ok(!/rendiAttivaPronta\('rB','vaB'\)/.test(h), 'mai su una Attiva');
     assert.ok(/V vaR/.test(t) && /Archiviate/.test(t), 'archiviate raccolte a parte');
@@ -450,7 +452,8 @@ const REGOLA_BARRA_LATERALE = "const hideSidebar=S.uiD3?(S.view==='profilo'||S.v
     const c = await setup();
     const fm = topLevelFunctions(baseHtml);
     let SRC_MAIN = SRC_D3;
-    for (const n of ['renderSidebar', 'renderBottomNav', 'renderAppHome', 'renderLabGlobale', 'renderAttive', 'renderActiveRecipeRow']) SRC_MAIN = SRC_MAIN.replace(topLevelFunctions(SRC_D3)[n], fm[n]);
+    for (const n of ['renderSidebar', 'renderBottomNav', 'renderAppHome', 'renderLabGlobale', 'renderAttive', 'renderActiveRecipeRow',
+      'renderProdRecipe', 'renderSearch', 'renderConfronto', 'renderOnboarding', 'renderLabConversionModal', 'renderProfiloPlaceholder', 'renderMichelinAIGlobalePlaceholder']) SRC_MAIN = SRC_MAIN.replace(topLevelFunctions(SRC_D3)[n], fm[n]);
     const cm = makeClientD3Src(clientFetch, SRC_MAIN); cm.S.recipes = clone(c.S.recipes); cm.S.productionSessions = []; c.S.productionSessions = [];
     const senzaInterruttore = h => h.replace(/\s*<button class="d3-sb-toggle"[\s\S]*?<\/button>/, '');
     for (const [view, mode] of [['app-home', 'lab'], ['home', 'lab'], ['lab-globale', 'lab'], ['recipe', 'lab'], ['recipe', 'produzione'], ['attive', 'lab'], ['sessione-operativa', 'lab'], ['storico-produzioni', 'lab']]) {
@@ -462,7 +465,14 @@ const REGOLA_BARRA_LATERALE = "const hideSidebar=S.uiD3?(S.view==='profilo'||S.v
     assert.strictEqual(c.renderLabGlobale(), cm.renderLabGlobale(), 'elenco LAB');
     c.S.view = cm.S.view = 'attive'; c.S.produzioneHome = cm.S.produzioneHome = { recipeQuery: '', expanded: null };
     assert.strictEqual(c.renderAttive(), cm.renderAttive(), 'Produzione');
-    const classico = REGOLA_BARRA_LATERALE;
+    // Finalizzazione: ogni funzione toccata, con l'anteprima spenta, produce lo stesso HTML di main.
+    for (const k of [c, cm]) Object.assign(k.S, { mode: 'produzione', selectedVariantId: 'vaB', confrontoA: 'vaB', confrontoB: 'vaP',
+      pendingLabConversion: { recipeId: 'rB', labVersionId: 'lvB', ingId: 'x', ingName: 'Uova (impasto)', fromUnit: 'n', toUnit: 'g', askUnit: 'n', value: '55', isReference: false, loading: false, error: 'Errore' } });
+    assert.strictEqual(c.renderProdRecipe(rec(c)), cm.renderProdRecipe(rec(cm)), 'Ricetta in Produzione');
+    assert.strictEqual(c.renderSearch('V va'), cm.renderSearch('V va'), 'Ricerca');
+    assert.strictEqual(c.renderConfronto(rec(c)), cm.renderConfronto(rec(cm)), 'Confronta Ricette');
+    for (const n of ['renderOnboarding', 'renderLabConversionModal', 'renderProfiloPlaceholder', 'renderMichelinAIGlobalePlaceholder']) assert.strictEqual(c[n](), cm[n](), n);
+    const classico = "const hideSidebar=S.uiD3?false:(S.view==='attive'||S.view==='profilo'||S.view==='load'||S.view==='preview'||S.view==='michelinai-globale'||S.view==='app-home'||S.view==='lab-globale');";
     assert.ok(html.includes(classico) && fm.render.includes("const hideSidebar=S.view==='attive'||S.view==='profilo'||S.view==='load'||S.view==='preview'||S.view==='michelinai-globale'||S.view==='app-home'||S.view==='lab-globale';"), 'regola classica della barra laterale invariata');
     assert.ok(html.includes("shellEl.classList.toggle('app-home-active',S.view==='app-home'&&!S.uiD3)"), 'Home classica a schermo intero invariata');
   });
@@ -560,6 +570,90 @@ const REGOLA_BARRA_LATERALE = "const hideSidebar=S.uiD3?(S.view==='profilo'||S.v
     c.S.uiD3 = false; const hc = c.renderLabRecipe(labOf(c));
     assert.ok(/<th>Quantità<\/th>/.test(hc) && !/Quantità a crudo/.test(hc), 'classica invariata (vedi anche P1)');
     assert.deepStrictEqual(saves, []);
+  });
+
+
+  // ══ Finalizzazione grafica ══
+  const classico = c => { c.S.uiD3 = false; return c; };
+  await test('P18. Ricerca globale: stessi risultati e destinazioni della grafica classica; stato effettivo; nessuna emoji', async () => {
+    const c = await setup();
+    rec(c).validatedVariants.find(v => v.id === 'vaR').status = 'retired';
+    const hc = classico(c).renderSearch('V va');
+    c.S.uiD3 = true; const hd = c.renderSearch('V va');
+    const dest = h => [...h.matchAll(/onclick="([^"]*)"/g)].map(m => m[1]);
+    assert.ok(dest(hc).length > 3);
+    assert.deepStrictEqual(dest(hd), dest(hc), 'stessi risultati, stesso ordine, stesse destinazioni');
+    const stati = Object.fromEntries(rec(c).validatedVariants.map(v => [v.name, c.d3StatoRicetta(v)]));
+    assert.strictEqual(stati['V vaB'], 'attiva'); assert.strictEqual(stati['V vaP'], 'validata'); assert.strictEqual(stati['V vaR'], 'archiviata');
+    for (const [nome, st] of Object.entries(stati)) {
+      const riga = hd.split('<button class="d3-ricerca-riga').find(x => x.includes('>' + nome + '<'));
+      assert.ok(riga && riga.includes('d3-pill-' + st), nome + ': ' + st);
+    }
+    assert.ok(!/[\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}]|\u{1F3F7}/u.test(hd), 'nessuna emoji (i simboli delle pillole di stato, es. ✓, restano)');
+    assert.ok(!/Ricetta attiva: V vaP/.test(hd), 'mai "Ricetta attiva" per una Validata');
+    assert.ok(/Ricetta attiva: V vaP/.test(hc), 'grafica classica invariata');
+    assert.ok(/Nessun risultato/.test(c.renderSearch('zzzz')));
+  });
+
+  await test('P19. Confronta Ricette e Benvenuto: niente intestazione viola-indaco ne\' emoji; stessi gestori; classico invariato', async () => {
+    const c = await setup(); c.S.uiD3 = true;
+    const hd = c.renderConfronto(rec(c)), hc = classico(c).renderConfronto(rec(c));
+    assert.ok(!/confronto-header/.test(hd) && /d3-h1 d3-serif">Confronta Ricette/.test(hd));
+    assert.ok(/confronto-header/.test(hc), 'classico invariato');
+    const selettori = h => h.slice(h.indexOf('<div class="confronto-selectors">'));
+    assert.strictEqual(selettori(hd), selettori(hc), 'selezione e confronto identici');
+    c.S.uiD3 = true; const od = c.renderOnboarding(), oc = classico(c).renderOnboarding();
+    assert.ok(!/[\u{1F300}-\u{1FAFF}]/u.test(od) && /Ricetta Validata/.test(od) && !/pronta/.test(od));
+    assert.ok(/👨‍🍳/.test(oc) && /Ricetta pronta/.test(oc), 'classico invariato');
+    const azione = h => h.match(/onclick="(S\.showOnboarding=false[^"]*)"/)[1];
+    assert.strictEqual(azione(od), azione(oc), 'stessa azione "Inizia"');
+  });
+
+  await test('P20. Ricetta in Produzione e selettore LAB/Produzione: le regole degli stati restano; "Elimina" esplicito e separato', async () => {
+    const c = await setup(); c.S.uiD3 = true; c.S.mode = 'produzione';
+    c.S.selectedVariantId = 'vaB'; const att = c.renderProdRecipe(rec(c));
+    c.S.selectedVariantId = 'vaP'; const val = c.renderProdRecipe(rec(c));
+    c.S.selectedVariantId = 'vaR'; const arc = c.renderProdRecipe(rec(c));
+    assert.ok(/openMandaInProduzione\('rB','vaB'\)/.test(att), 'Attiva: Manda in Produzione');
+    assert.ok(!/openMandaInProduzione/.test(val) && !/openMandaInProduzione/.test(arc), 'Validata e Archiviata: mai in Produzione dal selettore');
+    const azioni = att.slice(att.indexOf('header-actions'), att.indexOf('d3-prod-gestione'));
+    assert.ok(!/deleteVariant/.test(azioni), 'nessuna eliminazione fra le azioni di produzione');
+    assert.ok(/d3-prod-gestione[\s\S]*non riguarda le Sessioni di Produzione[\s\S]*onclick="deleteVariant\('rB','vaB'\)"[^>]*>Elimina questa Ricetta</.test(att), 'stesso gestore, significato esplicito');
+    const cl = classico(c); cl.S.selectedVariantId = 'vaB'; const hc = cl.renderProdRecipe(rec(cl));
+    assert.ok(/<i class="ti ti-trash"><\/i> Elimina<\/button>/.test(hc) && !/d3-prod-gestione/.test(hc), 'classico invariato');
+    const css = html.slice(html.indexOf('/* Selettore LAB / Produzione'), html.indexOf('/* Confronta Ricette */'));
+    assert.ok(/lab-active\{background:var\(--d3-amb-lab\)/.test(css) && /prod-active\{background:var\(--d3-amb-produzione\)/.test(css));
+  });
+
+  await test('P21. pulsanti principali nel colore dell\'ambiente, contrasto sufficiente; conversione "pezzi → grammi"; segnaposto con navigazione', async () => {
+    const c = await setup(); c.S.uiD3 = true;
+    for (const [v, m, amb] of [['recipe', 'lab', 'lab'], ['recipe', 'produzione', 'produzione'], ['ricetta-madre-v2', 'lab', 'schede'], ['load', 'lab', 'schede'], ['attive', 'lab', 'produzione'], ['lab-globale', 'lab', 'lab']]) {
+      c.S.view = v; c.S.mode = m; assert.strictEqual(c.d3SezioneNav(), amb, v + '/' + m);
+      assert.ok(new RegExp('body\\.ui-d3\\[data-d3-amb="' + amb + '"\\]\\{--d3-primario:var\\(--d3-amb-' + amb + '\\);\\}').test(html), amb);
+    }
+    assert.ok(/document\.body\.setAttribute\('data-d3-amb',d3SezioneNav\(\)\)/.test(html) && /body\.ui-d3 \.d3-btn-primary\{background:var\(--d3-primario\)/.test(html));
+    const colori = Object.fromEntries([...html.match(/body\.ui-d3\{--d3-amb-lab:[^}]*\}/)[0].matchAll(/--d3-amb-(lab|schede|produzione):(#[0-9A-Fa-f]{6})/g)].map(m => [m[1], m[2]]));
+    const lum = h => { const c3 = [1, 3, 5].map(i => parseInt(h.substr(i, 2), 16) / 255).map(x => x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4)); return 0.2126 * c3[0] + 0.7152 * c3[1] + 0.0722 * c3[2]; };
+    for (const [k, h] of Object.entries(colori)) assert.ok(1.05 / (lum(h) + 0.05) >= 4.5, k + ' ' + h + ': testo bianco leggibile');
+    assert.strictEqual(Object.keys(colori).length, 3);
+    c.S.pendingLabConversion = { recipeId: 'rB', labVersionId: 'lvB', ingId: 'x', ingName: 'Uova (impasto)', fromUnit: 'n', toUnit: 'g', askUnit: 'n', value: '55', isReference: false, loading: false, error: null };
+    assert.ok(/Da pezzi → grammi: serve un dato/.test(c.renderLabConversionModal()));
+    assert.ok(/Da n a g: serve un dato/.test(classico(c).renderLabConversionModal()), 'classico invariato');
+    c.S.uiD3 = true;
+    assert.ok(/d3-segnaposto/.test(c.renderProfiloPlaceholder()) && /d3-segnaposto/.test(c.renderMichelinAIGlobalePlaceholder()));
+    assert.ok(/const hideSidebar=S\.uiD3\?false:/.test(html), 'barra laterale (e barra in basso) anche nei segnaposto');
+  });
+
+  await test('P22. coerenza: conteggio Schede della Home come l\'archivio; un solo criterio "Ultima modifica"; un solo gestore "Nuova Scheda"; scorrimento delle schede del LAB', async () => {
+    const c = await setup(); c.S.uiD3 = true;
+    c.S.recipes.push({ ...clone(rec(c, 'rX')), id: 'rSub', name: 'Sotto-ricetta', parentRecipeId: 'rX' });
+    assert.strictEqual(c.d3ConteggiHome().schede, c.S.recipes.filter(r => !r.parentRecipeId).length);
+    assert.strictEqual(c.d3ConteggiHome().schede, 2, 'le sotto-ricette non sono Schede dell\'archivio');
+    const fn = topLevelFunctions(html);
+    assert.ok(/confrontaUltimaModificaBozze/.test(fn.renderLabGlobale) && /confrontaUltimaModificaBozze/.test(fn.d3GruppiLab));
+    assert.ok(!/new Date\(tb\)-new Date\(ta\)/.test(fn.d3GruppiLab + fn.renderLabGlobale) && /new Date\(tb\)-new Date\(ta\)/.test(fn.confrontaUltimaModificaBozze), 'il criterio vive in un solo punto');
+    assert.strictEqual((html.match(/makeDefaultLab\(id,'Nuova Scheda'\)/g) || []).length, 1, 'un solo gestore Nuova Scheda');
+    assert.ok(/d3AggiornaScorrimento\(\);\}/.test(fn.render) && /\.d3-scorre-dx\{-webkit-mask-image/.test(html));
   });
 
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
