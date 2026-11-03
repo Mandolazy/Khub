@@ -262,10 +262,15 @@ function assertSafe(c, ctx) {
     for (const [table, id] of [['recipes', 'r1'], ['variants', 'v&x=1'], ['production_sessions', 'ps1']]) {
       calls.length = 0;
       const r = await call({ supabaseAction: 'delete', table, id });
-      assert.deepStrictEqual(r.out, { ok: true });
-      assert.strictEqual(calls.length, 1); assertSafe(calls[0], 'delete');
-      const q = new URL(calls[0].url).searchParams;
-      assert.strictEqual(calls[0].method, 'DELETE');
+      assert.strictEqual(r.out.ok, true, JSON.stringify(r.out));
+      // Ricette e Schede: prima le letture delle dipendenze (mattoncini, Sessioni), poi una sola DELETE.
+      calls.forEach(c => assertSafe(c, 'delete'));
+      assert.deepStrictEqual(calls.slice(0, -1).map(c => c.method), calls.slice(0, -1).map(() => 'GET'), table + ': solo letture prima della DELETE');
+      assert.strictEqual(calls.filter(c => c.method !== 'GET').length, 1, table + ': una sola scrittura');
+      if (table === 'production_sessions') assert.strictEqual(calls.length, 1, 'Sessioni: nessuna lettura aggiuntiva');
+      const del = calls[calls.length - 1];
+      const q = new URL(del.url).searchParams;
+      assert.strictEqual(del.method, 'DELETE');
       assert.strictEqual(q.get('id'), 'eq.' + id);
       assert.deepStrictEqual(Array.from(q.keys()), table === 'production_sessions' ? ['id', 'status'] : ['id']);
       if (table === 'production_sessions') assert.strictEqual(q.get('status'), 'eq.pending');

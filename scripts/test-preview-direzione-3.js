@@ -310,8 +310,8 @@ function clientMain(fetchImpl, nomi) {
 }
 
 // Funzioni di khub_mvp.html che cambiano rispetto a main in questa fase.
-// Presentazione + ciclo di vita (attivazione diretta eliminata).
-const CAMBIATE_ATTESE = ['bindEvents', 'exportPDF', 'render', 'renderBottomNav', 'renderLabRecipe', 'renderRicettaMadreV2', 'renderSidebar', 'rendiAttiva'];
+// Presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato).
+const CAMBIATE_ATTESE = ['bindEvents', 'confirmMerge', 'deleteRecipe', 'deleteVariant', 'eliminaBozza', 'exportPDF', 'render', 'renderBottomNav', 'renderLabRecipe', 'renderRicettaMadreV2', 'renderSidebar', 'rendiAttiva'];
 // Regola della barra laterale (Direzione 3 / grafica classica).
 const REGOLA_BARRA_LATERALE = "const hideSidebar=S.uiD3?(S.view==='profilo'||S.view==='michelinai-globale'):(S.view==='attive'||S.view==='profilo'||S.view==='load'||S.view==='preview'||S.view==='michelinai-globale'||S.view==='app-home'||S.view==='lab-globale');";
 

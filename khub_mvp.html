@@ -2663,6 +2663,25 @@ async function saveToSupabase(recipe){
   }catch(e){console.error('Save error',e);toast('Errore salvataggio: '+e.message,'ti-alert-circle');return false;}
 }
 
+// Eliminazione sul server con esito verificato: l'interfaccia si aggiorna solo
+// se il database ha davvero eliminato. Il server rifiuta le Ricette usate come
+// mattoncino o in Produzione (si archiviano) e riporta i rifiuti del database.
+async function eliminaSulServer(table,id,extra){
+  try{
+    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({supabaseAction:'delete',table,id},extra||{}))});
+    const data=await res.json().catch(()=>null);
+    if(res.ok&&data&&data.ok===true)return{ok:true};
+    const motivi={
+      usata_come_mattoncino:'è usata come mattoncino in un\'altra Ricetta: puoi archiviarla, non eliminarla.',
+      usata_in_produzione:'è stata usata in Produzione: puoi archiviarla, non eliminarla.',
+      scheda_non_vuota:'contiene ancora delle Ricette.',
+      db:'il database ha rifiutato l\'eliminazione (è ancora collegata ad altri dati, ad esempio osservazioni di MichelinAI o bozze nate da questa).',
+      controllo_non_eseguibile:'non è stato possibile verificare le dipendenze: riprova.'
+    };
+    return{ok:false,codice:data&&data.code||'errore',messaggio:motivi[data&&data.code]||((data&&data.error)||('errore '+res.status))};
+  }catch(e){return{ok:false,codice:'rete',messaggio:'controlla la connessione e riprova.'};}
+}
+
 async function deleteRecipe(id){
   const recipe=R(id);
   if(!recipe)return;
@@ -2678,11 +2697,12 @@ async function deleteRecipe(id){
     return;
   }
   if(!confirm(`Eliminare "${recipe.name}"?`))return;
+  const esito=await eliminaSulServer('recipes',id);
+  if(!esito.ok){toast('"'+recipe.name+'" non eliminata: '+(esito.codice==='usata_come_mattoncino'||esito.codice==='usata_in_produzione'?'una sua Ricetta '+esito.messaggio:esito.messaggio),'ti-alert-circle');return;}
   S.recipes=S.recipes.filter(r=>r.id!==id);
   if(S.selectedId===id){S.selectedId=S.recipes[0]?.id||null;}
   S.view=S.recipes.length>0?'home':'load';
   render();
-  await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'delete',table:'recipes',id})});
   toast('Scheda eliminata','ti-trash');
 }
 
@@ -2768,20 +2788,33 @@ async function confirmMerge(){
     notes:appuntiAggiuntivi?((r.notes&&r.notes.trim())?r.notes+'\n\n':(r.notes||''))+appuntiAggiuntivi:(r.notes||''),
   });
 
-  // 4) Le Schede assorbite, ora vuote, vengono eliminate — client e Supabase
-  S.recipes=S.recipes.filter(r=>!absorbedIds.includes(r.id));
-  for(const id of absorbedIds){
-    await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'delete',table:'recipes',id})});
-  }
-
+  // 4) Prima si salva la Scheda superstite (le Ricette passano a lei con lo
+  //    stesso id), poi si eliminano le Schede assorbite, solo se il server le
+  //    trova vuote (soloSeVuota): con variants.recipe_id ON DELETE CASCADE eliminare una
+  //    Scheda che contiene ancora Ricette le cancellerebbe. Se il salvataggio
+  //    non riesce, nessuna Scheda viene eliminata e si ricarica lo stato reale.
+  S.recipes=S.recipes.filter(r=>!absorbedIds.includes(r.id)); // in memoria: le Ricette stanno solo nella Scheda superstite
   const updatedSurvivor=R(survivorId);
-  if(updatedSurvivor)await saveToSupabase(updatedSurvivor);
+  const chiudi=()=>{S.selectedId=survivorId;S.mergeSourceRecipeId=null;S.mergeTargetIds=[];S.mergeNotesChoices={};S.mergeSearch='';S.showMergePicker=false;S.showMergeConfirm=false;};
+  const salvato=updatedSurvivor?await saveToSupabase(updatedSurvivor):false;
+  if(!salvato){
+    chiudi();
+    try{await loadFromSupabase();}catch(e){}
+    render();
+    toast('Unione non completata: nessuna Scheda è stata eliminata e nessuna Ricetta è andata persa. Controlla le Schede e riprova.','ti-alert-circle');
+    return;
+  }
+  const nonEliminate=[];
+  for(const id of absorbedIds){
+    const esito=await eliminaSulServer('recipes',id,{soloSeVuota:true});
+    if(!esito.ok)nonEliminate.push(id);
+  }
+  if(nonEliminate.length){try{await loadFromSupabase();}catch(e){}}
 
-  S.selectedId=survivorId;
-  S.mergeSourceRecipeId=null;S.mergeTargetIds=[];S.mergeNotesChoices={};S.mergeSearch='';
-  S.showMergePicker=false;S.showMergeConfirm=false;
+  chiudi();
   render();
-  toast('Schede unite in "'+(updatedSurvivor?updatedSurvivor.name:'')+'"','ti-git-merge');
+  if(nonEliminate.length)toast('Ricette trasferite in "'+updatedSurvivor.name+'". '+nonEliminate.length+' Scheda/e di origine non eliminata/e: risulta ancora collegata ad altri dati.','ti-alert-circle');
+  else toast('Schede unite in "'+updatedSurvivor.name+'"','ti-git-merge');
 }
 
 async function deleteVariant(recipeId,variantId){
@@ -2796,10 +2829,11 @@ async function deleteVariant(recipeId,variantId){
     return;
   }
   if(!confirm(`Eliminare la Ricetta "${vv.name}"?`))return;
+  const esito=await eliminaSulServer('variants',variantId);
+  if(!esito.ok){toast('"'+vv.name+'" non eliminata: '+esito.messaggio,'ti-alert-circle');return;}
   upRec(recipeId,r=>({...r,validatedVariants:r.validatedVariants.filter(v=>v.id!==variantId)}));
   if(S.selectedVariantId===variantId)S.selectedVariantId=null;
   toast('Ricetta eliminata','ti-trash');
-  await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'delete',table:'variants',id:variantId})});
 }
 
 // ══════════════════════════════════════════════════════════
@@ -3170,6 +3204,8 @@ async function eliminaBozza(recipeId,variantId){
   const v=(recipe.labVersions||[]).find(lv=>lv.id===variantId);
   if(!v)return;
   if(!confirm('Eliminare la bozza "'+(v.name||recipe.name)+'"? Non modifica in alcun modo la Scheda ufficiale.'))return;
+  const esito=await eliminaSulServer('variants',variantId);
+  if(!esito.ok){toast('Bozza non eliminata: '+esito.messaggio,'ti-alert-circle');return;}
 
   S.view='ricetta-madre-v2'; // mai una schermata vuota: si torna sempre alla Scheda
 
@@ -3178,7 +3214,7 @@ async function eliminaBozza(recipeId,variantId){
     return{...r,labVersions:newLabVersions,currentLabIdx:0};
   });
   toast('Bozza eliminata','ti-trash');
-  await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'delete',table:'variants',id:variantId})});
+  render();
 }
 
 function rendiAttiva(recipeId){

@@ -229,7 +229,8 @@ const SRC_UX = SRC + '\n' + EXTRA.filter(m => !defined(m)).map(extractFunction).
 // Client reale con le funzioni di stato (validazione, attivazione,
 // archiviazione, riapertura, importazione) e rendiAttiva neutralizzata.
 // ══════════════════════════════════════════════════════════
-const EXTRA_STATI = ['function retireVariant(recipeId,variantId)', 'function rendiAttiva(recipeId)', 'function bozzaVuota(v)'];
+const EXTRA_STATI = ['function retireVariant(recipeId,variantId)', 'function rendiAttiva(recipeId)', 'function bozzaVuota(v)',
+  'async function eliminaSulServer(table,id,extra)', 'async function deleteVariant(recipeId,variantId)', 'async function deleteRecipe(id)', 'async function eliminaBozza(recipeId,variantId)', 'async function confirmMerge()'];
 const SRC_STATI = SRC_UX + '\n' + EXTRA_STATI.filter(m => !defined(m) && !SRC_UX.includes(m)).map(extractFunction).join('\n');
 function makeClientStati(fetchImpl) {
   const log = { toasts: [] };
@@ -237,10 +238,10 @@ function makeClientStati(fetchImpl) {
     var S={recipes:[],selectedId:null,families:[],variantFamilies:{},variantHistory:{},unitWeights:{},unitWeightFacts:{},productionConversionFacts:{},labYieldInput:{},activeYieldEdit:null,
       view:'ricetta-madre-v2',mode:'produzione',selectedVariantId:null,pendingFamilies:[],pendingNewFamily:'',showFamilyPicker:false,familyManagerMode:false,justValidated:null,renameEdit:null,rmv2AttivaEspansa:{},pendingDuplicaSceltaRecipeId:null,confirmDeleteId:null};
     var _knownIngredientIdsByVariant={}; var _persistedValidatedSig={}; var _saveLocked=false, _saveTimer={};
-    function render(){} function autosave(){} function toast(msg){log.toasts.push(msg);}
+    function render(){} function autosave(){} function toast(msg){log.toasts.push(msg);} function alert(msg){log.toasts.push('ALERT '+msg);}
     ${SRC_STATI}
     return {S, loadFromSupabase, saveToSupabase, onValidate, confirmValidate, toggleActiveV2, rendiAttivaPronta, riapriProntaInLab, retireVariant, rendiAttiva,
-      creaBozzaDaSorgente, upLab, upRec, R, curLab};
+      creaBozzaDaSorgente, upLab, upRec, R, curLab, deleteVariant, deleteRecipe, eliminaBozza, confirmMerge};
   `)(fetchImpl, log, { getElementById: () => null }, () => true);
   c.log = log; return c;
 }
@@ -395,6 +396,177 @@ function makeClientStati(fetchImpl) {
     const r2 = await salva({ recipe: clone(fake.tables.recipes[1]), variants: [rigaPayload('lvB', { recipe_id: 'rX', status: 'validated', active: true })], ingredients: [], deletedIngredients: [] });
     assert.deepStrictEqual([r2.ok, r2.code], [false, 'attivazione_diretta']);
   });
+  function conCascade() {
+    const base = fake.fetch;
+    fake.fetch = async (url, opts = {}) => {
+      const u = new URL(url); const method = opts.method || 'GET';
+      if (method === 'DELETE' && u.pathname.endsWith('/recipes')) {
+        const id = (u.searchParams.get('id') || '').replace(/^eq\./, '');
+        const vids = fake.tables.variants.filter(v => v.recipe_id === id).map(v => v.id);
+        fake.cascate = (fake.cascate || 0) + vids.length; // Ricette cancellate a cascata con la Scheda
+        fake.tables.variants = fake.tables.variants.filter(v => v.recipe_id !== id);
+        fake.tables.ingredients = fake.tables.ingredients.filter(i => !vids.includes(i.variant_id))
+          .map(i => (i.is_sub_recipe && vids.includes(i.sub_recipe_id) ? { ...i, sub_recipe_id: null } : i));
+      }
+      if (method === 'DELETE' && u.pathname.endsWith('/variants')) {
+        const id = (u.searchParams.get('id') || '').replace(/^eq\./, '');
+        fake.tables.ingredients = fake.tables.ingredients.filter(i => i.variant_id !== id).map(i => (i.is_sub_recipe && i.sub_recipe_id === id ? { ...i, sub_recipe_id: null } : i));
+      }
+      return base(url, opts);
+    };
+    globalThis.fetch = fake.fetch;
+  }
+  async function setupEliminazioni() {
+    const c = await setup(); conCascade();
+    // vaM: Validata usata come mattoncino da vaX (altra Scheda); vaS: citata solo nello snapshot di una Sessione;
+    // lvP: bozza IN LAB con una Sessione pending storica; lvZ: bozza mai usata; rD: Scheda con sole bozze mai usate.
+    const vP = riga('vaP');
+    fake.tables.variants.push({ ...clone(vP), id: 'vaM', name: 'V vaM', label: 'V vaM' }, { ...clone(vP), id: 'vaS', name: 'V vaS', label: 'V vaS' },
+      { ...clone(vP), id: 'vaU', name: 'V vaU', label: 'V vaU' },
+      { ...clone(riga('lvB')), id: 'lvP', name: 'Bozza P', label: 'Bozza P' }, { ...clone(riga('lvB')), id: 'lvZ', name: 'Bozza Z', label: 'Bozza Z' },
+      { ...clone(riga('lvB')), id: 'lvD1', recipe_id: 'rD', name: 'Bozza D1', label: 'Bozza D1' });
+    fake.tables.recipes.push({ id: 'rD', name: 'Scheda di prova', category: 'Dolci', department: 'Cucina', notes: '', created_at: '2026-10-01T00:00:00Z' });
+    fake.tables.ingredients.push({ id: 'mat-x', variant_id: 'vaX', name: 'Crema', qty: 100, unit: 'g', sort_order: 5, is_sub_recipe: true, sub_recipe_id: 'vaM', estimated_yield_pct: null, measured_yield_pct: null },
+      { id: 'ing-d1', variant_id: 'lvD1', name: 'Farina', qty: 10, unit: 'g', sort_order: 0, is_sub_recipe: false, sub_recipe_id: null, estimated_yield_pct: null, measured_yield_pct: null });
+    fake.tables.production_sessions.push(
+      { id: 'psP', recipe_id: 'rB', source_variant_id: 'lvP', status: 'pending', snapshot: { ingredients: [{ name: 'Farina', qty: 1 }] }, target_finished_total: 1 },
+      { id: 'psS', recipe_id: 'rX', source_variant_id: 'vaX', status: 'completed', snapshot: { ingredients: [{ name: 'Glassa', qty: 1, isSubRecipe: true, subRecipeId: 'vaS' }] }, target_finished_total: 1 });
+    const c2 = makeClientStati(clientFetch); await c2.loadFromSupabase(); c2.S.selectedId = 'rB';
+    void c; return c2;
+  }
+  const esiste = id => fake.tables.variants.some(v => v.id === id);
+  const inMemoria = (c, id) => c.S.recipes.some(r => r.validatedVariants.concat(r.labVersions).some(v => v.id === id));
+  const del = (table, id, extra) => callApi(Object.assign({ supabaseAction: 'delete', table, id }, extra || {})).then(r => r.body);
+
+  await test('E1. Ricetta usata come mattoncino: eliminazione rifiutata dal server e dall\'interfaccia; il collegamento resta', async () => {
+    const c = await setupEliminazioni(); const prima = db();
+    assert.deepStrictEqual(await del('variants', 'vaM'), { ok: false, code: 'usata_come_mattoncino', error: 'la Ricetta e\' usata come mattoncino in un\'altra Ricetta: si puo\' archiviare, non eliminare' });
+    await c.deleteVariant('rB', 'vaM');
+    assert.ok(inMemoria(c, 'vaM') && esiste('vaM')); assert.deepStrictEqual(db(), prima, 'nessun SET NULL, nessuna cancellazione');
+    assert.ok(c.log.toasts.join(' ').includes('mattoncino'));
+    c.retireVariant('rB', 'vaM'); assert.strictEqual(await c.saveToSupabase(c.R('rB')), true);
+    assert.deepStrictEqual([stato('vaM'), fake.tables.ingredients.find(i => i.id === 'mat-x').sub_recipe_id], [['retired', false], 'vaM'], 'archiviata: il mattoncino resta collegato');
+  });
+
+  await test('E2. Ricette usate in Produzione (origine o mattoncino nello snapshot), anche bozze IN LAB con Sessioni storiche: non eliminabili', async () => {
+    const c = await setupEliminazioni(); const prima = db();
+    for (const id of ['vaB', 'vaQ', 'vaS', 'lvP']) assert.strictEqual((await del('variants', id)).code, 'usata_in_produzione', id);
+    await c.deleteVariant('rB', 'vaQ'); await c.eliminaBozza('rB', 'lvP');
+    assert.ok(['vaQ', 'lvP'].every(id => inMemoria(c, id) && esiste(id)));
+    assert.deepStrictEqual(db(), prima, 'Sessioni e snapshot intatti');
+    assert.strictEqual(c.log.toasts.filter(t => /Produzione: puoi archiviarla/.test(t)).length, 2);
+  });
+
+  await test('E3. bozze mai usate: eliminabili (anche mai salvate); Ricetta senza dipendenze eliminabile', async () => {
+    const c = await setupEliminazioni();
+    await c.eliminaBozza('rB', 'lvZ'); assert.ok(!esiste('lvZ') && !inMemoria(c, 'lvZ'));
+    c.creaBozzaDaSorgente('rB', null); const locale = c.R('rB').labVersions.at(-1).id;
+    assert.ok(!esiste(locale)); await c.eliminaBozza('rB', locale); assert.ok(!inMemoria(c, locale), 'mai salvata: eliminata senza errori');
+    await c.deleteVariant('rB', 'vaU'); assert.ok(!esiste('vaU') && !inMemoria(c, 'vaU'));
+  });
+
+  await test('E4. rifiuto del database (es. riga ancora collegata): l\'API risponde ok:false e l\'interfaccia non elimina nulla', async () => {
+    const c = await setupEliminazioni();
+    const base = fake.fetch;
+    globalThis.fetch = async (u, o) => ((o && o.method === 'DELETE') ? { ok: false, status: 409, json: async () => ({ code: '23503' }), text: async () => 'violates foreign key constraint' } : base(u, o));
+    const r = await del('variants', 'vaU');
+    await c.deleteVariant('rB', 'vaU');
+    globalThis.fetch = base;
+    assert.deepStrictEqual([r.ok, r.code, r.status], [false, 'db', 409]);
+    assert.ok(esiste('vaU') && inMemoria(c, 'vaU')); assert.ok(/database ha rifiutato/.test(c.log.toasts.join(' ')));
+  });
+
+  await test('E5. Schede: rifiutata se contiene Ricette protette (nessuna cascata); eliminabile se contiene solo bozze mai usate', async () => {
+    const c = await setupEliminazioni(); const prima = db();
+    assert.ok(['usata_come_mattoncino', 'usata_in_produzione'].includes((await del('recipes', 'rB')).code), 'rB: mattoncino vaM e Ricette usate in Produzione');
+    assert.strictEqual((await del('recipes', 'rX')).code, 'usata_in_produzione', 'vaX origine di una Sessione');
+    await c.deleteRecipe('rB'); assert.ok(c.S.recipes.some(r => r.id === 'rB')); assert.deepStrictEqual(db(), prima, 'nessuna Ricetta cancellata a cascata');
+    await c.deleteRecipe('rD'); assert.ok(!c.S.recipes.some(r => r.id === 'rD') && !esiste('lvD1') && !fake.tables.recipes.some(r => r.id === 'rD'));
+    assert.strictEqual((await del('recipes', 'rB', { soloSeVuota: true })).code, 'scheda_non_vuota');
+  });
+
+  await test('E6. fail-closed: se le dipendenze non si possono verificare, nessuna eliminazione', async () => {
+    await setupEliminazioni(); const prima = db(); const base = fake.fetch;
+    globalThis.fetch = async (u, o) => (String(u).includes('/production_sessions') && (!o || !o.method || o.method === 'GET') ? { ok: false, status: 500, json: async () => ({}), text: async () => 'boom' } : base(u, o));
+    const r = await del('variants', 'lvZ'); globalThis.fetch = base;
+    assert.deepStrictEqual([r.ok, r.code], [false, 'controllo_non_eseguibile']); assert.deepStrictEqual(db(), prima);
+  });
+
+  // Scheda assorbita rX: vaX Attiva (origine di una Sessione) + Validata, Attiva e bozza aggiunte.
+  async function setupUnione() {
+    const c = await setupEliminazioni();
+    const vP = riga('vaP');
+    fake.tables.variants.push({ ...clone(vP), id: 'vaY1', recipe_id: 'rX', name: 'Y1', label: 'Y1' }, { ...clone(vP), id: 'vaY2', recipe_id: 'rX', name: 'Y2', label: 'Y2', active: true },
+      { ...clone(riga('lvB')), id: 'lvY3', recipe_id: 'rX', name: 'Y3', label: 'Y3' });
+    ['vaY1', 'vaY2', 'lvY3'].forEach((v, k) => fake.tables.ingredients.push({ id: 'ing-' + v, variant_id: v, name: 'Burro', qty: 100 + k, unit: 'g', sort_order: 0, is_sub_recipe: false, sub_recipe_id: null, estimated_yield_pct: null, measured_yield_pct: null }));
+    const c2 = makeClientStati(clientFetch); await c2.loadFromSupabase(); c2.S.selectedId = 'rB';
+    void c; return c2;
+  }
+  const trasferite = ['vaX', 'vaY1', 'vaY2', 'lvY3'];
+  const firma = () => trasferite.map(id => { const v = riga(id); return [id, v.status, v.active, v.name, ingDb(id)]; });
+  const unisci = async c => { Object.assign(c.S, { mergeSourceRecipeId: 'rB', mergeTargetIds: ['rX'], mergeNotesChoices: {} }); await c.confirmMerge(); };
+
+  await test('M1. Unisci: Ricette Validate, Attive e bozze trasferite con stesso id, stato, formulazione e storico; Scheda vuota eliminata; Sessioni intatte', async () => {
+    const c = await setupUnione(); const f0 = firma(); const sess = clone(fake.tables.production_sessions); const nV = fake.tables.variants.length;
+    await unisci(c);
+    assert.deepStrictEqual(trasferite.map(id => riga(id) && riga(id).recipe_id), ['rB', 'rB', 'rB', 'rB']);
+    assert.deepStrictEqual(firma(), f0, 'stato, nome e ingredienti invariati');
+    assert.strictEqual(fake.tables.variants.length, nV, 'nessuna Ricetta persa o duplicata');
+    assert.ok(!fake.tables.recipes.some(r => r.id === 'rX'), 'Scheda assorbita eliminata solo da vuota');
+    assert.deepStrictEqual(fake.tables.production_sessions, sess);
+    assert.strictEqual(fake.tables.ingredients.find(i => i.id === 'mat-x').sub_recipe_id, 'vaM', 'collegamenti dei mattoncini intatti');
+    assert.ok(/Schede unite/.test(c.log.toasts.join(' ')));
+    assert.strictEqual(fake.cascate || 0, 0, 'nessuna Ricetta cancellata a cascata');
+  });
+
+  await test('M2. Unisci con salvataggio fallito a meta\': nessuna Scheda eliminata, nessuna Ricetta persa, stato reale ricaricato', async () => {
+    const c = await setupUnione(); const nV = fake.tables.variants.length; const base = fake.fetch;
+    globalThis.fetch = async (u, o) => ((o && o.method === 'POST' && String(u).includes('/variants') && String(o.body).includes('"vaY2"')) ? { ok: false, status: 500, json: async () => ({}), text: async () => 'boom' } : base(u, o));
+    await unisci(c); globalThis.fetch = base;
+    assert.ok(fake.tables.recipes.some(r => r.id === 'rX'), 'Scheda di origine non eliminata');
+    assert.strictEqual(fake.tables.variants.length, nV); assert.ok(trasferite.every(esiste));
+    assert.ok(c.S.recipes.some(r => r.id === 'rX'), 'interfaccia ricaricata dal database');
+    assert.ok(/nessuna Ricetta è andata persa/.test(c.log.toasts.join(' ')));
+  });
+
+  await test('M3. Unisci con eliminazione rifiutata dal database: Ricette trasferite, Scheda vuota resta, messaggio chiaro', async () => {
+    const c = await setupUnione(); const base = fake.fetch;
+    globalThis.fetch = async (u, o) => ((o && o.method === 'DELETE' && String(u).includes('/recipes')) ? { ok: false, status: 409, json: async () => ({}), text: async () => 'restrict' } : base(u, o));
+    await unisci(c); globalThis.fetch = base;
+    assert.deepStrictEqual(trasferite.map(id => riga(id).recipe_id), ['rB', 'rB', 'rB', 'rB']);
+    assert.ok(fake.tables.recipes.some(r => r.id === 'rX')); assert.ok(/non eliminata/.test(c.log.toasts.join(' ')));
+  });
+
+  await test('M4. con il CASCADE reale, eliminare prima la Scheda (vecchio ordine) e\' impossibile: soloSeVuota la rifiuta finche\' contiene Ricette', async () => {
+    await setupUnione(); const prima = db();
+    assert.strictEqual((await del('recipes', 'rX', { soloSeVuota: true })).code, 'scheda_non_vuota');
+    assert.deepStrictEqual(db(), prima, 'nessuna Ricetta cancellata a cascata');
+  });
+
+
+  await test('M5. Unisci una Scheda di Ricette non protette (bozza e Validata mai usate): la Scheda si elimina solo dopo il trasferimento, mai a cascata', async () => {
+    const c = await setupEliminazioni();
+    fake.tables.variants.push({ ...clone(riga('vaP')), id: 'vaD2', recipe_id: 'rD', name: 'D2', label: 'D2' });
+    fake.tables.ingredients.push({ id: 'ing-d2', variant_id: 'vaD2', name: 'Latte', qty: 50, unit: 'g', sort_order: 0, is_sub_recipe: false, sub_recipe_id: null, estimated_yield_pct: null, measured_yield_pct: null });
+    fake.tables.l2_items.push({ id: 'l2D2', variant_id: 'vaD2', operational_state: 'open', decision_state: 'none', content: { label: 'x', text: 'osservazione' }, evidence: null, provenance_type: 'm1', source_l2_item_id: null, baseline_hash: 'h', baseline_context: {}, created_at: '2026-10-01T00:00:00Z' });
+    const c2 = makeClientStati(clientFetch); await c2.loadFromSupabase(); c2.S.selectedId = 'rB'; void c;
+    const ing0 = [ingDb('lvD1'), ingDb('vaD2')];
+    Object.assign(c2.S, { mergeSourceRecipeId: 'rB', mergeTargetIds: ['rD'], mergeNotesChoices: {} }); await c2.confirmMerge();
+    assert.strictEqual(fake.cascate || 0, 0, 'nessuna Ricetta cancellata a cascata');
+    assert.deepStrictEqual([riga('lvD1').recipe_id, riga('vaD2').recipe_id, stato('vaD2')], ['rB', 'rB', ['validated', false]]);
+    assert.deepStrictEqual([ingDb('lvD1'), ingDb('vaD2')], ing0);
+    assert.ok(!fake.tables.recipes.some(r => r.id === 'rD') && fake.tables.l2_items.some(x => x.id === 'l2D2'), 'Scheda vuota eliminata; osservazioni conservate');
+  });
+
+  await test('R1. nessuna regressione: archiviazione, riapertura nel LAB e Sessioni storiche come prima', async () => {
+    const c = await setupEliminazioni();
+    await c.riapriProntaInLab('rB', 'vaU'); assert.deepStrictEqual(stato('vaU'), ['lab', false]);
+    c.retireVariant('rB', 'vaC'); assert.strictEqual(await c.saveToSupabase(c.R('rB')), true); assert.deepStrictEqual(stato('vaC'), ['retired', false]);
+    const r = await callApi({ supabaseAction: 'startProductionSession', sessionId: 'psP' });
+    assert.ok(r.body && !r.body.error, 'Sessione pending storica di una bozza IN LAB: avviabile come prima ' + JSON.stringify(r.body));
+    assert.strictEqual(fake.tables.production_sessions.find(s => s.id === 'psP').status, 'in_progress');
+  });
+
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);
 })().catch(e => { console.log('ERRORE', e && e.stack); process.exit(1); });

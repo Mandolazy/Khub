@@ -612,6 +612,31 @@ export default async function handler(req, res) {
       return null;
     }
 
+    // Eliminazione di Ricette e Schede: mai una Ricetta usata come mattoncino da
+    // un'altra Ricetta o collegata a una Sessione di Produzione (come origine o
+    // come mattoncino nello snapshot, anche storica): si archivia, non si
+    // elimina. Una Scheda si elimina solo se nessuna sua Ricetta e' protetta;
+    // con soloSeVuota (Unisci) solo se non contiene piu' alcuna Ricetta.
+    async function eliminazioneProblema(table, id, soloSeVuota) {
+      let ids = [id];
+      if (table === 'recipes') {
+        const vr = await fetch(SB + '/rest/v1/variants?recipe_id=eq.' + encodeURIComponent(id) + '&select=id', { headers: SH_READ });
+        if (!vr.ok) throw new Error('lettura delle Ricette della Scheda non riuscita');
+        ids = (await vr.json()).map(v => v.id).filter(isValidId);
+        if (soloSeVuota && ids.length) return { code: 'scheda_non_vuota', msg: 'la Scheda contiene ancora ' + ids.length + ' Ricett' + (ids.length === 1 ? 'a' : 'e') + ': non viene eliminata' };
+        if (!ids.length) return null;
+      }
+      const mr = await fetch(SB + '/rest/v1/ingredients?sub_recipe_id=in.' + listaIn(ids) + '&is_sub_recipe=eq.true&select=variant_id,sub_recipe_id', { headers: SH_READ });
+      if (!mr.ok) throw new Error('verifica dei mattoncini non riuscita');
+      const usi = (await mr.json()).filter(u => !ids.includes(u.variant_id)); // riferimenti interni alla stessa Scheda non contano
+      if (usi.length) return { code: 'usata_come_mattoncino', msg: (table === 'recipes' ? 'una Ricetta di questa Scheda e\' usata' : 'la Ricetta e\' usata') + ' come mattoncino in un\'altra Ricetta: si puo\' archiviare, non eliminare' };
+      const sessioni = await sbSelectAll('production_sessions?select=id,source_variant_id,snapshot&order=id.asc');
+      const usata = sessioni.some(ps => ids.includes(ps.source_variant_id)
+        || (ps.snapshot && Array.isArray(ps.snapshot.ingredients) && ps.snapshot.ingredients.some(i => i && ids.includes(i.subRecipeId))));
+      if (usata) return { code: 'usata_in_produzione', msg: (table === 'recipes' ? 'una Ricetta di questa Scheda e\' stata usata' : 'la Ricetta e\' stata usata') + ' in Produzione: si puo\' archiviare, non eliminare' };
+      return null;
+    }
+
     // Sessioni: una Sessione si crea una sola volta (mai riscritta: lo snapshot
     // resta quello della creazione), solo da una Ricetta Attiva; gli stati di
     // spunte e passaggi si creano una sola volta, per una Sessione pending.
@@ -1188,13 +1213,33 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: 'delete: tabella non ammessa', code: 'not_allowed' });
       }
       if (!isValidId(body.id)) return res.status(400).json({ error: 'delete: id non valido', code: 'invalid' });
+      // Ricette e Schede: protezioni lette dal database prima di eliminare
+      // (variants.recipe_id e' ON DELETE CASCADE, ingredients.sub_recipe_id
+      // e' ON DELETE SET NULL: un'eliminazione sbagliata non si annulla).
+      if (table === 'variants' || table === 'recipes') {
+        let problema;
+        try { problema = await eliminazioneProblema(table, body.id, body.soloSeVuota === true); }
+        catch (e) { problema = { code: 'controllo_non_eseguibile', msg: 'controllo delle dipendenze non eseguibile: ' + e.message }; }
+        if (problema) {
+          console.error('Eliminazione rifiutata:', table, body.id, problema.code);
+          return res.status(200).json({ ok: false, code: problema.code, error: problema.msg });
+        }
+      }
       // Una Sessione si elimina solo come pulizia di una creazione fallita,
       // quando e' ancora pending: mai una Sessione avviata o completata.
       const onlyPending = table === 'production_sessions' ? '&status=eq.pending' : '';
-      await fetch(SB + '/rest/v1/' + table + '?id=eq.' + encodeURIComponent(body.id) + onlyPending, {
-        method: 'DELETE', headers: SH_DEL
+      const dr = await fetch(SB + '/rest/v1/' + table + '?id=eq.' + encodeURIComponent(body.id) + onlyPending, {
+        method: 'DELETE', headers: Object.assign({}, SH_DEL, { 'Prefer': 'return=representation' })
       });
-      return res.status(200).json({ ok: true });
+      if (!dr.ok) {
+        // Es. 409: riga ancora referenziata (osservazioni MichelinAI, bozze che la indicano come origine).
+        const detail = await dr.text().catch(() => '');
+        console.error('Supabase error [delete ' + table + ']:', dr.status, detail);
+        return res.status(200).json({ ok: false, code: 'db', status: dr.status, error: 'il database ha rifiutato l\'eliminazione' });
+      }
+      const eliminate = await dr.json().catch(() => null);
+      // 0 righe: gia' assente (es. bozza mai salvata) -> nulla da eliminare, esito positivo.
+      return res.status(200).json({ ok: true, deleted: Array.isArray(eliminate) ? eliminate.length : null });
     }
 
     // UX dopo la validazione: correzione del nome di una Ricetta validata
