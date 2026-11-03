@@ -1,0 +1,3 @@
+# 2026-11-01T22:41:07.062Z
+cp khub_mvp.html /tmp/claude-0/-home-user-Khub/72a60e49-aca5-5514-bb9d-e5a4330113b3/scratchpad/k.bak && sed -i "s/  return v.active===true?'attiva':'validata';/  return 'attiva';/" khub_mvp.html && HTTPS_PROXY=http://127.0.0.1:9 node scripts/test-preview-direzione-3.js 2>&1 | grep -E "^  FAIL|passed"; cp /tmp/claude-0/-home-user-Khub/72a60e49-aca5-5514-bb9d-e5a4330113b3/scratchpad/k.bak khub_mvp.html
+for f in scripts/test-*.js; do case "$f" in *live*|*roundtrip*) continue;; esac; out=$(HTTPS_PROXY=http://127.0.0.1:9 timeout 180 node "$f" 2>&1); rc=$?; [ $rc -ne 0 ] && echo "$rc $f :: $(echo "$out" | grep -E 'FAIL' | head -3) $(echo "$out" | grep passed | tail -1)"; done; echo fine-regressione

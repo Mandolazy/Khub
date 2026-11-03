@@ -1,0 +1,2 @@
+# 2026-11-01T22:42:03.590Z
+sed -i "s|    assert.strictEqual(c.renderProdRecipe(rec(c)), cm.renderProdRecipe(rec(cm)), 'Ricetta in Produzione');|    { const a1 = c.renderProdRecipe(rec(c)), b1 = cm.renderProdRecipe(rec(cm)); if (a1 !== b1) { let i = 0; while (a1[i] === b1[i]) i++; console.log('DIFF', JSON.stringify(a1.slice(i - 80, i + 80)), '\\\\n', JSON.stringify(b1.slice(i - 80, i + 80))); } assert.strictEqual(a1, b1, 'Ricetta in Produzione'); }|" scripts/test-preview-direzione-3.js && HTTPS_PROXY=http://127.0.0.1:9 node scripts/test-preview-direzione-3.js 2>&1 | grep DIFF

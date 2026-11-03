@@ -1,0 +1,3 @@
+# 2026-11-01T22:42:18.343Z
+h=$(HTTPS_PROXY=http://127.0.0.1:9 node scripts/test-fix2d-lab-weights.js 2>&1 | grep -A4 "renderProdRecipe" | grep -o "+ '[0-9a-f]\{16\}'" | grep -o "[0-9a-f]\{16\}"); echo "nuova impronta: $h"; [ -n "$h" ] && sed -i "s/'function renderProdRecipe(recipe)': '5f2531985a632050'/'function renderProdRecipe(recipe)': '$h'/" scripts/test-fix2d-lab-weights.js scripts/test-schede-categorie.js
+for f in scripts/test-*.js; do case "$f" in *live*|*roundtrip*) continue;; esac; out=$(HTTPS_PROXY=http://127.0.0.1:9 timeout 180 node "$f" 2>&1); rc=$?; echo "$rc $(basename $f) $(echo "$out" | grep -E 'passed' | tail -1)"; done 2>&1 | awk '{ok+=($1==0)} $1!=0{print} END{print ok" suite verdi"}'

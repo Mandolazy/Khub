@@ -1,0 +1,2 @@
+# 2026-10-28T23:15:59.920Z
+sed -i 's/split("\\n").slice(0, 8)/split(\x27\\n\x27).slice(0, 4)/' scripts/test-stati-ricetta.js && sed -n 24,28p scripts/test-stati-ricetta.js | head -3; sed -i "s|    assert.ok(!fake.tables.recipes.some(r => r.id === 'rE') \&\& !esiste('lvE9') \&\& !schedaInMemoria(c, 'rE'));|    assert.ok(!fake.tables.recipes.some(r => r.id === 'rE') \&\& !esiste('lvE9') \&\& !schedaInMemoria(c, 'rE'), c.log.toasts.join(' \| '));|" scripts/test-stati-ricetta.js; HTTPS_PROXY=http://127.0.0.1:9 node scripts/test-stati-ricetta.js 2>&1 | grep -A2 "FAIL"

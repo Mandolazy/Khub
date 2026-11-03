@@ -1,0 +1,2 @@
+# 2026-10-28T23:16:07.748Z
+sed -i "s|    c.creaBozzaDaSorgente('rE', null); c.S.confirmDeleteId = 'rE'; await c.deleteRecipe('rE');|    c.creaBozzaDaSorgente('rE', null); c.S.confirmDeleteId = 'rE'; console.log('DBG', idsScheda('rE'), c.ricetteDellaScheda(c.R('rE'))); await c.deleteRecipe('rE');|" scripts/test-stati-ricetta.js; HTTPS_PROXY=http://127.0.0.1:9 node scripts/test-stati-ricetta.js 2>&1 | grep DBG
