@@ -616,22 +616,19 @@ export default async function handler(req, res) {
     // un'altra Ricetta o collegata a una Sessione di Produzione (come origine o
     // come mattoncino nello snapshot, anche storica): si archivia, non si
     // elimina. Una Scheda si elimina solo se nessuna sua Ricetta e' protetta;
-    // con soloSeVuota (Unisci) solo se non contiene piu' alcuna Ricetta.
+    // Unisci (soloSeVuota) non passa da qui: vedi eliminaSchedaSeVuota.
     // Elimina Scheda: la cascata cancella solo Ricette confermate dall'utente
     // (ricetteAttese); se nel database ce n'e' una in piu', nulla si elimina.
     // Le osservazioni di MichelinAI (L2/L3) non si cancellano mai da qui.
-    async function eliminazioneProblema(table, id, soloSeVuota, ricetteAttese) {
+    async function eliminazioneProblema(table, id, ricetteAttese) {
       let ids = [id];
       if (table === 'recipes') {
         const vr = await fetch(SB + '/rest/v1/variants?recipe_id=eq.' + encodeURIComponent(id) + '&select=id', { headers: SH_READ });
         if (!vr.ok) throw new Error('lettura delle Ricette della Scheda non riuscita');
         ids = (await vr.json()).map(v => v.id).filter(isValidId);
-        if (soloSeVuota && ids.length) return { code: 'scheda_non_vuota', msg: 'la Scheda contiene ancora ' + ids.length + ' Ricett' + (ids.length === 1 ? 'a' : 'e') + ': non viene eliminata' };
-        if (!soloSeVuota) {
-          if (!Array.isArray(ricetteAttese)) return { code: 'conferma_mancante', msg: 'manca l\'elenco delle Ricette confermate: nessuna eliminazione' };
-          const nonConfermate = ids.filter(v => !ricetteAttese.includes(v));
-          if (nonConfermate.length) return { code: 'scheda_cambiata', msg: 'la Scheda contiene Ricette diverse da quelle confermate: nessuna eliminazione' };
-        }
+        if (!Array.isArray(ricetteAttese)) return { code: 'conferma_mancante', msg: 'manca l\'elenco delle Ricette confermate: nessuna eliminazione' };
+        const nonConfermate = ids.filter(v => !ricetteAttese.includes(v));
+        if (nonConfermate.length) return { code: 'scheda_cambiata', msg: 'la Scheda contiene Ricette diverse da quelle confermate: nessuna eliminazione' };
         const l3 = await fetch(SB + '/rest/v1/l3_items?recipe_id=eq.' + encodeURIComponent(id) + '&select=id&limit=1', { headers: SH_READ });
         if (!l3.ok) throw new Error('verifica delle osservazioni MichelinAI non riuscita');
         if ((await l3.json()).length) return { code: 'osservazioni_michelinai', msg: 'la Scheda ha osservazioni di MichelinAI collegate: non viene eliminata' };
@@ -649,6 +646,34 @@ export default async function handler(req, res) {
       if (!l2.ok) throw new Error('verifica delle osservazioni MichelinAI non riuscita');
       if ((await l2.json()).length) return { code: 'osservazioni_michelinai', msg: (table === 'recipes' ? 'una Ricetta di questa Scheda ha' : 'la Ricetta ha') + ' osservazioni di MichelinAI collegate: non viene eliminata' };
       return null;
+    }
+
+    // Unisci: la Scheda di origine si elimina solo se e' vuota, con controllo
+    // ed eliminazione in un'unica transazione nel database (funzione
+    // elimina_scheda_se_vuota, docs/proposte/elimina_scheda_se_vuota.sql):
+    // nessuna Ricetta puo' finire nella cascata di variants.recipe_id.
+    // Mai una DELETE alternativa: se la funzione manca, sbaglia o non
+    // risponde, la Scheda resta e l'esito lo dice.
+    async function eliminaSchedaSeVuota(id) {
+      let r;
+      try {
+        r = await fetch(SB + '/rest/v1/rpc/elimina_scheda_se_vuota', { method: 'POST', headers: SH_READ, body: JSON.stringify({ p_recipe_id: id }) });
+      } catch (e) {
+        return { code: 'rpc_errore', msg: 'eliminazione sicura non raggiungibile: la Scheda e\' conservata' };
+      }
+      if (!r.ok) {
+        const detail = await r.text().catch(() => '');
+        console.error('Supabase error [rpc elimina_scheda_se_vuota]:', r.status, detail);
+        if (r.status === 404 || /PGRST202/.test(detail)) return { code: 'rpc_assente', msg: 'funzione elimina_scheda_se_vuota non installata: la Scheda e\' conservata' };
+        return { code: 'rpc_errore', msg: 'eliminazione sicura non riuscita: la Scheda e\' conservata' };
+      }
+      const esito = await r.json().catch(() => null);
+      if (esito === 'eliminata') return { ok: true, deleted: 1 };
+      if (esito === 'assente') return { ok: true, deleted: 0 };
+      if (esito === 'non_vuota') return { code: 'scheda_non_vuota', msg: 'la Scheda contiene ancora delle Ricette: non viene eliminata' };
+      if (esito === 'osservazioni_michelinai') return { code: 'osservazioni_michelinai', msg: 'la Scheda ha osservazioni di MichelinAI collegate: non viene eliminata' };
+      console.error('Risposta inattesa da elimina_scheda_se_vuota:', JSON.stringify(esito).slice(0, 100));
+      return { code: 'rpc_errore', msg: 'risposta inattesa dall\'eliminazione sicura: la Scheda e\' conservata' };
     }
 
     // Sessioni: una Sessione si crea una sola volta (mai riscritta: lo snapshot
@@ -1230,9 +1255,15 @@ export default async function handler(req, res) {
       // Ricette e Schede: protezioni lette dal database prima di eliminare
       // (variants.recipe_id e' ON DELETE CASCADE, ingredients.sub_recipe_id
       // e' ON DELETE SET NULL: un'eliminazione sbagliata non si annulla).
+      if (table === 'recipes' && body.soloSeVuota === true) {
+        const esito = await eliminaSchedaSeVuota(body.id);
+        if (esito.ok) return res.status(200).json({ ok: true, deleted: esito.deleted });
+        console.error('Eliminazione rifiutata:', table, body.id, esito.code);
+        return res.status(200).json({ ok: false, code: esito.code, error: esito.msg });
+      }
       if (table === 'variants' || table === 'recipes') {
         let problema;
-        try { problema = await eliminazioneProblema(table, body.id, body.soloSeVuota === true, body.ricetteAttese); }
+        try { problema = await eliminazioneProblema(table, body.id, body.ricetteAttese); }
         catch (e) { problema = { code: 'controllo_non_eseguibile', msg: 'controllo delle dipendenze non eseguibile: ' + e.message }; }
         if (problema) {
           console.error('Eliminazione rifiutata:', table, body.id, problema.code);

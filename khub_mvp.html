@@ -2743,7 +2743,9 @@ async function eliminaSulServer(table,id,extra){
       controllo_non_eseguibile:'non è stato possibile verificare le dipendenze: riprova.',
       osservazioni_michelinai:'ha osservazioni di MichelinAI collegate, che non vengono eliminate: per ora non si può eliminare.',
       scheda_cambiata:'la Scheda è cambiata nel frattempo (contiene Ricette diverse da quelle confermate). Ricontrolla e riprova.',
-      conferma_mancante:'manca la conferma delle Ricette da eliminare: riprova.'
+      conferma_mancante:'manca la conferma delle Ricette da eliminare: riprova.',
+      rpc_assente:'l\'eliminazione sicura non è ancora installata nel database: la Scheda è stata conservata.',
+      rpc_errore:'l\'eliminazione sicura non è riuscita: la Scheda è stata conservata. Riprova più tardi.'
     };
     return{ok:false,codice:data&&data.code||'errore',messaggio:motivi[data&&data.code]||((data&&data.error)||('errore '+res.status))};
   }catch(e){return{ok:false,codice:'rete',messaggio:'controlla la connessione e riprova.'};}
@@ -2888,16 +2890,16 @@ async function confirmMerge(){
     toast('Unione non completata: nessuna Scheda è stata eliminata e nessuna Ricetta è andata persa. Controlla le Schede e riprova.','ti-alert-circle');
     return;
   }
-  const nonEliminate=[];
+  const nonEliminate=[];let motivo='';
   for(const id of absorbedIds){
     const esito=await eliminaSulServer('recipes',id,{soloSeVuota:true});
-    if(!esito.ok)nonEliminate.push(id);
+    if(!esito.ok){nonEliminate.push(id);motivo=motivo||esito.messaggio;}
   }
   if(nonEliminate.length){try{await loadFromSupabase();}catch(e){}}
 
   chiudi();
   render();
-  if(nonEliminate.length)toast('Ricette trasferite in "'+updatedSurvivor.name+'". '+nonEliminate.length+' Scheda/e di origine non eliminata/e: risulta ancora collegata ad altri dati.','ti-alert-circle');
+  if(nonEliminate.length)toast('Ricette trasferite in "'+updatedSurvivor.name+'". '+nonEliminate.length+' Scheda/e di origine non eliminata/e: '+motivo,'ti-alert-circle');
   else toast('Schede unite in "'+updatedSurvivor.name+'"','ti-git-merge');
 }
 

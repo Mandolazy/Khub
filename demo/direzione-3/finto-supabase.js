@@ -2,7 +2,8 @@
  * Finto Supabase (PostgREST) in memoria per la demo locale della Direzione 3.
  * Riproduce solo cio' che api/chat.js usa davvero: GET con filtri, ordine e
  * paginazione; POST con upsert (merge-duplicates / ignore-duplicates);
- * PATCH e DELETE filtrati; Prefer: return=representation.
+ * PATCH e DELETE filtrati; Prefer: return=representation; la funzione
+ * elimina_scheda_se_vuota (Unisci).
  * Nessuna rete: i dati vivono solo nella memoria del processo e si perdono
  * alla chiusura della demo.
  */
@@ -85,6 +86,17 @@ function creaFintoSupabase(datiIniziali) {
     const corrisponde = r => filtri.every(f => confronta(r, f));
 
     try {
+      // Funzione elimina_scheda_se_vuota (docs/proposte/elimina_scheda_se_vuota.sql):
+      // nella demo e' "installata", con la stessa logica.
+      if (method === 'POST' && table === 'rpc/elimina_scheda_se_vuota') {
+        const id = String((JSON.parse(opts.body || '{}') || {}).p_recipe_id || '');
+        let esito;
+        if (!(tables.recipes || []).some(r => r.id === id)) esito = 'assente';
+        else if ((tables.variants || []).some(v => v.recipe_id === id)) esito = 'non_vuota';
+        else if ((tables.l3_items || []).some(x => x.recipe_id === id)) esito = 'osservazioni_michelinai';
+        else { tables.recipes = tables.recipes.filter(r => r.id !== id); esito = 'eliminata'; }
+        return risposta(200, esito);
+      }
       if (method === 'GET') {
         const out = rows.filter(corrisponde).sort((a, b) => ordina(a, b, ordine));
         return risposta(200, proietta(out.slice(offset, limit == null ? undefined : offset + limit), select));
