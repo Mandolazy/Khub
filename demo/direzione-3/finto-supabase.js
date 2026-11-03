@@ -94,6 +94,7 @@ function creaFintoSupabase(datiIniziali) {
         if (!(tables.recipes || []).some(r => r.id === id)) esito = 'assente';
         else if ((tables.variants || []).some(v => v.recipe_id === id)) esito = 'non_vuota';
         else if ((tables.l3_items || []).some(x => x.recipe_id === id)) esito = 'osservazioni_michelinai';
+        else if ((tables.recipes || []).some(r => r.parent_recipe_id === id) || (tables.ingredients || []).some(i => i.group_recipe_id === id)) esito = 'collegata';
         else { tables.recipes = tables.recipes.filter(r => r.id !== id); esito = 'eliminata'; }
         return risposta(200, esito);
       }

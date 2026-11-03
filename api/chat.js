@@ -679,6 +679,7 @@ export default async function handler(req, res) {
       if (esito === 'assente') return { ok: true, deleted: 0 };
       if (esito === 'non_vuota') return { code: 'scheda_non_vuota', msg: 'la Scheda contiene ancora delle Ricette: non viene eliminata' };
       if (esito === 'osservazioni_michelinai') return { code: 'osservazioni_michelinai', msg: 'la Scheda ha osservazioni di MichelinAI collegate: non viene eliminata' };
+      if (esito === 'collegata') return { code: 'scheda_collegata', msg: 'la Scheda e\' ancora indicata da altri dati (Scheda principale o ingrediente di gruppo): non viene eliminata' };
       console.error('Risposta inattesa da elimina_scheda_se_vuota:', JSON.stringify(esito).slice(0, 100));
       return { code: 'rpc_errore', msg: 'risposta inattesa dall\'eliminazione sicura: la Scheda e\' conservata' };
     }

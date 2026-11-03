@@ -300,6 +300,7 @@ function assertSafe(c, ctx, rpcAmmessa = false) {
     const esiti = [
       ['eliminata', { ok: true, deleted: 1 }], ['assente', { ok: true, deleted: 0 }],
       ['non_vuota', { ok: false, code: 'scheda_non_vuota' }], ['osservazioni_michelinai', { ok: false, code: 'osservazioni_michelinai' }],
+      ['collegata', { ok: false, code: 'scheda_collegata' }],
       ['qualcosa', { ok: false, code: 'rpc_errore' }]];
     for (const [risposta, atteso] of esiti) {
       rpcRisposta = () => ({ ok: true, status: 200, json: async () => risposta, text: async () => JSON.stringify(risposta) });

@@ -52,3 +52,12 @@ codice di base è diverso, si fermano senza modificare nulla.
 
 Le patch `d455725`, `7e67e01` e `179bf08` si applicano solo dopo aver
 ricostruito `c52d013` e `fb90da0`, nell'ordine originale.
+
+## Script SQL superato (novembre 2026)
+
+`sql/khub_test_elimina_scheda_se_vuota.sql` resta qui come testo storico ma
+**non va più eseguito**: la sua verifica preliminare rifiuta le due foreign
+key `ON DELETE SET NULL` che lo schema reale contiene
+(`recipes.parent_recipe_id`, `ingredients.group_recipe_id`). La versione
+corretta per KHUB Test è `docs/proposte/khub_test_elimina_scheda_se_vuota.sql`,
+verificata da `scripts/db/test-elimina-scheda-se-vuota.sh`.

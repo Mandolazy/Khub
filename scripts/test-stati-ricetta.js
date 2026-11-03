@@ -460,6 +460,7 @@ function makeClientStati(fetchImpl) {
         if (!t.recipes.some(r => r.id === id)) esito = 'assente';
         else if (t.variants.some(v => v.recipe_id === id)) esito = 'non_vuota';
         else if (t.l3_items.some(x => x.recipe_id === id)) esito = 'osservazioni_michelinai';
+        else if (t.recipes.some(r => r.parent_recipe_id === id) || (t.ingredients || []).some(i => i.group_recipe_id === id)) esito = 'collegata';
         else { fake.daRpc = true; await fake.fetch(u.origin + '/rest/v1/recipes?id=eq.' + encodeURIComponent(id), { method: 'DELETE', headers: {} }); fake.daRpc = false; esito = 'eliminata'; }
         return { ok: true, status: 200, json: async () => esito, text: async () => JSON.stringify(esito) };
       }
@@ -723,6 +724,23 @@ function makeClientStati(fetchImpl) {
     assert.ok(fake.tables.recipes.some(r => r.id === 'rX') && fake.tables.l3_items.some(x => x.id === 'l3X'), 'Scheda e osservazioni conservate');
     assert.ok(/osservazioni di MichelinAI/.test(c.log.toasts.join(' ')));
     assert.deepStrictEqual(trasferite.map(id => riga(id).recipe_id), ['rB', 'rB', 'rB', 'rB']);
+  });
+
+  await test('M8. Unisci: Scheda di origine ancora indicata da altre righe (parent_recipe_id, group_recipe_id) -> conservata, riferimenti intatti, messaggio chiaro', async () => {
+    for (const [nome, extra, verifica] of [
+      ['parent_recipe_id', () => fake.tables.recipes.push({ id: 'rFiglia', name: 'Figlia', category: 'Base', parent_recipe_id: 'rX' }),
+        () => fake.tables.recipes.find(r => r.id === 'rFiglia').parent_recipe_id],
+      ['group_recipe_id', () => fake.tables.ingredients.push({ id: 'ing-gr', variant_id: 'vaAltro', name: 'Gruppo', qty: 1, unit: 'g', sort_order: 9, is_sub_recipe: false, sub_recipe_id: null, group_recipe_id: 'rX' }),
+        () => fake.tables.ingredients.find(i => i.id === 'ing-gr').group_recipe_id]]) {
+      const c = await setupUnione(); extra(); const nV = fake.tables.variants.length;
+      await unisci(c);
+      assert.ok(fake.tables.recipes.some(r => r.id === 'rX'), nome + ': Scheda conservata');
+      assert.strictEqual(verifica(), 'rX', nome + ': riferimento non scollegato');
+      assert.strictEqual(fake.deleteSchedeDirette || 0, 0, nome + ': nessuna DELETE alternativa');
+      assert.strictEqual(fake.tables.variants.length, nV, nome + ': nessuna Ricetta persa');
+      assert.deepStrictEqual(trasferite.map(id => riga(id).recipe_id), ['rB', 'rB', 'rB', 'rB']);
+      assert.ok(/ancora indicata da altri dati/.test(c.log.toasts.join(' ')), nome + ': ' + c.log.toasts.join(' | '));
+    }
   });
 
   await test('M4. con il CASCADE reale, eliminare prima la Scheda (vecchio ordine) e\' impossibile: soloSeVuota la rifiuta finche\' contiene Ricette', async () => {
