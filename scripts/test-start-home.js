@@ -47,8 +47,9 @@ function extractFunction(startMarker) {
     let done;
     const finished = new Promise(r => { done = r; });
     const body = 'var _initDone=false;\nreturn ' + html.slice(start, end - 1).replace(/_initDone=true;/, '_initDone=true;done();');
-    new Function('S', 'render', 'loadFromSupabase', 'checkOnboarding', 'done', body)(
-      S, () => {}, async () => { S.recipes = recipes; }, checkOnboarding, done);
+    // initUiD3 (anteprima Direzione 3) non tocca il flusso di avvio: qui e' neutra.
+    new Function('S', 'render', 'loadFromSupabase', 'checkOnboarding', 'done', 'initUiD3', body)(
+      S, () => {}, async () => { S.recipes = recipes; }, checkOnboarding, done, () => {});
     await finished;
     return S;
   }

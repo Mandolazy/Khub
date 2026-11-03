@@ -56,6 +56,7 @@ nella demo vengono perse (alla riapertura ritrovi i dati iniziali).
 | Entrare nel LAB | nella Scheda, sulla Ricetta «In LAB» → **Apri nel LAB**; oppure **Risotto agli asparagi** (18 ingredienti, titolo lungo) |
 | Modificare | cambia quantità e nomi degli ingredienti, il testo dei passaggi, la resa |
 | Salvataggio | dopo una modifica compare «Salvato»; ricarica la pagina (⌘ + R): l'app riparte dalla pagina iniziale (come oggi), rientra in **Schede** → Scheda → LAB e la modifica è ancora lì |
+| Elenco LAB | **LAB**: bozze raggruppate per Scheda; in alto **Ultima modifica** (predefinito) o **A–Z**. Dopo una modifica la bozza sale in cima alla successiva apertura della pagina |
 | Arrotonda quantità | interruttore nell'intestazione del LAB |
 | Esporta | **↓ Esporta** → PDF ricetta (si apre la finestra di stampa) |
 | Navigazione mobile | barra in basso Produzione / Schede / LAB; nel LAB le sezioni Ingredienti, Procedimento, Note… |

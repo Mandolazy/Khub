@@ -857,6 +857,15 @@ body.ui-d3 .sec-label{color:var(--d3-ink2);font-size:10.5px;}
 body.ui-d3 .bottom-nav{background:var(--d3-bar);border-top-color:var(--d3-bordo);}
 body.ui-d3 .bnav-btn{color:var(--d3-ink2);font-size:12px;}
 body.ui-d3 .bnav-btn.active,body.ui-d3 .bnav-btn.active-lab{color:var(--d3-ink);background:var(--d3-sabbia);box-shadow:inset 0 3px 0 var(--d3-ink);font-weight:600;}
+body.ui-d3 :is(#sb-lab,#bnav-lab) i{color:var(--d3-amb-lab);}
+body.ui-d3 :is(#sb-ricette,#bnav-ricette) i{color:var(--d3-amb-schede);}
+body.ui-d3 :is(#sb-produzione,#bnav-produzione) i{color:var(--d3-amb-produzione);}
+body.ui-d3 #sb-lab.active{box-shadow:inset 3px 0 0 var(--d3-amb-lab);}
+body.ui-d3 #sb-ricette.active{box-shadow:inset 3px 0 0 var(--d3-amb-schede);}
+body.ui-d3 #sb-produzione.active{box-shadow:inset 3px 0 0 var(--d3-amb-produzione);}
+body.ui-d3 #bnav-lab.active{box-shadow:inset 0 3px 0 var(--d3-amb-lab);}
+body.ui-d3 #bnav-ricette.active{box-shadow:inset 0 3px 0 var(--d3-amb-schede);}
+body.ui-d3 #bnav-produzione.active{box-shadow:inset 0 3px 0 var(--d3-amb-produzione);}
 body.ui-d3 .card{background:var(--d3-card);border-color:var(--d3-bordo);}
 .d3-serif{font-family:'Newsreader',Georgia,serif;font-weight:500;letter-spacing:-0.01em;}
 .d3-wrap{max-width:1180px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:16px;}
@@ -1131,6 +1140,22 @@ body.ui-d3 :is(.btn-outline,.btn-ghost):not(.d3-lab *):hover{background:var(--d3
 body.ui-d3 .btn-ghost-danger{background:transparent;color:#A33A2A;border:1.5px solid #E7C9C2;}
 /* Home */
 .d3-home-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;}
+/* Colori di ambiente: solo dettagli (icona, filetto, conteggio, freccia), mai
+   blocchi pieni; non sostituiscono gli stati delle Ricette (pillole e bande). */
+body.ui-d3{--d3-amb-lab:#24533F;--d3-amb-lab-tinta:#E3EDE7;--d3-amb-schede:#94661C;--d3-amb-schede-tinta:#F3E8D2;--d3-amb-produzione:#B4501C;--d3-amb-produzione-tinta:#F6E4D8;}
+.d3-amb-lab{--amb:var(--d3-amb-lab);--amb-tinta:var(--d3-amb-lab-tinta);}
+.d3-amb-schede{--amb:var(--d3-amb-schede);--amb-tinta:var(--d3-amb-schede-tinta);}
+.d3-amb-produzione{--amb:var(--d3-amb-produzione);--amb-tinta:var(--d3-amb-produzione-tinta);}
+.d3-home-card[class*="d3-amb-"]{grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"i t f" "i d f" "i c f";box-shadow:inset 4px 0 0 var(--amb);}
+.d3-home-card-icona{grid-area:i;align-self:start;width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:var(--amb-tinta);color:var(--amb);margin-right:2px;}
+.d3-home-card[class*="d3-amb-"] .d3-home-card-conteggio,.d3-home-card[class*="d3-amb-"] .d3-home-card-freccia{color:var(--amb);}
+/* Elenco LAB: ordine "Ultima modifica" / A-Z */
+.d3-labg-testa{display:flex;align-items:flex-end;justify-content:space-between;gap:10px 16px;flex-wrap:wrap;}
+.d3-ordine{display:inline-flex;border:1.5px solid var(--d3-bordo);border-radius:8px;overflow:hidden;background:var(--d3-card);}
+.d3-ordine button{background:none;border:none;font:inherit;font-size:14px;color:var(--d3-ink2);padding:8px 14px;min-height:40px;cursor:pointer;}
+.d3-ordine button+button{border-left:1.5px solid var(--d3-bordo);}
+.d3-ordine button[aria-pressed="true"]{background:var(--d3-sabbia);color:var(--d3-ink);font-weight:600;}
+.d3-facoltativa{font-size:12px;color:var(--d3-grigio);font-weight:400;}
 .d3-home-card{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"t f" "d f" "c f";align-items:center;gap:4px 12px;text-align:left;padding:18px 22px;cursor:pointer;font-family:inherit;color:var(--d3-ink);}
 .d3-home-card:hover{background:var(--d3-bar);border-color:var(--d3-campo);}
 .d3-home-card-titolo{grid-area:t;font-size:26px;line-height:1.15;}
@@ -8391,9 +8416,9 @@ function renderSidebar(){
   return `<button class="new-btn" id="btn-new-recipe"><i class="ti ti-plus"></i> Nuova Scheda</button>
   <button class="load-btn ${S.view==='load'?'active':''}" id="btn-load-view"><i class="ti ti-upload"></i> Carica Scheda</button>
   <div class="sec-label">Navigazione</div>
-  <button class="load-btn ${isProduzione?'active':''}" id="sb-produzione"><i class="ti ti-tools-kitchen-2"></i> Produzione</button>
-  <button class="load-btn ${isRicette?'active':''}" id="sb-ricette"><i class="ti ti-book-2"></i> Schede</button>
-  <button class="load-btn ${isLab?'active':''}" id="sb-lab"><i class="ti ti-flask"></i> LAB</button>
+  ${d3OrdineNav([`<button class="load-btn ${isProduzione?'active':''}" id="sb-produzione"><i class="ti ti-tools-kitchen-2"></i> Produzione</button>`,
+  `<button class="load-btn ${isRicette?'active':''}" id="sb-ricette"><i class="ti ti-book-2"></i> Schede</button>`,
+  `<button class="load-btn ${isLab?'active':''}" id="sb-lab"><i class="ti ti-flask"></i> LAB</button>`]).join('\n  ')}
   <button class="d3-sb-toggle" onclick="setUiD3(${S.uiD3?'false':'true'})" title="Anteprima della nuova grafica: solo visualizzazione, stessi dati">${S.uiD3?'Anteprima Direzione 3 · torna alla grafica attuale':'Prova la Direzione 3 (anteprima)'}</button>`;
 }
 
@@ -9075,7 +9100,7 @@ function renderLabRecipe(recipe){
   <div class="card">
     <div class="card-label"><i class="ti ti-list-details"></i> Ingredienti</div>
     <table class="ing-table">
-      <thead><tr><th>Ingrediente</th><th>Quantità</th><th>Unità</th><th style="text-align:right">%</th><th style="text-align:right;color:var(--sage);font-size:11px">Resa%</th><th></th></tr></thead>
+      <thead><tr><th>Ingrediente</th><th>${S.uiD3?'Quantità a crudo':'Quantità'}</th><th>Unità</th><th style="text-align:right">%</th><th style="text-align:right;color:var(--sage);font-size:11px">Resa%</th><th></th></tr></thead>
       <tbody>
         ${v.ingredients.map(ing=>{
           const isBrick=ing.isSubRecipe===true;
@@ -10363,9 +10388,9 @@ function renderBottomNav(){
   const isProduzione=nav?nav==='produzione':(S.view==='attive'||S.view==='produzione-guidata'||S.view==='sessione-operativa'||S.view==='storico-produzioni');
   const isLab=nav?nav==='lab':S.view==='lab-globale';
   return `
-    <button class="bnav-btn ${isProduzione?'active':''}" id="bnav-produzione"><i class="ti ti-tools-kitchen-2"></i>Produzione</button>
-    <button class="bnav-btn ${isRicette?'active':''}" id="bnav-ricette"><i class="ti ti-book-2"></i>Schede</button>
-    <button class="bnav-btn ${isLab?'active':''}" id="bnav-lab"><i class="ti ti-flask"></i>LAB</button>`;
+    ${d3OrdineNav([`<button class="bnav-btn ${isProduzione?'active':''}" id="bnav-produzione"><i class="ti ti-tools-kitchen-2"></i>Produzione</button>`,
+    `<button class="bnav-btn ${isRicette?'active':''}" id="bnav-ricette"><i class="ti ti-book-2"></i>Schede</button>`,
+    `<button class="bnav-btn ${isLab?'active':''}" id="bnav-lab"><i class="ti ti-flask"></i>LAB</button>`]).join('\n    ')}`;
 }
 
 // ══════════════════════════════════════════════════════════
@@ -10478,7 +10503,7 @@ function render(){
   else if(S.view==='storico-produzioni'){mainContent=renderStoricoProduzioni();}
   else if(S.view==='profilo'){mainContent=renderProfiloPlaceholder();}
   else if(S.view==='michelinai-globale'){mainContent=renderMichelinAIGlobalePlaceholder();}
-  else if(S.view==='lab-globale'){mainContent=renderLabGlobale();}
+  else if(S.view==='lab-globale'){mainContent=S.uiD3?renderLabGlobaleD3():renderLabGlobale();}
 
   const main=document.getElementById('main');
   // MS15: render() ricostruisce #main; se si sta scrivendo la nota, cursore e
@@ -10796,8 +10821,8 @@ function initUiD3(){
   if(!initUiD3.ascolto){
     initUiD3.ascolto=true;
     // Tastiera su mobile: mentre si scrive, le barre fisse in basso si nascondono.
-    document.addEventListener('focusin',function(e){if(S.uiD3&&e.target&&/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)&&!e.target.closest('.d3-mbar'))document.body.classList.add('d3-typing');});
-    document.addEventListener('focusout',function(){document.body.classList.remove('d3-typing');});
+    document.addEventListener('focusin',function(){d3SincronizzaTastiera();});
+    document.addEventListener('focusout',function(){setTimeout(d3SincronizzaTastiera,0);});
     // Menu "⋯": un clic fuori lo chiude.
     document.addEventListener('click',function(e){
       if(!S.uiD3||!S.d3Menu)return;
@@ -10805,6 +10830,14 @@ function initUiD3(){
       S.d3Menu=null;render();
     });
   }
+}
+// Le barre si nascondono solo mentre un campo e' davvero attivo: dopo il
+// salvataggio automatico il campo viene ridisegnato senza segnalare l'uscita,
+// quindi lo stato si ricalcola dall'elemento attivo, non dall'evento.
+function d3SincronizzaTastiera(){
+  var el=document.activeElement;
+  var scrive=!!(S.uiD3&&el&&/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)&&!el.closest('.d3-mbar'));
+  document.body.classList.toggle('d3-typing',scrive);
 }
 function setUiD3(on){
   try{localStorage.setItem(D3_UI_KEY,on?'d3':'classic');}catch(e){}
@@ -10818,6 +10851,9 @@ function d3Autosize(el){
   var elenco=el?[el]:document.querySelectorAll('.d3-lab .d3-titolo-input,.d3-lab textarea.step-text');
   for(var i=0;i<elenco.length;i++){var t=elenco[i];t.style.height='auto';t.style.height=(t.scrollHeight+t.offsetHeight-t.clientHeight)+'px';}
 }
+// Ordine della navigazione: LAB -> Schede -> Produzione nella Direzione 3,
+// ordine di sempre nella grafica classica (stesse voci, stessi id).
+function d3OrdineNav(voci){return S.uiD3?[voci[2],voci[1],voci[0]]:voci;}
 // Sezione evidenziata nella navigazione (solo Direzione 3; null = regola classica).
 // La Ricetta aperta appartiene al LAB o alla Produzione secondo la modalita'.
 function d3SezioneNav(){
@@ -10847,6 +10883,71 @@ function d3NascondiDuplicati(){
     if(n&&v&&uguali(v.textContent,n.textContent))v.classList.add('d3-ripetuto');
   });
 }
+// Elenco LAB della Direzione 3: bozze raggruppate per Scheda, ordinate per
+// "Ultima modifica" (predefinito, stesso criterio dell'elenco classico: data
+// del database, bozze senza data in fondo) oppure A-Z (Schede e bozze, ordine
+// italiano). La scelta resta nel browser.
+var D3_LAB_ORDINE_KEY='khub_lab_ordine';
+function d3LabOrdine(){
+  var v=null;try{v=localStorage.getItem(D3_LAB_ORDINE_KEY);}catch(e){}
+  return v==='alfabetico'?'alfabetico':'modifica';
+}
+function d3SetLabOrdine(o){
+  try{localStorage.setItem(D3_LAB_ORDINE_KEY,o==='alfabetico'?'alfabetico':'modifica');}catch(e){}
+  render();
+}
+function d3GruppiLab(ordine){
+  var bozze=[];
+  S.recipes.filter(function(r){return!r.parentRecipeId;}).forEach(function(r){
+    (r.labVersions||[]).forEach(function(v){bozze.push({recipeId:r.id,recipeName:r.name,bozza:v});});
+  });
+  var nome=function(b){return b.label||b.name||'Bozza';};
+  if(ordine==='alfabetico'){
+    bozze.sort(function(a,b){return confrontaNomiIt(a.recipeName,b.recipeName)||(a.recipeId<b.recipeId?-1:a.recipeId>b.recipeId?1:0)||confrontaNomiIt(nome(a.bozza),nome(b.bozza));});
+  }else{
+    bozze.sort(function(a,b){
+      var ta=a.bozza.contenutoModificatoIl,tb=b.bozza.contenutoModificatoIl;
+      if(ta&&tb)return new Date(tb)-new Date(ta);
+      if(ta&&!tb)return -1;
+      if(!ta&&tb)return 1;
+      return 0;
+    });
+  }
+  var mappa=new Map(),ordineGruppi=[];
+  bozze.forEach(function(x){
+    if(!mappa.has(x.recipeId)){mappa.set(x.recipeId,{recipeId:x.recipeId,recipeName:x.recipeName,bozze:[]});ordineGruppi.push(x.recipeId);}
+    mappa.get(x.recipeId).bozze.push(x.bozza);
+  });
+  return{gruppi:ordineGruppi.map(function(id){return mappa.get(id);}),totBozze:bozze.length};
+}
+function d3DataLab(iso){
+  if(!iso)return'non tracciata';
+  var d=new Date(iso);
+  var mesi=['gen','feb','mar','apr','mag','giu','lug','ago','set','ott','nov','dic'];
+  return String(d.getDate()).padStart(2,'0')+' '+mesi[d.getMonth()]+' · '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+}
+function renderLabGlobaleD3(){
+  var ordine=d3LabOrdine();
+  var r=d3GruppiLab(ordine),gruppi=r.gruppi;
+  var plur=function(n,uno,molti){return n+' '+(n===1?uno:molti);};
+  var scelta=`<div class="d3-ordine" role="group" aria-label="Ordine delle bozze">
+      <button aria-pressed="${ordine==='modifica'}" onclick="d3SetLabOrdine('modifica')">Ultima modifica</button><button aria-pressed="${ordine==='alfabetico'}" onclick="d3SetLabOrdine('alfabetico')">A–Z</button>
+    </div>`;
+  if(!r.totBozze)return`<div class="labg-env">
+    <div class="labg-title">LAB</div>
+    <div class="d3-card d3-vuoto">Nessuna bozza in sviluppo al momento.</div>
+  </div>`;
+  return`<div class="labg-env">
+    <div class="d3-labg-testa"><div><div class="labg-title">LAB</div><div class="labg-count">${plur(r.totBozze,'bozza','bozze')} in ${plur(gruppi.length,'Scheda','Schede')}</div></div>${scelta}</div>
+    ${gruppi.map(function(g){return`<div class="labg-group">
+      <div class="labg-group-band"><div class="labg-group-nome">${d3Esc(g.recipeName)}</div><div class="labg-group-conteggio">${plur(g.bozze.length,'bozza','bozze')}</div></div>
+      <div class="labg-group-body">${g.bozze.map(function(b){var t=!!b.contenutoModificatoIl;return`<button class="labg-row" onclick="apriBozzaDalLabGlobale('${g.recipeId}','${b.id}')">
+        <span class="labg-row-titolo">${d3Esc(b.label||b.name||'Bozza')}</span>
+        <span class="labg-row-data${t?'':' non-tracciata'}">${d3DataLab(b.contenutoModificatoIl)}</span>
+      </button>`;}).join('')}</div>
+    </div>`;}).join('')}
+  </div>`;
+}
 // Home della Direzione 3: tre accessi con i conteggi gia' presenti nell'app
 // (stessi calcoli di Produzione, Schede e LAB) e le azioni esistenti.
 function d3ConteggiHome(){
@@ -10855,10 +10956,20 @@ function d3ConteggiHome(){
   principali.forEach(function(r){var n=(r.labVersions||[]).length;bozze+=n;if(n)schedeLab++;});
   return{attive:activeRecipeEntries(S.recipes).length,schede:S.recipes.length,bozze:bozze,schedeLab:schedeLab};
 }
+// Icone degli ambienti nel codice (nessuna dipendenza da caratteri esterni).
+var D3_ICONE_AMBIENTE=(function(){
+  var svg=function(d){return'<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+d+'</svg>';};
+  return{
+    'ti-flask':svg('<path d="M9 3h6"/><path d="M10 3v6.2L4.8 18.1A2 2 0 0 0 6.5 21h11a2 2 0 0 0 1.7-2.9L14 9.2V3"/><path d="M7.5 15h9"/>'),
+    'ti-book-2':svg('<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/><path d="M9 7h6"/>'),
+    'ti-tools-kitchen-2':svg('<path d="M4 10h16v2a6 6 0 0 1-6 6h-4a6 6 0 0 1-6-6z"/><path d="M2 10h2M20 10h2"/><path d="M9 6c0-1 1-1 1-2M13 6c0-1 1-1 1-2"/><path d="M8 18v2h8v-2"/>')
+  };
+})();
 function renderAppHomeD3(){
   var c=d3ConteggiHome();
   var plur=function(n,uno,molti){return n+' '+(n===1?uno:molti);};
-  var card=function(id,titolo,descr,conteggio){return`<button class="d3-card d3-home-card" id="${id}">
+  var card=function(id,amb,icona,titolo,descr,conteggio){return`<button class="d3-card d3-home-card d3-amb-${amb}" id="${id}">
+      <span class="d3-home-card-icona" aria-hidden="true">${D3_ICONE_AMBIENTE[icona]}</span>
       <span class="d3-home-card-titolo d3-serif">${titolo}</span>
       <span class="d3-home-card-descr">${descr}</span>
       <span class="d3-home-card-conteggio">${conteggio}</span>
@@ -10867,9 +10978,9 @@ function renderAppHomeD3(){
   return`<div class="d3-wrap d3-home">
     <div><h1 class="d3-h1 d3-serif">Home</h1></div>
     <div class="d3-home-grid">
-      ${card('apphome-produzione','Produzione','Sessioni da avviare e in corso, Ricette attive',plur(c.attive,'Ricetta attiva','Ricette attive'))}
-      ${card('apphome-schede','Schede','Archivio delle Schede dalla A alla Z',plur(c.schede,'Scheda','Schede'))}
-      ${card('apphome-lab','LAB','Bozze in sviluppo, Scheda per Scheda',plur(c.bozze,'bozza','bozze')+(c.bozze?' in '+plur(c.schedeLab,'Scheda','Schede'):''))}
+      ${card('apphome-lab','lab','ti-flask','LAB','Bozze in sviluppo, Scheda per Scheda',plur(c.bozze,'bozza','bozze')+(c.bozze?' in '+plur(c.schedeLab,'Scheda','Schede'):''))}
+      ${card('apphome-schede','schede','ti-book-2','Schede','Archivio delle Schede dalla A alla Z',plur(c.schede,'Scheda','Schede'))}
+      ${card('apphome-produzione','produzione','ti-tools-kitchen-2','Produzione','Sessioni da avviare e in corso, Ricette attive',plur(c.attive,'Ricetta attiva','Ricette attive'))}
     </div>
     <div class="d3-home-azioni">
       <button class="d3-btn d3-btn-line" onclick="nuovaScheda()">+ Nuova Scheda</button>
@@ -11105,14 +11216,14 @@ function renderLabFormulazioneD3(recipe,v,w){
   var calo=w.status==='complete'&&w.raw>0?Math.round((w.finished-w.raw)/w.raw*100):null;
   var avviso=pending?`<div class="lab-yield-error d3-errore">${d3Esc(pending.error)} Non ancora salvata. <button class="d3-btn-text" onclick="discardLabDeclaredYieldInput('${recipe.id}')">Ripristina</button></div>`
     :state.status==='invalid'?`<div class="lab-yield-error d3-errore">La resa salvata non è valida: ${d3Esc(declaredYieldErrorMessage(state.error))}</div>`:'';
-  var nota=w.status==='incomplete'?'pesi incompleti: mancano conversioni':w.status==='invalid'?'pesi non calcolabili':w.status==='empty'?'nessun ingrediente':(stima?'calcolato · stima':'calcolato');
+  var nota=w.status==='incomplete'?'pesi incompleti: mancano conversioni':w.status==='invalid'?'pesi non calcolabili':w.status==='empty'?'nessun ingrediente':(stima?'calcolato dagli ingredienti · stima':'calcolato dagli ingredienti');
   return`<div class="d3-pesi" id="lab-formulation">
     <div class="d3-peso lab-w-raw"><div class="d3-peso-label">Peso totale a crudo</div><div class="d3-peso-val">${crudo}</div><div class="d3-peso-nota">${nota}</div></div>
-    <div class="d3-peso lab-w-finished"><div class="d3-peso-label">Peso finito teorico</div><div class="d3-peso-val">${finito}</div><div class="d3-peso-nota">${w.status==='complete'?'calcolato'+(calo!=null&&calo!==0?' · '+(calo>0?'+':'−')+Math.abs(calo)+'%':'')+(stima?' · stima':''):nota}</div></div>
-    <div class="d3-peso d3-resa"><div class="d3-peso-label">Resa dichiarata</div>
-      <div class="d3-resa-campi"><input id="lab-yield-qty" type="text" inputmode="decimal" autocomplete="off" placeholder="es. 30" value="${d3Esc(qtyText)}" onchange="onLabDeclaredYield('${recipe.id}','qty',this.value)" aria-label="Resa dichiarata: quantità"><input id="lab-yield-unit" type="text" list="lab-yield-units" maxlength="${DECLARED_YIELD_UNIT_MAX_LENGTH}" autocomplete="off" placeholder="es. bignè" value="${d3Esc(unitText)}" onchange="onLabDeclaredYield('${recipe.id}','unit',this.value)" aria-label="Resa dichiarata: unità"></div>
-      <datalist id="lab-yield-units">${['pz','porzioni','bignè','vasetti','filoni','teglie','g','kg','ml','l'].map(function(u){return'<option value="'+u+'">';}).join('')}</datalist>
-      <div class="d3-peso-nota">correggibile · non cambia gli ingredienti</div>
+    <div class="d3-peso lab-w-finished"><div class="d3-peso-label">Peso finito teorico</div><div class="d3-peso-val">${finito}</div><div class="d3-peso-nota">${w.status==='complete'?'calcolato con le rese degli ingredienti'+(calo!=null&&calo!==0?' · '+(calo>0?'+':'−')+Math.abs(calo)+'%':'')+(stima?' · stima':''):nota}</div></div>
+    <div class="d3-peso d3-resa"><div class="d3-peso-label">Resa prevista <span class="d3-facoltativa">facoltativa</span></div>
+      <div class="d3-resa-campi"><input id="lab-yield-qty" type="text" inputmode="decimal" autocomplete="off" placeholder="es. 30" value="${d3Esc(qtyText)}" onchange="onLabDeclaredYield('${recipe.id}','qty',this.value)" aria-label="Resa prevista: quantità"><input id="lab-yield-unit" type="text" list="lab-yield-units" maxlength="${DECLARED_YIELD_UNIT_MAX_LENGTH}" autocomplete="off" placeholder="pz, porzioni, g…" value="${d3Esc(unitText)}" onchange="onLabDeclaredYield('${recipe.id}','unit',this.value)" aria-label="Resa prevista: unità"></div>
+      <datalist id="lab-yield-units">${['pz','porzioni','vasetti','filoni','teglie','g','kg','ml','l'].map(function(u){return'<option value="'+u+'">';}).join('')}</datalist>
+      <div class="d3-peso-nota">risultato atteso: peso o numero di pezzi/porzioni · non cambia gli ingredienti</div>
     </div>
   </div>${avviso}`;
 }

@@ -102,9 +102,15 @@ function creaFintoSupabase(datiIniziali) {
           if (i >= 0) {
             if (ignora) continue;
             if (!unisci) return risposta(409, { message: 'duplicate key value violates unique constraint (' + table + ')' });
-            rows[i] = { ...rows[i], ...row }; inseriti.push(rows[i]);
+            const primaHash = rows[i].contenuto_hash;
+            rows[i] = { ...rows[i], ...row };
+            // Come il database reale (e i test): la data di modifica della bozza
+            // si aggiorna solo quando cambia la firma del contenuto.
+            if (table === 'variants' && 'contenuto_hash' in row && row.contenuto_hash !== primaHash) rows[i].contenuto_modificato_il = new Date().toISOString();
+            inseriti.push(rows[i]);
           } else {
             const nuova = { created_at: new Date().toISOString(), ...row };
+            if (table === 'variants' && nuova.contenuto_hash != null && nuova.contenuto_modificato_il == null) nuova.contenuto_modificato_il = new Date().toISOString();
             if (nuova.id == null && !CHIAVI[table]) nuova.id = 'demo-' + Math.random().toString(36).slice(2, 10);
             rows.push(nuova); inseriti.push(nuova);
           }
