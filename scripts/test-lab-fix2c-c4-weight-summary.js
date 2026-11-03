@@ -34,6 +34,12 @@ function extractFunction(startMarker) {
 }
 
 // Finto PostgREST: GET con eq, POST insert/upsert (merge-duplicates), DELETE per id.
+// Le Ricette Attive esistono anche nel database: il server crea una Sessione
+// solo da una Ricetta Attiva salvata (controllo degli stati lato server).
+function seedAttive(fake, recs) {
+  fake.tables.variants = recs.flatMap(r => (r.validatedVariants || []).map(v => ({ id: v.id, recipe_id: r.id, status: v.status === 'retired' ? 'retired' : 'validated', active: v.active === true })));
+  return fake;
+}
 function makeFakeSupabase() {
   const tables = {};
   const calls = [];
@@ -179,7 +185,7 @@ const sansEstimate = r => { const c = { ...r }; delete c.referenceDataUsed; retu
   process.env.SUPABASE_URL = 'https://fake.supabase';
   process.env.SUPABASE_ANON_KEY = 'anon';
   const handler = await loadHandler();
-  function freshDb() { const fake = makeFakeSupabase(); globalThis.fetch = fake.fetch; return fake; }
+  function freshDb() { const fake = seedAttive(makeFakeSupabase(), fixtureRecipes()); globalThis.fetch = fake.fetch; return fake; }
   const vis = (h) => h.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ');
   console.log('LAB FIX 2C — C4: riepilogo pesi senza obiettivo salvato e Calcolo rapido');
 

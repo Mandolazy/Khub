@@ -169,6 +169,7 @@ const SRC = [
   'function validateLabProductionTarget(field,value)', 'function setLabProductionTarget(recipeId,field,rawValue)', 'function onLabTargetPortions(recipeId,val)',
   'function creaBozzaDaSorgente(recipeId,attiva)', 'function duplicaVersioneLAB(recipeId)', 'async function creaSchedaDaLab(recipeId)',
   'function rendiAttiva(recipeId)', 'function onValidate()', 'async function confirmValidate()',
+  'function toggleActiveV2(recipeId,variantId,currentActive)', 'function rendiAttivaPronta(recipeId,variantId)',
   'function uid()', 'function normalizeIngredientName(name)', 'function conversionFactSourcePriority(sourceType)',
   'function isBetterConversionFact(candidate,current)', 'function buildKnownIngredientIds(ingredientRows)',
   'function computeIngredientDeletions(knownByVariant,currentByVariant)',
@@ -199,7 +200,7 @@ function makeClient(fetchImpl) {
     function openLabFamilyPicker(){}
     ${SRC}
     return {S, loadFromSupabase, saveToSupabase, buildValidatedVariantPayload, declaredYieldState, creaBozzaDaSorgente, duplicaVersioneLAB,
-      creaSchedaDaLab, rendiAttiva, onValidate, confirmValidate, onLabTargetPortions, getSig: id => _persistedValidatedSig[id]};
+      creaSchedaDaLab, rendiAttiva, onValidate, confirmValidate, rendiAttivaPronta, onLabTargetPortions, getSig: id => _persistedValidatedSig[id]};
   `)(fetchImpl, log);
   c.log = log;
   return c;
@@ -210,6 +211,12 @@ function makeClient(fetchImpl) {
   process.env.SUPABASE_ANON_KEY = 'anon';
   const realHandler = await loadHandler();
   let saves = [];
+  // Promozione della bozza corrente con il percorso approvato: Valida, poi Rendi attiva.
+  async function promuovi(c, rid) {
+    const r = c.S.recipes.find(x => x.id === rid); const vid = r.labVersions[r.currentLabIdx || 0].id;
+    c.S.selectedId = rid; c.onValidate(); await c.confirmValidate(); c.rendiAttivaPronta(rid, vid);
+    return vid;
+  }
   async function callApi(body) {
     let status = 200, out;
     if (body.supabaseAction === 'save') saves.push(clone(body.data));
@@ -331,7 +338,7 @@ function makeClient(fetchImpl) {
     rec(c, 'rT').currentLabIdx = 0;
     const qtyBefore = lab(c, 'rT', 'lvT').ingredients.map(i => [i.name, i.qty, i.unit]);
     const vaTBefore = { v: dbVariant(fake, 'vaT'), i: ingContent(fake, 'vaT') };
-    c.rendiAttiva('rT');
+    await promuovi(c, 'rT'); saves = [];
     const nv = val(c, 'lvT');
     assert.deepStrictEqual(memYield(nv), [2.5, 'teglia 30x40']);
     assert.strictEqual(await c.saveToSupabase(rec(c, 'rT')), true);
@@ -362,7 +369,7 @@ function makeClient(fetchImpl) {
     assert.ok(!JSON.stringify(c.S.recipes).includes('declaredYield'));
     rec(c, 'rT').currentLabIdx = 0;
     c.duplicaVersioneLAB('rT'); c.creaBozzaDaSorgente('rK', null);
-    c.rendiAttiva('rT');
+    await promuovi(c, 'rT');
     for (const rid of ['rT', 'rK']) assert.strictEqual(await c.saveToSupabase(rec(c, rid)), true);
     assert.ok(!JSON.stringify(saves).includes('declared_yield'));
     assert.deepStrictEqual(c.declaredYieldState(val(c, 'vaT')), { status: 'absent' });
@@ -371,9 +378,9 @@ function makeClient(fetchImpl) {
   await test('Y13. correzione A: dopo la promozione la resa viaggia una sola volta; i salvataggi successivi dell\'Attiva non la riscrivono', async () => {
     const c = await setup();
     rec(c, 'rT').currentLabIdx = 0;
-    c.rendiAttiva('rT');
+    await promuovi(c, 'rT');
     assert.strictEqual(await c.saveToSupabase(rec(c, 'rT')), true);
-    assert.deepStrictEqual(saves[0].variants.filter(v => v.id === 'lvT').map(v => [v.declared_yield_qty, v.declared_yield_unit]), [[2.5, 'teglia 30x40']], 'promozione: resa inviata');
+    assert.deepStrictEqual(saves.flatMap(x => x.variants).filter(v => v.id === 'lvT' && 'declared_yield_qty' in v).map(v => [v.declared_yield_qty, v.declared_yield_unit]).slice(0, 1), [[2.5, 'teglia 30x40']], 'promozione (Valida): resa inviata');
     // altra modifica dell'Attiva nata in sessione (es. disattivazione): la resa non viene piu' inviata
     rec(c, 'rT').validatedVariants = rec(c, 'rT').validatedVariants.map(v => v.id === 'lvT' ? { ...v, active: false } : v);
     saves = [];
@@ -387,7 +394,7 @@ function makeClient(fetchImpl) {
     const c = await setup();
     const sessions = clone(fake.tables.production_sessions);
     rec(c, 'rT').currentLabIdx = 0;
-    c.duplicaVersioneLAB('rT'); c.rendiAttiva('rT');
+    c.duplicaVersioneLAB('rT'); await promuovi(c, 'rT');
     for (const rid of ['rT', 'rK']) await c.saveToSupabase(rec(c, rid));
     assert.deepStrictEqual(fake.tables.production_sessions, sessions);
     assert.deepStrictEqual(dbYield(fake, 'vaP'), [0, 'pz']);

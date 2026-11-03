@@ -34,6 +34,12 @@ function extractFunction(startMarker) {
 }
 
 // Finto PostgREST: GET con eq, POST insert/upsert (merge-duplicates), DELETE per id.
+// Le Ricette Attive esistono anche nel database: il server crea una Sessione
+// solo da una Ricetta Attiva salvata (controllo degli stati lato server).
+function seedAttive(fake, recs) {
+  fake.tables.variants = recs.flatMap(r => (r.validatedVariants || []).map(v => ({ id: v.id, recipe_id: r.id, status: v.status === 'retired' ? 'retired' : 'validated', active: v.active === true })));
+  return fake;
+}
 function makeFakeSupabase() {
   const tables = {};
   const calls = [];
@@ -159,7 +165,7 @@ function makeClient(handler, opts = {}) {
   const handler = await loadHandler();
   // Il DB assegna created_at (DEFAULT now()): la nuova Sessione e' la piu' recente.
   function freshDb(nOld) {
-    const fake = makeFakeSupabase();
+    const fake = seedAttive(makeFakeSupabase(), recipes());
     fake.tables.production_sessions = Array.from({ length: nOld }, (_, i) => old('o' + (i + 1), '2026-10-0' + (i + 1) + 'T08:00:00Z'));
     const f = fake.fetch;
     fake.fetch = async (url, opts = {}) => {

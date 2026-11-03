@@ -248,15 +248,20 @@ function makeClient(handler, interceptLoad) {
     assert.deepStrictEqual(pick(client2.S.recipes.find(r => r.id === 'rC')), before);
   });
 
-  await test('5. una nuova Ricetta Attiva nata nel client (Rendi attiva/Valida) viene inviata con il suo mattoncino; l\'altra Attiva resta identica', async () => {
+  // Percorso approvato: la bozza diventa Validata (stesso id) e poi Attiva; l'attivazione diretta
+  // di una bozza e' rifiutata dal server (test-stati-ricetta).
+  await test('5. una nuova Ricetta nata nel client (Valida, poi Rendi attiva) viene inviata con il suo mattoncino; l\'altra Attiva resta identica', async () => {
     const { fake, client, recipe } = await setup();
     const before = snapshotOthers(fake);
     const r = recipe(); const v = r.labVersions[0];
-    const nv = { id: v.id, name: v.name, status: 'approved', active: true, validatedAt: '10/10/2026', portionsCount: v.portionsCount, gramsPerPortion: v.gramsPerPortion, portionUnit: 'g',
+    const nv = { id: v.id, name: v.name, status: 'approved', active: false, validatedAt: '10/10/2026', portionsCount: v.portionsCount, gramsPerPortion: v.gramsPerPortion, portionUnit: 'g',
       ingredients: v.ingredients.map((i, k) => ({ ...i, id: 'vi_new_' + k })), steps: v.steps, stepsV2: v.stepsV2, originVariantId: v.originVariantId, l2Items: [] };
     r.validatedVariants = [...r.validatedVariants, nv]; r.labVersions = [];
     assert.strictEqual(await client.saveToSupabase(r), true);
     assert.deepStrictEqual(saves[0].variants.map(x => x.id), ['lvC']);
+    nv.active = true; // Rendi attiva
+    assert.strictEqual(await client.saveToSupabase(r), true);
+    assert.deepStrictEqual(saves[1].variants.map(x => x.id), ['lvC']);
     const row = dbVariant(fake, 'lvC');
     assert.strictEqual(row.status, 'validated'); assert.strictEqual(row.active, true); assert.strictEqual(row.label, v.name);
     assert.deepStrictEqual(dbIngs(fake, 'lvC').map(i => i.id), ['vi_new_0', 'vi_new_1', 'vi_new_2'], 'vecchi ingredienti della bozza cancellati');
@@ -334,16 +339,18 @@ function makeClient(handler, interceptLoad) {
     assert.deepStrictEqual(dbIngs(fake, 'vaC').map(i => i.id), ['a0x', 'a1x', 'a2x']);
     assert.strictEqual(dbIngs(fake, 'vaC')[2].sub_recipe_id, 'vaF');
   });
-  await test('L6. ingrediente senza id: id generato una sola volta e stabile tra salvataggi e riaperture', async () => {
+  // Un ingrediente nuovo in una Ricetta validata e' ora rifiutato dal server (formulazione
+  // protetta): l'id generato resta comunque unico e stabile fra i tentativi, e nulla viene scritto.
+  await test('L6. ingrediente senza id: id generato una sola volta e stabile tra i tentativi; formulazione validata protetta', async () => {
     const { fake, client, recipe } = await setupWith();
     const r = recipe(); r.validatedVariants = r.validatedVariants.map(v => v.id === 'vaC' ? { ...v, ingredients: [...v.ingredients, { name: 'Sale', qty: 1, unit: 'g' }] } : v);
-    await client.saveToSupabase(r);
-    const id1 = dbIngs(fake, 'vaC').find(i => i.name === 'Sale').id;
-    await client.saveToSupabase(r);
-    const c2 = makeClient(handler); await c2.loadFromSupabase(); await c2.saveToSupabase(c2.S.recipes.find(x => x.id === 'rC'));
-    const rows = dbIngs(fake, 'vaC').filter(i => i.name === 'Sale');
-    assert.strictEqual(rows.length, 1); assert.strictEqual(rows[0].id, id1);
-    assert.ok(!saves[1].variants.some(v => v.id === 'vaC'), 'secondo salvataggio senza modifiche: non rispedita');
+    const sale = () => r.validatedVariants.find(v => v.id === 'vaC').ingredients.find(i => i.name === 'Sale');
+    assert.strictEqual(await client.saveToSupabase(r), false, 'rifiutato: la formulazione si corregge nel LAB');
+    const id1 = sale().id; assert.ok(id1, 'id generato');
+    assert.strictEqual(await client.saveToSupabase(r), false);
+    assert.strictEqual(sale().id, id1, 'stesso id al tentativo successivo');
+    assert.deepStrictEqual(saves.map(x => x.ingredients.filter(i => i.name === 'Sale').map(i => i.id)), [[id1], [id1]]);
+    assert.ok(!dbIngs(fake, 'vaC').some(i => i.name === 'Sale'), 'nessuna scrittura');
   });
   await test('L7. nuova versione validata nata nel client: validated_at calcolato come prima (non NULL)', async () => {
     const { fake, client, recipe } = await setupWith(noValidatedAt);

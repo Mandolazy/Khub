@@ -256,7 +256,7 @@ function makeClient(fetchImpl) {
     assert.deepStrictEqual([dbT('lvZ'), dbT('lvU'), dbT('lvV')], [[0, 0], [1, 350], [12, 85.5]]);
   });
 
-  await test('T5. copie e promozioni: Nuova bozza da Attiva, Duplica, Crea Scheda, Rendi attiva, Valida copiano i valori come sono', async () => {
+  await test('T5. copie e promozioni: Nuova bozza da Attiva, Duplica, Crea Scheda, Valida + Rendi attiva, Valida copiano i valori come sono', async () => {
     const c = await setup();
     c.creaBozzaDaSorgente('rT', ver(c, 'vaA'));
     assert.deepStrictEqual([rec(c).labVersions[0].portionsCount, rec(c).labVersions[0].gramsPerPortion], [0, 0], 'da Attiva 0/0');
@@ -272,8 +272,9 @@ function makeClient(fetchImpl) {
     const scheda = c2.S.recipes.find(r => r.id !== 'rT');
     assert.deepStrictEqual([scheda.labVersions[0].portionsCount, scheda.labVersions[0].gramsPerPortion], [1, 0]);
     assert.deepStrictEqual(dbT(scheda.labVersions[0].id), [1, 0]);
-    rec(c2).currentLabIdx = rec(c2).labVersions.findIndex(v => v.id === 'lvZ');
-    c2.rendiAttiva('rT');
+    // Percorso approvato: Valida, poi Rendi attiva (l'attivazione diretta dal LAB non esiste piu').
+    c2.S.selectedId = 'rT'; rec(c2).currentLabIdx = rec(c2).labVersions.findIndex(v => v.id === 'lvZ');
+    c2.onValidate(); await c2.confirmValidate(); c2.toggleActiveV2('rT', 'lvZ', false);
     c2.S.selectedId = 'rT'; rec(c2).currentLabIdx = rec(c2).labVersions.findIndex(v => v.id === 'lvS');
     c2.onValidate(); await c2.confirmValidate();
     assert.strictEqual(await c2.saveToSupabase(rec(c2)), true);

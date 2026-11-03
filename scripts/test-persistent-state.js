@@ -196,13 +196,17 @@ test('khub_mvp.html: onValidate preserva v.id (nessun nuovo id in validazione)',
   assert.match(fnBody, /l2Items:v\.l2Items\|\|\[\]/);
 });
 
-test('khub_mvp.html: rendiAttiva preserva v.id (nessun nuovo id in attivazione)', () => {
-  const fnBody = html.slice(html.indexOf('function rendiAttiva('), html.indexOf('function onValidate()'));
+// Percorso approvato: Valida (stesso v.id, non Attiva) -> Rendi attiva dalla Scheda.
+// rendiAttiva non attiva piu' una bozza; l'identita' passa per onValidate.
+test('khub_mvp.html: Valida preserva v.id (nessun nuovo id); rendiAttiva non crea Ricette', () => {
+  const fnBody = html.slice(html.indexOf('function onValidate()'), html.indexOf('async function confirmValidate()'));
   assert.doesNotMatch(fnBody, /id:'vv'\+Date\.now\(\)/);
   assert.match(fnBody, /id:v\.id,/);
-  assert.match(fnBody, /active:true/);
+  assert.match(fnBody, /active:false/);
   assert.match(fnBody, /originVariantId:v\.originVariantId\|\|null/);
   assert.match(fnBody, /l2Items:v\.l2Items\|\|\[\]/);
+  const rendi = html.slice(html.indexOf('function rendiAttiva('), html.indexOf('\n}\n', html.indexOf('function rendiAttiva(')));
+  assert.doesNotMatch(rendi, /validatedVariants|upRec|active:true/);
 });
 
 test('khub_mvp.html: confirmValidate sposta la bozza in validatedVariants senza rigenerare id', () => {

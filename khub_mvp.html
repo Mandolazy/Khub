@@ -3182,59 +3182,11 @@ async function eliminaBozza(recipeId,variantId){
 }
 
 function rendiAttiva(recipeId){
-  const recipe=R(recipeId);
-  if(!recipe)return;
-  const v=curLab(recipe);
-  if(!v||!v.ingredients||!v.ingredients.length){
-    toast('Aggiungi almeno un ingrediente prima di rendere attiva questa bozza.','ti-alert-circle');
-    return;
-  }
-  if(!confirm('Rendere attiva questa bozza? Diventerà una Ricetta attiva. La bozza nel LAB si chiuderà.'))return;
-
-  // D3: stesso variant.id lungo tutto il lifecycle (lab -> attiva). Un nuovo
-  // id nasce SOLO nel vero branching (creaBozzaDaSorgente/duplicaVersioneLAB/ecc).
-  const nv={
-    id:v.id,
-    name:v.name||recipe.name,
-    status:'approved',
-    active:true,
-    validatedAt:new Date().toLocaleDateString('it-IT'),
-    portionsCount:v.portionsCount,
-    gramsPerPortion:v.gramsPerPortion,
-    portionSize:v.portionSize||v.gramsPerPortion,
-    portionUnit:v.portionUnit||'g',
-    ingredients:v.ingredients.map(i=>({
-      ...i,
-      id:'vi'+uid()+uid(),
-      estimatedYieldPct:i.estimatedYieldPct!==undefined&&i.estimatedYieldPct!==null?i.estimatedYieldPct:null,
-      measuredYieldPct:i.measuredYieldPct!==undefined&&i.measuredYieldPct!==null?i.measuredYieldPct:null,
-    })),
-    steps:[...(v.steps||[])],
-    stepsV2:getStructuredSteps(v.steps,v.stepsV2).map(s=>({...s})),
-    mediaUrl:v.mediaUrl||null,videoUrl:v.videoUrl||null,
-    originVariantId:v.originVariantId||null, // D3: sopravvive alla transizione di lifecycle
-    l2Items:v.l2Items||[], // PSL: L2 segue la Ricetta, mai copiato in una nuova identita'
-    intentionInitial:v.intentionInitial||null,intentionCurrent:v.intentionCurrent||null,
-    criteriaInitial:v.criteriaInitial||null,criteriaCurrent:v.criteriaCurrent||null,
-    ...copyDeclaredYield(v), // I4: stesso variant.id, stessa resa dichiarata
-  };
-
-  S.view='ricetta-madre-v2'; // la bozza ha concluso il ciclo: si torna alla Scheda
-
-  upRec(recipeId,r=>{
-    // Micro-Step B: nessun pensionamento automatico delle altre attive —
-    // una Scheda può avere 0..N Ricette attive contemporaneamente.
-    const newLabVersions=r.labVersions.filter(lv=>lv.id!==v.id);
-    return{
-      ...r,
-      validatedVariants:[...r.validatedVariants,nv],
-      labVersions:newLabVersions,
-      currentLabIdx:0,
-    };
-  });
-
-  addHistory(nv.id,'attivata',nv.name);
-  toast('"'+nv.name+'" è ora una Ricetta attiva.','ti-circle-check');
+  // Percorso approvato: IN LAB -> Valida -> VALIDATA -> Rendi attiva (dalla
+  // Scheda) -> ATTIVA. Una bozza non si attiva direttamente: la funzione resta
+  // solo perche' un vecchio pulsante o collegamento non dia errore, e non
+  // modifica nulla. Anche il server rifiuta l'attivazione diretta.
+  toast('Una bozza non si attiva direttamente: prima Valida, poi «Rendi attiva» dalla Scheda.','ti-info-circle');
 }
 
 function onValidate(){

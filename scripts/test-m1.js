@@ -392,11 +392,12 @@ test('khub_mvp.html: Famiglie/mattoncini, merge Schede, yield analysis, cronolog
   assert.match(html, /function addHistory\(/);
 });
 
-test('khub_mvp.html (D3): identita\' variant.id nel lifecycle resta preservata (onValidate/rendiAttiva)', () => {
+test('khub_mvp.html (D3): identita\' variant.id nel lifecycle resta preservata (onValidate; rendiAttiva non crea Ricette)', () => {
   const onValidateBody = html.slice(html.indexOf('function onValidate()'), html.indexOf('async function confirmValidate()'));
   assert.match(onValidateBody, /id:v\.id,name,/);
-  const rendiAttivaBody = html.slice(html.indexOf('function rendiAttiva('), html.indexOf('function onValidate()'));
-  assert.match(rendiAttivaBody, /id:v\.id,/);
+  // Percorso approvato: Valida -> Rendi attiva. rendiAttiva non attiva piu' una bozza e non crea varianti.
+  const rendiAttivaBody = html.slice(html.indexOf('function rendiAttiva('), html.indexOf('\n}\n', html.indexOf('function rendiAttiva(')));
+  assert.doesNotMatch(rendiAttivaBody, /validatedVariants|upRec|id:/);
 });
 
 test('khub_mvp.html (D2): active resta la source of truth, nessun residuo funzionale di .shared', () => {

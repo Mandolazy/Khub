@@ -114,7 +114,9 @@ const MACARONS = ['albumi', 'farina di mandorle extra fine', 'zucchero a velo', 
 
 function seed(fake) {
   fake.tables.recipes = [{ id: 'rMAC', name: 'Macarons', category: 'Dolci', created_at: '2026-09-01T00:00:00Z' }];
-  fake.tables.variants = [{ id: 'vMAC', recipe_id: 'rMAC', name: 'Macarons', status: 'validated', active: true,
+  // Variante in LAB: la formulazione di una Ricetta validata e' protetta dal server (si corregge
+  // tornando nel LAB), quindi i casi di modifica/cancellazione degli ingredienti si provano su una bozza.
+  fake.tables.variants = [{ id: 'vMAC', recipe_id: 'rMAC', name: 'Macarons', status: 'lab', active: false,
     portions_count: 4, grams_per_portion: 200, steps: '[]', steps_v2: [], created_at: '2026-09-01T00:00:00Z' }];
   const ing = [];
   for (let v = 0; v < 161; v++) {
@@ -213,7 +215,7 @@ function makeClient(handler, interceptLoad) {
     withFake();
     const client = makeClient(handler);
     await client.loadFromSupabase();
-    const vv = client.S.recipes.find(r => r.id === 'rMAC').validatedVariants.find(v => v.id === 'vMAC');
+    const vv = client.S.recipes.find(r => r.id === 'rMAC').labVersions.find(v => v.id === 'vMAC');
     assert.deepStrictEqual(vv.ingredients.map(i => i.name), MACARONS);
   });
 
@@ -253,7 +255,7 @@ function makeClient(handler, interceptLoad) {
     const client = makeClient(handler, truncate);
     await client.loadFromSupabase();
     const recipe = client.S.recipes.find(r => r.id === 'rMAC');
-    const vv = recipe.validatedVariants.find(v => v.id === 'vMAC');
+    const vv = recipe.labVersions.find(v => v.id === 'vMAC');
     assert.strictEqual(vv.ingredients.length, 6, 'precondizione: il client deve aver ricevuto solo 6 ingredienti');
     vv.portionsCount = 8; // una modifica qualsiasi -> autosave -> saveToSupabase
     assert.strictEqual(await client.saveToSupabase(recipe), true);
@@ -289,7 +291,7 @@ function makeClient(handler, interceptLoad) {
     const client = makeClient(handler);
     await client.loadFromSupabase();
     const recipe = client.S.recipes.find(r => r.id === 'rMAC');
-    const vv = recipe.validatedVariants.find(v => v.id === 'vMAC');
+    const vv = recipe.labVersions.find(v => v.id === 'vMAC');
     vv.ingredients = vv.ingredients.filter(i => i.name !== 'panna liquida fresca'); // come delIngredient
     assert.strictEqual(await client.saveToSupabase(recipe), true);
     assert.deepStrictEqual(macRowsInDb(fake).map(i => i.name), MACARONS.filter(n => n !== 'panna liquida fresca'));
@@ -301,7 +303,7 @@ function makeClient(handler, interceptLoad) {
     const client = makeClient(handler);
     await client.loadFromSupabase();
     const recipe = client.S.recipes.find(r => r.id === 'rMAC');
-    recipe.validatedVariants.find(v => v.id === 'vMAC').ingredients = [];
+    recipe.labVersions.find(v => v.id === 'vMAC').ingredients = [];
     assert.strictEqual(await client.saveToSupabase(recipe), true);
     assert.strictEqual(macRowsInDb(fake).length, 0);
   });
@@ -311,7 +313,7 @@ function makeClient(handler, interceptLoad) {
     const client = makeClient(handler);
     await client.loadFromSupabase();
     const recipe = client.S.recipes.find(r => r.id === 'rMAC');
-    const vv = recipe.validatedVariants.find(v => v.id === 'vMAC');
+    const vv = recipe.labVersions.find(v => v.id === 'vMAC');
     vv.ingredients = vv.ingredients.map((i, k) => ({ ...i, id: 'vi_new_' + k }));
     assert.strictEqual(await client.saveToSupabase(recipe), true);
     const rows = macRowsInDb(fake);
@@ -324,7 +326,7 @@ function makeClient(handler, interceptLoad) {
     const client = makeClient(handler);
     await client.loadFromSupabase();
     const recipe = client.S.recipes.find(r => r.id === 'rMAC');
-    const vv = recipe.validatedVariants.find(v => v.id === 'vMAC');
+    const vv = recipe.labVersions.find(v => v.id === 'vMAC');
     vv.ingredients = [...vv.ingredients, { id: 'idNuovo12345', name: 'sale', qty: 1, unit: 'g' }];
     assert.strictEqual(await client.saveToSupabase(recipe), true);
     assert.strictEqual(macRowsInDb(fake).length, 10);
@@ -338,7 +340,7 @@ function makeClient(handler, interceptLoad) {
     const client = makeClient(handler);
     await client.loadFromSupabase();
     const recipe = client.S.recipes.find(r => r.id === 'rMAC');
-    const vv = recipe.validatedVariants.find(v => v.id === 'vMAC');
+    const vv = recipe.labVersions.find(v => v.id === 'vMAC');
     vv.ingredients = vv.ingredients.filter(i => i.name !== 'panna liquida fresca');
     fake.failNextDeletes(1);
     const logError = console.error;

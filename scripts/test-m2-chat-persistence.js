@@ -253,7 +253,10 @@ function makeClient(handler, opts = {}) {
     const fake = freshDb();
     const c = makeClient(handler);
     await ask(c, 'domanda prima di attivare');
-    c.api.rendiAttiva('r1');
+    // Percorso approvato (Valida, poi Rendi attiva): stesso variant.id. Qui conta solo lo
+    // stato in memoria; l'attivazione diretta dal LAB non esiste piu' (rendiAttiva non attiva).
+    const r1 = c.api.R('r1'); const bozza = r1.labVersions[0];
+    r1.validatedVariants = [{ ...bozza, status: 'approved', active: true, validatedAt: '10/10/2026' }]; r1.labVersions = [];
     const attiva = c.api.R('r1').validatedVariants[0];
     assert.strictEqual(attiva.id, 'v1', 'stesso variant.id (D3)');
     c.api.retireVariant('r1', 'v1');

@@ -33,6 +33,7 @@ async function test(name, fn) {
 
 // Supabase e Anthropic simulati: registrano ogni richiesta in uscita.
 const calls = [];
+const SESSIONI_CREATE = new Set(['psNewAz']); // psNewAz: Sessione pending usata dal modello 'update'
 let supabaseFails = false;
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url);
@@ -43,6 +44,12 @@ globalThis.fetch = async (url, init = {}) => {
   const q = new URL(u).searchParams;
   const id = (q.get('id') || q.get('session_id') || 'x').replace(/^eq\./, '');
   const method = init.method || 'GET';
+  // Stati delle Ricette e Sessioni (controlli lato server prima di scrivere):
+  // le Sessioni create in questi test (psA, psNew*) non esistono prima della
+  // creazione e sono pending subito dopo; v1 e' una Ricetta Attiva salvata.
+  if (method === 'GET' && u.includes('/production_sessions') && /^(psA|psNew)/.test(id)) return json(200, SESSIONI_CREATE.has(id) ? [{ id, status: 'pending' }] : []);
+  if (method === 'GET' && u.includes('/variants') && q.get('id') === 'eq.v1') return json(200, [{ id: 'v1', recipe_id: 'r1', status: 'validated', active: true }]);
+  if (method === 'POST' && u.includes('/production_sessions')) { const b = JSON.parse(init.body || '{}'); if (b && b.id) SESSIONI_CREATE.add(b.id); }
   // Letture paginate (offset>0): pagina vuota, cosi' la paginazione termina.
   if (method === 'GET') return json(200, u.includes('/production_sessions') && !(Number(q.get('offset')) > 0) ? [{ id, status: 'in_progress' }] : []);
   if (method === 'PATCH') return json(200, [Object.assign({ id }, JSON.parse(init.body || '{}'))]);
@@ -76,7 +83,7 @@ const ACTIONS = {
     ingredients: [{ id: 'i1', variant_id: 'v1', name: 'Farina' }], deletedIngredients: [{ id: 'i9', variant_id: 'v1' }],
     l2Items: [{ id: 'l2a', variant_id: 'v1' }], l3Items: [{ id: 'l3a', recipe_id: 'r1' }] } },
   updateDeclaredYield: { variantId: 'v1', recipeId: 'r1', qty: 2, unit: 'kg' },
-  update: { table: 'session_step_state', data: [{ id: 'pss1', session_id: 'ps1', item_key: 's1', checked: false, checked_at: null, timer_started_at: null, timer_actual_seconds: null }] },
+  update: { table: 'session_step_state', data: [{ id: 'pss1', session_id: 'psNewAz', item_key: 's1', checked: false, checked_at: null, timer_started_at: null, timer_actual_seconds: null }] },
   delete: { table: 'variants', id: 'v1' },
   updateVariantName: { variantId: 'v1', recipeId: 'r1', name: 'Nuovo nome' },
 };
@@ -213,9 +220,13 @@ function assertSafe(c, ctx) {
       calls.length = 0;
       const r = await call({ supabaseAction: 'update', table, data });
       assert.deepStrictEqual(r.out, { ok: true }, table);
-      assert.strictEqual(calls.length, 1); assertSafe(calls[0], table);
-      assert.strictEqual(new URL(calls[0].url).pathname, '/rest/v1/' + table);
-      assert.deepStrictEqual(JSON.parse(calls[0].body), data, table + ': corpo invariato');
+      // Prima le letture di controllo (Sessione, Ricetta Attiva, stati gia' esistenti), poi una sola scrittura.
+      calls.forEach(c => assertSafe(c, table));
+      assert.deepStrictEqual(calls.slice(0, -1).map(c => c.method), calls.slice(0, -1).map(() => 'GET'), table + ': solo letture prima della scrittura');
+      const w = calls[calls.length - 1];
+      assert.strictEqual(w.method, 'POST');
+      assert.strictEqual(new URL(w.url).pathname, '/rest/v1/' + table);
+      assert.deepStrictEqual(JSON.parse(w.body), data, table + ': corpo invariato');
     }
   });
 

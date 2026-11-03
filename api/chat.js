@@ -494,6 +494,156 @@ export default async function handler(req, res) {
     }
 
 
+    // ── Stati delle Ricette e Sessioni: controlli lato server ────────────
+    // Percorso approvato: IN LAB -> Valida -> VALIDATA -> Rendi attiva ->
+    // ATTIVA -> Produzione. Il client lo segue gia'; qui lo si garantisce
+    // anche contro richieste costruite a mano o finestre con dati vecchi.
+    // Il cambio di Scheda (Unisci) non cambia nessuna di queste regole.
+    const listaIn = ids => encodeURIComponent('(' + ids.map(id => '"' + String(id).replace(/"/g, '') + '"').join(',') + ')');
+    const testiPassi = row => {
+      let v2 = row && row.steps_v2;
+      if (typeof v2 === 'string') { try { v2 = JSON.parse(v2); } catch (e) { v2 = null; } }
+      if (Array.isArray(v2) && v2.length) return v2.map(x => String((x && x.text) || '').trim());
+      let st = row && row.steps;
+      if (typeof st === 'string') { try { st = JSON.parse(st); } catch (e) { st = [st]; } }
+      return Array.isArray(st) ? st.map(x => String((x && x.text) || x || '').trim()) : [];
+    };
+    const stessoValore = (a, b) => (a == null || a === '') && (b == null || b === '') ? true : (a == null || b == null) ? false : (typeof a === 'number' || typeof b === 'number' || !isNaN(Number(a))) ? Number(a) === Number(b) : String(a) === String(b);
+    const CAMPI_FORMULAZIONE = ['name', 'qty', 'unit', 'is_sub_recipe', 'sub_recipe_id', 'estimated_yield_pct', 'measured_yield_pct'];
+
+    // Transizione fra lo stato salvato (prima) e quello richiesto (dopo) di una
+    // Ricetta: null se ammessa, altrimenti { code, msg }. usi() legge, solo se
+    // serve, gli utilizzi della Ricetta (Sessioni anche storiche, mattoncini).
+    async function transizioneVarianteProblema(prima, dopo, usi) {
+      const id = dopo.id;
+      const attivaDopo = dopo.active === true;
+      if (!prima) {
+        // Ricetta nuova: nasce bozza o validata, mai gia' Attiva.
+        if (attivaDopo) return { code: 'attivazione_diretta', msg: 'attivazione diretta di una bozza non consentita: prima Valida, poi Rendi attiva dalla Scheda (' + id + ')' };
+        return null;
+      }
+      if (prima.status === 'retired') {
+        if (dopo.status !== 'retired') return { code: 'transizione_non_consentita', msg: 'una Ricetta archiviata non cambia stato (' + id + ')' };
+        if (attivaDopo) return { code: 'archiviata_attiva', msg: 'una Ricetta archiviata non puo\' essere attiva (' + id + ')' };
+        return null;
+      }
+      if (dopo.status === 'retired') {
+        if (attivaDopo) return { code: 'archiviata_attiva', msg: 'una Ricetta archiviata non puo\' essere attiva (' + id + ')' };
+        return null;
+      }
+      if (prima.status === 'lab') {
+        if (dopo.status === 'lab' && attivaDopo) return { code: 'bozza_attiva', msg: 'una bozza in LAB non puo\' essere attiva (' + id + ')' };
+        if (dopo.status === 'validated' && attivaDopo) return { code: 'attivazione_diretta', msg: 'attivazione diretta di una bozza non consentita: prima Valida, poi Rendi attiva dalla Scheda (' + id + ')' };
+        return null;
+      }
+      // Ricetta validata (anche Attiva).
+      if (dopo.status === 'lab') {
+        if (attivaDopo) return { code: 'bozza_attiva', msg: 'una bozza in LAB non puo\' essere attiva (' + id + ')' };
+        if (prima.active === true) return { code: 'attiva_protetta', msg: 'una Ricetta Attiva non torna nel LAB: crea una nuova bozza (' + id + ')' };
+        const u = await usi(id);
+        if (u.sessioni) return { code: 'usata_in_produzione', msg: 'Ricetta gia\' usata in Produzione: non torna nel LAB (' + id + ')' };
+        if (u.mattoncino) return { code: 'usata_come_mattoncino', msg: 'Ricetta usata come mattoncino: non torna nel LAB (' + id + ')' };
+        return null;
+      }
+      return null;
+    }
+
+    // Formulazione di una Ricetta che resta validata: ingredienti e
+    // procedimento non cambiano sul posto (si corregge tornando nel LAB).
+    function formulazioneProblema(id, primaRow, richiesti, salvati, eliminati) {
+      const msgIng = cosa => ({ code: 'formulazione_protetta', msg: cosa + ' in una Ricetta validata: la formulazione si corregge solo tornando nel LAB (' + id + ')' });
+      if (eliminati.length) return { code: 'formulazione_protetta', msg: 'ingredienti di una Ricetta validata non eliminabili: torna nel LAB (' + id + ')' };
+      if (richiesti) {
+        const perId = new Map(salvati.map(i => [i.id, i]));
+        for (const r of richiesti) {
+          const s0 = perId.get(r.id);
+          if (!s0) return msgIng('ingrediente nuovo');
+          if (CAMPI_FORMULAZIONE.some(k => k in r && !stessoValore(r[k], s0[k]))) return msgIng('ingrediente modificato');
+        }
+        const ordine = list => list.slice().sort((a, b) => (Number(a.sort_order) - Number(b.sort_order)) || (a.id < b.id ? -1 : 1)).map(i => i.id);
+        const richiestiIds = new Set(richiesti.map(r => r.id));
+        if (ordine(richiesti).join('|') !== ordine(salvati.filter(i => richiestiIds.has(i.id))).join('|')) return msgIng('ordine degli ingredienti modificato');
+      }
+      return null;
+    }
+
+    // Controllo del salvataggio: stati e formulazioni rispetto al database.
+    // Fail-closed: se lo stato salvato non si puo' leggere, non si scrive nulla.
+    async function controlloStatiRicette(data) {
+      const varianti = Array.isArray(data && data.variants) ? data.variants.filter(v => v && isValidId(v.id)) : [];
+      const eliminati = Array.isArray(data && data.deletedIngredients) ? data.deletedIngredients.filter(d => d && isValidId(d.variant_id)) : [];
+      const ids = [...new Set(varianti.map(v => v.id).concat(eliminati.map(d => d.variant_id)))];
+      if (!ids.length) return null;
+      const salvate = await sbSelectAll('variants?select=id,recipe_id,status,active,steps,steps_v2&id=in.' + listaIn(ids) + '&order=id.asc');
+      const primaDi = new Map(salvate.map(v => [v.id, v]));
+      const validate = ids.filter(id => primaDi.has(id) && primaDi.get(id).status !== 'lab');
+      const ingSalvati = validate.length ? await sbSelectAll('ingredients?select=*&variant_id=in.' + listaIn(validate) + '&order=sort_order.asc,id.asc') : [];
+      const richiestiPer = id => { const r = (data.ingredients || []).filter(i => i && i.variant_id === id); return r.length ? r : null; };
+      let cacheUsi = null;
+      const usi = async id => {
+        if (!cacheUsi) {
+          const sessioni = await sbSelectAll('production_sessions?select=id,source_variant_id,snapshot&order=id.asc');
+          cacheUsi = { sessioni };
+        }
+        const sessioni = cacheUsi.sessioni.some(ps => ps.source_variant_id === id
+          || (ps.snapshot && Array.isArray(ps.snapshot.ingredients) && ps.snapshot.ingredients.some(i => i && i.subRecipeId === id)));
+        const mr = await fetch(SB + '/rest/v1/ingredients?sub_recipe_id=eq.' + encodeURIComponent(id) + '&is_sub_recipe=eq.true&select=variant_id', { headers: SH_READ });
+        if (!mr.ok) throw new Error('verifica dei mattoncini non riuscita');
+        const mattoncino = (await mr.json()).some(u => u.variant_id !== id);
+        return { sessioni, mattoncino };
+      };
+      for (const v of varianti) {
+        const prima = primaDi.get(v.id) || null;
+        const t = await transizioneVarianteProblema(prima, v, usi);
+        if (t) return t;
+        if (prima && prima.status !== 'lab' && v.status !== 'lab') {
+          const f = formulazioneProblema(v.id, prima, richiestiPer(v.id), ingSalvati.filter(i => i.variant_id === v.id), eliminati.filter(d => d.variant_id === v.id));
+          if (f) return f;
+          if (('steps_v2' in v || 'steps' in v) && testiPassi(v).join('\n') !== testiPassi(prima).join('\n'))
+            return { code: 'formulazione_protetta', msg: 'il procedimento di una Ricetta validata non cambia sul posto: torna nel LAB (' + v.id + ')' };
+        }
+      }
+      // Ingredienti eliminati di Ricette validate non presenti fra le varianti inviate.
+      for (const d of eliminati) {
+        const prima = primaDi.get(d.variant_id);
+        if (prima && prima.status !== 'lab' && !varianti.some(v => v.id === d.variant_id))
+          return { code: 'formulazione_protetta', msg: 'ingredienti di una Ricetta validata non eliminabili: torna nel LAB (' + d.variant_id + ')' };
+      }
+      return null;
+    }
+
+    // Sessioni: una Sessione si crea una sola volta (mai riscritta: lo snapshot
+    // resta quello della creazione), solo da una Ricetta Attiva; gli stati di
+    // spunte e passaggi si creano una sola volta, per una Sessione pending.
+    async function controlloCreazioneSessione(table, data) {
+      if (table === 'production_sessions') {
+        const row = data;
+        const er = await fetch(SB + '/rest/v1/production_sessions?id=eq.' + encodeURIComponent(row.id) + '&select=id', { headers: SH_READ });
+        if (!er.ok) throw new Error('verifica Sessione non riuscita');
+        if ((await er.json()).length) return 'Sessione gia\' esistente: lo snapshot non si riscrive';
+        if (!isValidId(row.source_variant_id)) return 'Sessione senza Ricetta di origine';
+        const vr = await fetch(SB + '/rest/v1/variants?id=eq.' + encodeURIComponent(row.source_variant_id) + '&select=id,recipe_id,status,active', { headers: SH_READ });
+        if (!vr.ok) throw new Error('verifica Ricetta non riuscita');
+        const v = (await vr.json())[0];
+        if (!v || v.status !== 'validated' || v.active !== true) return 'solo una Ricetta Attiva va in Produzione';
+        if (row.recipe_id != null && row.recipe_id !== v.recipe_id) return 'Ricetta e Scheda non corrispondono';
+        return null;
+      }
+      const rows = Array.isArray(data) ? data : [data];
+      const sid = rows[0].session_id;
+      if (rows.some(r => r.session_id !== sid)) return 'righe di Sessioni diverse nella stessa richiesta';
+      const sr = await fetch(SB + '/rest/v1/production_sessions?id=eq.' + encodeURIComponent(sid) + '&select=id,status', { headers: SH_READ });
+      if (!sr.ok) throw new Error('verifica Sessione non riuscita');
+      const ps = (await sr.json())[0];
+      if (!ps || ps.status !== 'pending') return 'gli stati si creano solo per una Sessione da avviare';
+      // Percorso sempre fra quelli noti (mai costruito dal client).
+      const tabellaStati = table === 'session_step_state' ? '/rest/v1/session_step_state' : '/rest/v1/session_ingredient_state';
+      const xr = await fetch(SB + tabellaStati + '?id=in.' + listaIn(rows.map(r => r.id)) + '&select=id', { headers: SH_READ });
+      if (!xr.ok) throw new Error('verifica degli stati non riuscita');
+      if ((await xr.json()).length) return 'stati gia\' esistenti: non si riscrivono';
+      return null;
+    }
+
     if (body.supabaseAction === 'loadFamilies') {
       // Paginata: variant_families cresce con le varianti e il client la
       // riusa per riscrivere le famiglie di una variante (saveVariantFamilies
@@ -899,6 +1049,18 @@ export default async function handler(req, res) {
         if (r.error) throw new Error(label + ': ' + r.error);
       };
 
+      // Stati delle Ricette: controllati prima di scrivere qualunque cosa.
+      let problemaStati;
+      try { problemaStati = await controlloStatiRicette(body.data); }
+      catch (e) {
+        console.error('Save rifiutato (controllo stati non eseguibile):', e.message);
+        return res.status(200).json({ ok: false, code: 'controllo_non_eseguibile', errors: ['controllo degli stati non eseguibile: nessun dato salvato'] });
+      }
+      if (problemaStati) {
+        console.error('Save rifiutato (stati):', problemaStati.code, problemaStati.msg);
+        return res.status(200).json({ ok: false, code: problemaStati.code, errors: [problemaStati.msg] });
+      }
+
       try {
         // 1. Upsert ricetta
         await mustSave('recipes', recipe, 'recipes');
@@ -1009,6 +1171,13 @@ export default async function handler(req, res) {
     if (body.supabaseAction === 'update') {
       const problem = genericUpdateProblem(body.table, body.data);
       if (problem) return res.status(400).json({ error: 'update: ' + problem, code: 'not_allowed' });
+      let problemaSessione;
+      try { problemaSessione = await controlloCreazioneSessione(body.table, body.data); }
+      catch (e) { problemaSessione = 'controllo non eseguibile: ' + e.message; }
+      if (problemaSessione) {
+        console.error('Update rifiutato (Sessioni):', body.table, problemaSessione);
+        return res.status(200).json({ error: 'update: ' + problemaSessione, code: 'stato_sessione' });
+      }
       const ru = await sbPost(body.table, body.data);
       return res.status(200).json(ru);
     }

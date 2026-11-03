@@ -35,6 +35,12 @@ function extractFunction(startMarker) {
 }
 
 // Finto PostgREST: GET con eq, POST insert/upsert (merge-duplicates), DELETE per id.
+// Le Ricette Attive esistono anche nel database: il server crea una Sessione
+// solo da una Ricetta Attiva salvata (controllo degli stati lato server).
+function seedAttive(fake, recs) {
+  fake.tables.variants = recs.flatMap(r => (r.validatedVariants || []).map(v => ({ id: v.id, recipe_id: r.id, status: v.status === 'retired' ? 'retired' : 'validated', active: v.active === true })));
+  return fake;
+}
 function makeFakeSupabase() {
   const tables = {};
   const calls = [];
@@ -145,7 +151,7 @@ function makeClient(handler, opts = {}) {
   process.env.SUPABASE_URL = 'https://fake.supabase';
   process.env.SUPABASE_ANON_KEY = 'anon';
   const handler = await loadHandler();
-  function freshDb() { const fake = makeFakeSupabase(); globalThis.fetch = fake.fetch; return fake; }
+  function freshDb() { const fake = seedAttive(makeFakeSupabase(), recipes()); globalThis.fetch = fake.fetch; return fake; }
   const qtys = (h) => Object.fromEntries([...h.matchAll(/data-qc-item="([^"]*)"><td class="ing-name">[\s\S]*?<\/td><td class="qc-qty">([^<]*)<\/td>/g)].map(m => [m[1], m[2]]));
   const recipeWrites = (fake, c) => fake.calls.filter(x => x.method !== 'GET' && ['recipes', 'variants', 'ingredients'].includes(x.table)).length
     + c.apiCalls.filter(x => x.supabaseAction === 'save' || (x.supabaseAction === 'update' && ['recipes', 'variants', 'ingredients'].includes(x.table))).length;

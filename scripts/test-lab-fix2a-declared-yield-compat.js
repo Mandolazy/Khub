@@ -242,10 +242,12 @@ const legacy = f => clone(f.tables.variants.map(({ declared_yield_qty, declared_
     assert.deepStrictEqual(yieldCols(fake), y0);
   });
 
-  await test('4. promozione (stesso variant.id, come Rendi attiva): la riga conserva la resa dichiarata della bozza', async () => {
+  // Promozione con il percorso approvato (Valida: stesso id, non ancora Attiva); l'attivazione
+  // diretta di una bozza e' rifiutata dal server (test-stati-ricetta).
+  await test('4. promozione (stesso variant.id, come Valida): la riga conserva la resa dichiarata della bozza', async () => {
     const { fake, client, recipe } = await setup(withDeclaredYield);
     const r = recipe(); const v = r.labVersions[0];
-    r.validatedVariants = [...r.validatedVariants, { id: v.id, name: v.name, status: 'approved', active: true, validatedAt: '10/10/2026', portionsCount: v.portionsCount, gramsPerPortion: v.gramsPerPortion, portionUnit: 'g',
+    r.validatedVariants = [...r.validatedVariants, { id: v.id, name: v.name, status: 'approved', active: false, validatedAt: '10/10/2026', portionsCount: v.portionsCount, gramsPerPortion: v.gramsPerPortion, portionUnit: 'g',
       ingredients: v.ingredients.map((i, k) => ({ ...i, id: 'vi_new_' + k })), steps: v.steps, stepsV2: v.stepsV2, originVariantId: v.originVariantId, l2Items: [] }];
     r.labVersions = [];
     assert.strictEqual(await client.saveToSupabase(r), true);
