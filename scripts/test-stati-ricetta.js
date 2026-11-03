@@ -401,6 +401,48 @@ function makeClientStati(fetchImpl) {
   // SET NULL; RESTRICT (controllato a fine istruzione, tutto o niente) su
   // variants.origin_variant_id, l2_items.variant_id, l3_items.recipe_id.
   const restrict409 = () => ({ ok: false, status: 409, json: async () => ({ code: '23503' }), text: async () => 'violates foreign key constraint (restrict)' });
+  await test('T11. durate dei passaggi protette: modificarle su una Validata o una Attiva e\' rifiutato dal server; nella bozza si modificano', async () => {
+    for (const [id, da, a] of [['vaP', null, 300], ['vaB', null, 300], ['vaB', 300, 600], ['vaB', 300, null]]) {
+      const c = await setup();
+      // durata gia' salvata (da) sul primo passaggio, poi richiesta di modificarla (a)
+      if (da != null) { riga(id).steps_v2 = [{ id: 'st1', order: 0, text: 'Impastare', expectedDurationSeconds: da }]; }
+      const c2 = makeClientStati(clientFetch); await c2.loadFromSupabase(); void c;
+      const prima = db();
+      const v = vv(c2, id);
+      v.stepsV2 = v.stepsV2.map((st, i) => i === 0 ? { ...st, expectedDurationSeconds: a } : st);
+      assert.strictEqual(await c2.saveToSupabase(c2.R('rB')), false, id + ': ' + da + ' -> ' + a);
+      assert.deepStrictEqual(db(), prima, id + ': nulla scritto');
+      const r = await salva({ recipe: clone(fake.tables.recipes[0]), variants: [rigaPayload(id, { steps_v2: [{ id: 'st1', order: 0, text: 'Impastare', expectedDurationSeconds: a }] })], ingredients: [], deletedIngredients: [] });
+      assert.deepStrictEqual([r.ok, r.code, /procedimento di una Ricetta validata/.test(r.errors[0])], [false, 'formulazione_protetta', true], 'API diretta: ' + id);
+    }
+    const c = await setup();
+    assert.strictEqual(await c.saveToSupabase(c.R('rB')), true, 'durate invariate: salvataggio ammesso');
+    c.R('rB').currentLabIdx = c.R('rB').labVersions.findIndex(v => v.id === 'lvB');
+    c.upLab('rB', v => ({ ...v, stepsV2: [{ id: 'st1', order: 0, text: 'Impastare', expectedDurationSeconds: 420 }] }));
+    assert.strictEqual(await c.saveToSupabase(c.R('rB')), true, 'bozza in LAB: durata modificabile');
+    assert.strictEqual(riga('lvB').steps_v2[0].expectedDurationSeconds, 420);
+  });
+
+  await test('T12. una bozza IN LAB non passa ad Archiviata (anche via API); si archivia solo da Validata o Attiva; nessun comando lo propone', async () => {
+    const c = await setup(); const prima = db();
+    for (const [row, msg] of [[rigaPayload('lvB', { status: 'retired', active: false }), /bozza in LAB non si archivia/], [rigaPayload('lvB', { id: 'lvNuovaArch', status: 'retired', active: false }), /non nasce archiviata/]]) {
+      const r = await salva({ recipe: clone(fake.tables.recipes[0]), variants: [row], ingredients: [], deletedIngredients: [] });
+      assert.deepStrictEqual([r.ok, r.code, msg.test(r.errors[0])], [false, 'transizione_non_consentita', true], row.id);
+    }
+    assert.deepStrictEqual(db(), prima, 'nulla scritto');
+    c.retireVariant('rB', 'lvB');
+    assert.ok(c.R('rB').labVersions.some(v => v.id === 'lvB') && !c.log.toasts.includes('Ricetta archiviata'), 'retireVariant non agisce su una bozza');
+    // percorso ammesso: IN LAB -> Validata -> archiviata
+    c.R('rB').currentLabIdx = c.R('rB').labVersions.findIndex(v => v.id === 'lvB');
+    c.onValidate(); await c.confirmValidate();
+    c.retireVariant('rB', 'lvB'); assert.strictEqual(await c.saveToSupabase(c.R('rB')), true);
+    assert.deepStrictEqual(stato('lvB'), ['retired', false]);
+    const h = fs.readFileSync(path.join(ROOT, 'khub_mvp.html'), 'utf8');
+    const rami = h.slice(h.indexOf("}else if(stato==='lab'){"), h.indexOf("}else if(stato==='lab'){") + 1500);
+    assert.ok(!/retireVariant/.test(rami.slice(0, rami.indexOf('}else'))), 'il menu di una bozza non propone Archivia');
+    assert.ok(/const vv=recipe\.validatedVariants\.find\(v=>v\.id===variantId\);/.test(h.slice(h.indexOf('function retireVariant('), h.indexOf('function retireVariant(') + 200)), 'retireVariant solo su Ricette validate');
+  });
+
   function conCascade() {
     const base = fake.fetch;
     fake.fetch = async (url, opts = {}) => {

@@ -500,13 +500,17 @@ export default async function handler(req, res) {
     // anche contro richieste costruite a mano o finestre con dati vecchi.
     // Il cambio di Scheda (Unisci) non cambia nessuna di queste regole.
     const listaIn = ids => encodeURIComponent('(' + ids.map(id => '"' + String(id).replace(/"/g, '') + '"').join(',') + ')');
-    const testiPassi = row => {
+    // Procedimento di una Ricetta: testo e durata prevista di ogni passaggio
+    // (steps_v2.expectedDurationSeconds), nello stesso ordine. Le righe storiche
+    // senza steps_v2 hanno solo i testi (steps): durata assente.
+    const durataPasso = d => (d == null || d === '' ? null : Number(d));
+    const passiProtetti = row => {
       let v2 = row && row.steps_v2;
       if (typeof v2 === 'string') { try { v2 = JSON.parse(v2); } catch (e) { v2 = null; } }
-      if (Array.isArray(v2) && v2.length) return v2.map(x => String((x && x.text) || '').trim());
+      if (Array.isArray(v2) && v2.length) return v2.map(x => String((x && x.text) || '').trim() + '\u0000' + durataPasso(x && x.expectedDurationSeconds));
       let st = row && row.steps;
       if (typeof st === 'string') { try { st = JSON.parse(st); } catch (e) { st = [st]; } }
-      return Array.isArray(st) ? st.map(x => String((x && x.text) || x || '').trim()) : [];
+      return Array.isArray(st) ? st.map(x => String((x && x.text) || x || '').trim() + '\u0000' + durataPasso(x && x.expectedDurationSeconds)) : [];
     };
     const stessoValore = (a, b) => (a == null || a === '') && (b == null || b === '') ? true : (a == null || b == null) ? false : (typeof a === 'number' || typeof b === 'number' || !isNaN(Number(a))) ? Number(a) === Number(b) : String(a) === String(b);
     const CAMPI_FORMULAZIONE = ['name', 'qty', 'unit', 'is_sub_recipe', 'sub_recipe_id', 'estimated_yield_pct', 'measured_yield_pct'];
@@ -518,8 +522,9 @@ export default async function handler(req, res) {
       const id = dopo.id;
       const attivaDopo = dopo.active === true;
       if (!prima) {
-        // Ricetta nuova: nasce bozza o validata, mai gia' Attiva.
+        // Ricetta nuova: nasce bozza o validata, mai gia' Attiva ne' archiviata.
         if (attivaDopo) return { code: 'attivazione_diretta', msg: 'attivazione diretta di una bozza non consentita: prima Valida, poi Rendi attiva dalla Scheda (' + id + ')' };
+        if (dopo.status === 'retired') return { code: 'transizione_non_consentita', msg: 'una Ricetta non nasce archiviata: si archivia solo da Validata o Attiva (' + id + ')' };
         return null;
       }
       if (prima.status === 'retired') {
@@ -528,6 +533,8 @@ export default async function handler(req, res) {
         return null;
       }
       if (dopo.status === 'retired') {
+        // Si archivia solo da Validata o Attiva: una bozza in LAB prima si valida.
+        if (prima.status === 'lab') return { code: 'transizione_non_consentita', msg: 'una bozza in LAB non si archivia: prima Valida (' + id + ')' };
         if (attivaDopo) return { code: 'archiviata_attiva', msg: 'una Ricetta archiviata non puo\' essere attiva (' + id + ')' };
         return null;
       }
@@ -599,7 +606,7 @@ export default async function handler(req, res) {
         if (prima && prima.status !== 'lab' && v.status !== 'lab') {
           const f = formulazioneProblema(v.id, prima, richiestiPer(v.id), ingSalvati.filter(i => i.variant_id === v.id), eliminati.filter(d => d.variant_id === v.id));
           if (f) return f;
-          if (('steps_v2' in v || 'steps' in v) && testiPassi(v).join('\n') !== testiPassi(prima).join('\n'))
+          if (('steps_v2' in v || 'steps' in v) && passiProtetti(v).join('\n') !== passiProtetti(prima).join('\n'))
             return { code: 'formulazione_protetta', msg: 'il procedimento di una Ricetta validata non cambia sul posto: torna nel LAB (' + v.id + ')' };
         }
       }
