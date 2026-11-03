@@ -261,7 +261,7 @@ function assertSafe(c, ctx) {
   await test('delete: solo recipes/variants/production_sessions, id codificato, Sessioni solo se pending', async () => {
     for (const [table, id] of [['recipes', 'r1'], ['variants', 'v&x=1'], ['production_sessions', 'ps1']]) {
       calls.length = 0;
-      const r = await call({ supabaseAction: 'delete', table, id });
+      const r = await call(Object.assign({ supabaseAction: 'delete', table, id }, table === 'recipes' ? { ricetteAttese: [] } : {}));
       assert.strictEqual(r.out.ok, true, JSON.stringify(r.out));
       // Ricette e Schede: prima le letture delle dipendenze (mattoncini, Sessioni), poi una sola DELETE.
       calls.forEach(c => assertSafe(c, 'delete'));

@@ -2676,10 +2676,23 @@ async function eliminaSulServer(table,id,extra){
       usata_in_produzione:'è stata usata in Produzione: puoi archiviarla, non eliminarla.',
       scheda_non_vuota:'contiene ancora delle Ricette.',
       db:'il database ha rifiutato l\'eliminazione (è ancora collegata ad altri dati, ad esempio osservazioni di MichelinAI o bozze nate da questa).',
-      controllo_non_eseguibile:'non è stato possibile verificare le dipendenze: riprova.'
+      controllo_non_eseguibile:'non è stato possibile verificare le dipendenze: riprova.',
+      osservazioni_michelinai:'ha osservazioni di MichelinAI collegate, che non vengono eliminate: per ora non si può eliminare.',
+      scheda_cambiata:'la Scheda è cambiata nel frattempo (contiene Ricette diverse da quelle confermate). Ricontrolla e riprova.',
+      conferma_mancante:'manca la conferma delle Ricette da eliminare: riprova.'
     };
     return{ok:false,codice:data&&data.code||'errore',messaggio:motivi[data&&data.code]||((data&&data.error)||('errore '+res.status))};
   }catch(e){return{ok:false,codice:'rete',messaggio:'controlla la connessione e riprova.'};}
+}
+
+// Elimina Scheda: le Ricette che la conferma mostra sono le stesse inviate al
+// server, che rifiuta se nel database la Scheda ne contiene altre.
+function ricetteDellaScheda(recipe){
+  return[...new Set((recipe.validatedVariants||[]).concat(recipe.labVersions||[]).map(v=>v.id))];
+}
+function testoEliminaScheda(recipe){
+  const n=ricetteDellaScheda(recipe).length;
+  return 'Eliminare la Scheda «'+escAttr(recipe.name)+'»'+(n?' e '+(n===1?'la sua Ricetta':'le sue '+n+' Ricette'):'')+'? L\'azione è irreversibile.';
 }
 
 async function deleteRecipe(id){
@@ -2696,9 +2709,16 @@ async function deleteRecipe(id){
     alert('Non puoi eliminare "'+recipe.name+'": una sua Ricetta attiva è usata come mattoncino da:\n\n'+elenco+'\n\nRimuovi prima il collegamento da quelle Schede, poi riprova.');
     return;
   }
-  if(!confirm(`Eliminare "${recipe.name}"?`))return;
-  const esito=await eliminaSulServer('recipes',id);
-  if(!esito.ok){toast('"'+recipe.name+'" non eliminata: '+(esito.codice==='usata_come_mattoncino'||esito.codice==='usata_in_produzione'?'una sua Ricetta '+esito.messaggio:esito.messaggio),'ti-alert-circle');return;}
+  // Una sola conferma: quella nella pagina (testoEliminaScheda), che ha portato qui.
+  const esito=await eliminaSulServer('recipes',id,{ricetteAttese:ricetteDellaScheda(recipe)});
+  if(!esito.ok){
+    S.confirmDeleteId=null;
+    if(esito.codice==='scheda_cambiata'){try{await loadFromSupabase();}catch(e){}}
+    render();
+    toast('"'+recipe.name+'" non eliminata: '+(esito.codice==='usata_come_mattoncino'||esito.codice==='usata_in_produzione'?'una sua Ricetta '+esito.messaggio:esito.messaggio),'ti-alert-circle');
+    return;
+  }
+  S.confirmDeleteId=null;
   S.recipes=S.recipes.filter(r=>r.id!==id);
   if(S.selectedId===id){S.selectedId=S.recipes[0]?.id||null;}
   S.view=S.recipes.length>0?'home':'load';
@@ -8650,7 +8670,7 @@ function renderRicettaMadreV2(recipe){
       ${recipe.validatedVariants.length>=2?`<button class="si-btn-secondario" onclick="S.view='confronto';S.confrontoA=null;S.confrontoB=null;render()"><i class="ti ti-columns"></i> Confronta Ricette attive</button>`:''}
       <button class="si-btn-secondario" onclick="openMergePicker('${recipe.id}')"><i class="ti ti-git-merge"></i> Unisci con un'altra Scheda</button>
       ${S.confirmDeleteId===recipe.id?`
-        <div style="font-size:13px;color:#c0392b;text-align:center;padding:8px 0"><i class="ti ti-alert-triangle"></i> Sei sicuro? Questa azione è irreversibile.</div>
+        <div style="font-size:13px;color:#c0392b;text-align:center;padding:8px 0"><i class="ti ti-alert-triangle"></i> ${testoEliminaScheda(recipe)}</div>
         <div style="display:flex;gap:8px">
           <button class="si-btn-secondario" style="flex:1" onclick="S.confirmDeleteId=null;render()">Annulla</button>
           <button class="si-btn-elimina" style="flex:1;border:1px solid #c0392b" onclick="deleteRecipe('${recipe.id}')">Sì, elimina</button>
@@ -9362,7 +9382,7 @@ function renderLabRecipe(recipe){
 
   <div class="card">
     ${S.confirmDeleteId===recipe.id?
-      `<div style="font-size:13px;color:#c0392b;margin-bottom:10px"><i class="ti ti-alert-triangle"></i> Sei sicuro? Questa azione è irreversibile.</div>
+      `<div style="font-size:13px;color:#c0392b;margin-bottom:10px"><i class="ti ti-alert-triangle"></i> ${testoEliminaScheda(recipe)}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-sm" style="background:#c0392b;color:white" onclick="deleteRecipe('${recipe.id}')"><i class="ti ti-trash"></i> Sì, elimina</button>
         <button class="btn btn-outline btn-sm" onclick="S.confirmDeleteId=null;render()">Annulla</button>
@@ -11153,7 +11173,7 @@ function renderSchedaD3(recipe){
   var sezione=function(titolo,lista,stato){return lista.length?`<div class="d3-sez"><div class="d3-sez-titolo">${titolo} <span>${lista.length}</span></div>${lista.map(function(v){return card(v,stato);}).join('')}</div>`:'';};
   var scelta=S.pendingDuplicaSceltaRecipeId===rid?`<div class="d3-card d3-scelta"><div class="d3-sez-titolo">Da quale Ricetta attiva vuoi partire?</div>${attive.map(function(v){return`<button class="d3-btn d3-btn-line" onclick="creaBozzaDaAttivaId('${rid}','${v.id}')">${d3Esc(v.name)}</button>`;}).join('')}<button class="d3-btn d3-btn-text" onclick="S.pendingDuplicaSceltaRecipeId=null;render()">Annulla</button></div>`:'';
   var rinominaScheda=S.renameEdit&&S.renameEdit.kind==='scheda'&&S.renameEdit.recipeId===rid;
-  var conferma=S.confirmDeleteId===rid?`<div class="d3-card d3-conferma"><div>Eliminare la Scheda «${d3Esc(recipe.name)}» e tutte le sue Ricette? L'azione è irreversibile.</div><div class="d3-riga-azioni"><button class="d3-btn d3-btn-line" onclick="S.confirmDeleteId=null;render()">Annulla</button><button class="d3-btn d3-btn-danger" onclick="deleteRecipe('${rid}')">Sì, elimina</button></div></div>`:'';
+  var conferma=S.confirmDeleteId===rid?`<div class="d3-card d3-conferma"><div>${testoEliminaScheda(recipe)}</div><div class="d3-riga-azioni"><button class="d3-btn d3-btn-line" onclick="S.confirmDeleteId=null;render()">Annulla</button><button class="d3-btn d3-btn-danger" onclick="deleteRecipe('${rid}')">Sì, elimina</button></div></div>`:'';
   return`<div class="d3-wrap d3-scheda">
     <div class="d3-crumb"><button onclick="S.view='home';render()">‹ Schede</button>${cat?` › ${d3Esc(cat)}`:''}</div>
     <div class="d3-scheda-head">
