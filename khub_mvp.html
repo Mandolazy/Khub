@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:wght@400;500&family=IBM+Plex+Mono:wght@400;500;600&family=Archivo:wght@400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
@@ -836,6 +837,402 @@ body{font-family:'DM Sans',sans-serif;background:var(--cream);color:var(--dark);
 .labg-row-data.non-tracciata{color:var(--dpop-timestamp-spento);}
 
 .labg-fine{font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:var(--dpop-grigio-dato);text-align:center;padding:24px;}
+/* ══ ANTEPRIMA DIREZIONE 3 — Cucina editoriale (solo con body.ui-d3) ══ */
+.d3-sb-toggle{margin-top:auto;background:none;border:1px dashed var(--border);border-radius:var(--r-md);padding:8px 10px;font-family:inherit;font-size:11px;color:var(--mid);cursor:pointer;text-align:left;}
+body.ui-d3{
+  --d3-bg:#F4EEE2;--d3-card:#FFFDF9;--d3-bar:#FAF6EE;--d3-bordo:#E2D7C4;--d3-sabbia:#EDE4D3;--d3-campo:#C9BBA4;
+  --d3-ink:#231B14;--d3-ink2:#6B5F55;--d3-terra:#B4501C;--d3-terra2:#9C4416;--d3-verde:#2E6A45;--d3-ardesia:#55606A;--d3-tratto:#8C7B68;--d3-grigio:#8C8277;
+  --cream:#F4EEE2;--white:#FFFDF9;--border:#E2D7C4;--dark:#231B14;--mid:#6B5F55;--light:#8C8277;
+  font-family:'Instrument Sans','DM Sans',sans-serif;background:var(--d3-bg);color:var(--d3-ink);
+}
+body.ui-d3 .main{background:var(--d3-bg);}
+body.ui-d3 .topbar{background:var(--d3-bar);border-bottom-color:var(--d3-bordo);}
+body.ui-d3 .logo{color:var(--d3-terra);}
+body.ui-d3 .sidebar{background:var(--d3-bar);border-right-color:var(--d3-bordo);gap:4px;padding:16px 12px;}
+body.ui-d3 .new-btn{background:var(--d3-card);color:var(--d3-ink);border:1.5px solid var(--d3-ink);font-weight:600;font-size:14px;padding:11px 14px;}
+body.ui-d3 .load-btn{border-color:transparent;color:var(--d3-ink);font-size:14px;padding:11px 14px;}
+body.ui-d3 #btn-load-view{border-color:var(--d3-bordo);background:var(--d3-card);}
+body.ui-d3 .load-btn.active{background:var(--d3-sabbia);color:var(--d3-ink);border-color:transparent;font-weight:600;box-shadow:inset 3px 0 0 var(--d3-ink);}
+body.ui-d3 .sec-label{color:var(--d3-ink2);font-size:10.5px;}
+body.ui-d3 .bottom-nav{background:var(--d3-bar);border-top-color:var(--d3-bordo);}
+body.ui-d3 .bnav-btn{color:var(--d3-ink2);font-size:12px;}
+body.ui-d3 .bnav-btn.active,body.ui-d3 .bnav-btn.active-lab{color:var(--d3-ink);background:var(--d3-sabbia);box-shadow:inset 0 3px 0 var(--d3-ink);font-weight:600;}
+body.ui-d3 .card{background:var(--d3-card);border-color:var(--d3-bordo);}
+.d3-serif{font-family:'Newsreader',Georgia,serif;font-weight:500;letter-spacing:-0.01em;}
+.d3-wrap{max-width:1180px;width:100%;margin:0 auto;display:flex;flex-direction:column;gap:16px;}
+.d3-h1{font-size:40px;line-height:1.1;color:var(--d3-ink);font-weight:500;}
+.d3-sub{font-size:13px;color:var(--d3-ink2);}
+.d3-muto{color:var(--d3-grigio);}
+.d3-card{background:var(--d3-card);border:1px solid var(--d3-bordo);border-radius:12px;}
+.d3-crumb{font-size:13px;color:var(--d3-ink2);display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.d3-crumb button{background:none;border:none;font:inherit;color:var(--d3-ink2);cursor:pointer;padding:6px 0;min-height:32px;}
+.d3-crumb button:hover{color:var(--d3-ink);text-decoration:underline;}
+/* Banda di stato a sinistra delle card */
+.d3-band{position:relative;overflow:visible;}
+.d3-band::before{content:'';position:absolute;left:-1px;top:-1px;bottom:-1px;width:5px;border-radius:12px 0 0 12px;}
+.d3-band-attiva::before{background:var(--d3-verde);}
+.d3-band-validata::before{background:var(--d3-ardesia);}
+.d3-band-lab::before{background:repeating-linear-gradient(to bottom,var(--d3-tratto) 0 7px,transparent 7px 12px);}
+.d3-band-archiviata::before{background:var(--d3-grigio);opacity:.5;}
+/* Pillole di stato: parola + glifo + forma */
+.d3-pill{display:inline-flex;align-items:center;gap:6px;align-self:flex-start;font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;padding:4px 11px;border-radius:999px;line-height:1.3;}
+.d3-pill-attiva{background:var(--d3-verde);color:#fff;border:1.5px solid var(--d3-verde);}
+.d3-pill-validata{background:#EEF0F1;color:#3C454D;border:1.5px solid var(--d3-ardesia);}
+.d3-pill-lab{background:transparent;color:#5C4F42;border:1.5px dashed var(--d3-tratto);}
+.d3-pill-archiviata{background:var(--d3-sabbia);color:var(--d3-ink2);border:1.5px solid transparent;}
+.d3-previsto{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--d3-sabbia);color:var(--d3-ink2);padding:2px 6px;border-radius:3px;vertical-align:middle;}
+.d3-oggi{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;background:var(--d3-ink);color:var(--d3-card);padding:2px 6px;border-radius:3px;margin-left:8px;}
+/* Pulsanti: un solo terracotta per schermata (cambio di stato) */
+.d3-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font-family:inherit;font-size:14px;font-weight:600;border-radius:8px;padding:10px 16px;min-height:44px;cursor:pointer;white-space:nowrap;}
+.d3-btn-primary{background:var(--d3-terra);color:#fff;border:1.5px solid var(--d3-terra);}
+.d3-btn-primary:hover,.d3-btn-primary:active{background:var(--d3-terra2);border-color:var(--d3-terra2);}
+.d3-btn-line{background:var(--d3-card);color:var(--d3-ink);border:1.5px solid var(--d3-ink);}
+.d3-btn-line:hover{background:var(--d3-sabbia);}
+.d3-btn-line.attivo{background:var(--d3-sabbia);}
+.d3-btn-ink{background:var(--d3-ink);color:var(--d3-card);border:1.5px solid var(--d3-ink);}
+.d3-btn-danger{background:#9B2C1F;color:#fff;border:1.5px solid #9B2C1F;}
+.d3-btn-text{background:none;border:none;color:var(--d3-ink);font:inherit;font-weight:600;text-decoration:underline;text-underline-offset:3px;cursor:pointer;padding:6px 4px;min-height:44px;}
+.d3-btn-icon{width:44px;padding:0;background:var(--d3-card);border:1.5px solid var(--d3-bordo);color:var(--d3-ink);font-size:18px;}
+.d3-riga-azioni{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+/* Menu ⋯ */
+.d3-menu-wrap{position:relative;display:inline-flex;}
+.d3-menu{position:absolute;right:0;top:calc(100% + 6px);z-index:60;min-width:230px;background:var(--d3-card);border:1px solid var(--d3-bordo);border-radius:10px;box-shadow:0 8px 24px rgba(35,27,20,.16);padding:6px;display:flex;flex-direction:column;}
+.d3-menu-item{background:none;border:none;text-align:left;font-family:inherit;font-size:14px;color:var(--d3-ink);padding:11px 12px;border-radius:6px;cursor:pointer;min-height:44px;}
+.d3-menu-item:hover{background:var(--d3-sabbia);}
+.d3-menu-item.danger{color:#9B2C1F;}
+.d3-anteprima-nota{font-size:12px;color:var(--d3-ink2);text-align:center;}
+.d3-anteprima-nota .d3-btn-text{font-size:12px;min-height:32px;}
+.d3-vuoto{padding:28px;text-align:center;color:var(--d3-ink2);display:flex;flex-direction:column;align-items:center;gap:12px;}
+.d3-solo-mobile{display:none !important;}
+/* ── Archivio Schede ── */
+.d3-arch-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;}
+.d3-arch-ctrl{display:flex;gap:10px;align-items:center;}
+.d3-search{flex:1;display:flex;align-items:center;gap:8px;background:var(--d3-card);border:1.5px solid var(--d3-campo);border-radius:8px;padding:0 12px;min-height:46px;color:var(--d3-ink2);}
+.d3-search input{flex:1;border:none;background:transparent;font-family:inherit;font-size:15px;color:var(--d3-ink);outline:none;min-width:0;min-height:44px;}
+.d3-search:focus-within{border-color:var(--d3-ink);}
+.d3-select{font-family:inherit;font-size:14px;font-weight:600;color:var(--d3-ink);background:var(--d3-card);border:1.5px solid var(--d3-ink);border-radius:8px;min-height:44px;padding:0 12px;max-width:240px;}
+.d3-indice{display:flex;gap:2px;flex-wrap:wrap;}
+.d3-indice button,.d3-indice span{min-width:28px;min-height:30px;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;border-radius:4px;}
+.d3-indice button{background:none;border:none;color:var(--d3-ink);cursor:pointer;font-family:inherit;}
+.d3-indice button:hover{background:var(--d3-sabbia);}
+.d3-indice span{color:#C6BBAA;font-weight:500;}
+.d3-arch-lista{overflow:hidden;}
+.d3-arch-testata,.d3-arch-riga{display:grid;grid-template-columns:minmax(0,2.4fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1.2fr) 20px;gap:12px;align-items:center;padding:0 20px;}
+.d3-arch-testata{min-height:40px;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--d3-ink2);border-bottom:1px solid var(--d3-bordo);}
+.d3-arch-gruppo{display:flex;justify-content:space-between;align-items:center;padding:8px 20px;background:var(--d3-bg);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--d3-ink);border-bottom:1px solid var(--d3-bordo);scroll-margin-top:8px;}
+.d3-arch-gruppo span{font-weight:500;letter-spacing:0;text-transform:none;color:var(--d3-ink2);}
+.d3-arch-riga{width:100%;min-height:56px;background:var(--d3-card);border:none;border-bottom:1px solid var(--d3-bordo);text-align:left;cursor:pointer;font-family:inherit;color:var(--d3-ink);}
+.d3-arch-riga:hover{background:var(--d3-bar);}
+.d3-arch-riga:last-child{border-bottom:none;}
+.d3-arch-nome{font-size:20px;line-height:1.2;overflow-wrap:anywhere;}
+.d3-arch-cat,.d3-arch-fam{font-size:14px;color:var(--d3-ink2);overflow-wrap:anywhere;}
+.d3-arch-cnt{font-size:13px;color:var(--d3-ink2);}
+.d3-arch-meta-m{display:none;}
+.d3-cnt-att{color:var(--d3-verde);font-weight:700;}
+.d3-cnt-zero{color:var(--d3-grigio);}
+.d3-chev{color:var(--d3-grigio);font-size:18px;}
+/* ── Scheda ── */
+.d3-scheda-head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;padding-bottom:16px;border-bottom:1px solid var(--d3-bordo);}
+.d3-scheda-id{display:flex;flex-direction:column;gap:10px;min-width:0;flex:1;}
+.d3-scheda-id .d3-h1{font-size:44px;overflow-wrap:anywhere;}
+.d3-scheda-cta{display:flex;gap:8px;align-items:center;}
+.d3-chips-statiche{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+.d3-chip,.d3-chip-cat{font-size:13px;background:var(--d3-sabbia);color:var(--d3-ink);border-radius:6px;padding:5px 10px;border:none;font-family:inherit;}
+.d3-chip-cat{cursor:pointer;min-height:32px;border:1px dashed transparent;}
+.d3-chip-cat:hover{border-color:var(--d3-tratto);}
+.d3-cat-edit input{font-family:inherit;font-size:14px;padding:6px 10px;border:1.5px solid var(--d3-ink);border-radius:6px;background:var(--d3-card);min-height:36px;width:220px;max-width:100%;}
+.d3-conferma-val{font-size:14px;color:var(--d3-ink2);border-left:3px solid var(--d3-verde);padding:6px 12px;}
+.d3-conferma-val strong{color:var(--d3-ink);}
+.d3-sez{display:flex;flex-direction:column;gap:10px;}
+.d3-sez-titolo{font-size:13px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--d3-ink);}
+.d3-sez-titolo span{font-weight:500;letter-spacing:.02em;text-transform:none;color:var(--d3-ink2);margin-left:6px;}
+.d3-ric{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 16px;align-items:center;padding:18px 20px 18px 24px;}
+.d3-ric-testo{display:flex;flex-direction:column;gap:6px;min-width:0;}
+.d3-ric-nome{font-size:24px;line-height:1.2;overflow-wrap:anywhere;}
+.d3-ric-meta{font-size:13px;color:var(--d3-ink2);}
+.d3-ric-azioni{display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap;}
+.d3-ric-azioni .d3-btn-line,.d3-ric-azioni .d3-btn-primary{min-width:190px;}
+.d3-ric-extra{grid-column:1/-1;padding-top:12px;border-top:1px solid var(--d3-bordo);}
+.d3-evidenza{background:#F3F6F2;}
+.d3-archiviate{padding:0;}
+.d3-arch-toggle{width:100%;display:flex;justify-content:space-between;gap:12px;background:none;border:none;font-family:inherit;font-size:14px;color:var(--d3-ink2);padding:16px 20px;cursor:pointer;min-height:52px;text-align:left;}
+.d3-scelta,.d3-conferma{padding:16px 20px;display:flex;flex-direction:column;gap:10px;align-items:flex-start;}
+/* ── LAB ── */
+.d3-lab-top{display:flex;flex-direction:column;gap:10px;}
+.d3-bozze{display:flex;gap:4px;align-items:flex-end;overflow-x:auto;scrollbar-width:none;}
+.d3-bozza{flex-shrink:0;font-family:inherit;font-size:14px;font-weight:600;color:var(--d3-ink2);background:var(--d3-bar);border:1px solid var(--d3-bordo);border-bottom:none;border-radius:10px 10px 0 0;padding:10px 16px;min-height:44px;cursor:pointer;display:inline-flex;gap:8px;align-items:baseline;}
+.d3-bozza span{font-size:12px;font-weight:400;color:var(--d3-grigio);}
+.d3-bozza.attiva{background:var(--d3-card);color:var(--d3-ink);}
+.d3-bozza-piu{font-size:18px;background:none;border:none;}
+.d3-labhead{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:20px;padding:20px 22px 20px 28px;}
+.d3-labhead-main{display:flex;flex-direction:column;gap:8px;min-width:0;}
+.d3-titolo-input{font-size:38px;line-height:1.15;color:var(--d3-ink);background:transparent;border:none;border-bottom:1.5px solid transparent;padding:2px 0;width:100%;outline:none;min-width:0;resize:none;overflow:hidden;field-sizing:content;display:block;}
+.d3-titolo-input:hover{border-bottom-color:var(--d3-bordo);}
+.d3-titolo-input:focus{border-bottom-color:var(--d3-ink);}
+.d3-pesi{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;margin-top:10px;padding-top:14px;border-top:1px solid var(--d3-bordo);}
+.d3-peso{padding:0 16px;border-left:1px solid var(--d3-bordo);min-width:0;}
+.d3-peso:first-child{padding-left:0;border-left:none;}
+.d3-peso-label{font-size:12px;color:var(--d3-ink2);}
+.d3-peso-val{font-size:24px;font-weight:700;color:var(--d3-ink);margin-top:4px;font-variant-numeric:tabular-nums;}
+.d3-peso-nota{font-size:11px;color:var(--d3-grigio);margin-top:4px;}
+.d3-resa-campi{display:flex;gap:6px;margin-top:4px;}
+.d3-resa-campi input{min-width:0;font-family:inherit;font-size:16px;font-weight:600;color:var(--d3-ink);background:var(--d3-card);border:1.5px solid var(--d3-campo);border-radius:6px;padding:6px 8px;min-height:40px;}
+.d3-resa-campi input:first-child{width:76px;flex-shrink:0;}
+.d3-resa-campi input:last-child{flex:1;}
+.d3-resa-campi input:focus{border-color:var(--d3-ink);outline:none;}
+.d3-errore{font-size:12px;color:#9B2C1F;background:#FBEDEA;border-radius:6px;padding:6px 10px;margin-top:8px;}
+.d3-labhead-side{display:flex;flex-direction:column;gap:10px;}
+.d3-btn-valida{width:100%;min-height:52px;font-size:16px;}
+.d3-caption{font-size:12px;color:var(--d3-ink2);text-align:center;padding-bottom:10px;border-bottom:1px solid var(--d3-bordo);}
+.d3-switch{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:14px;color:var(--d3-ink);cursor:pointer;min-height:44px;position:relative;}
+.d3-switch input{position:absolute;opacity:0;width:1px;height:1px;}
+.d3-switch-ui{width:42px;height:24px;border-radius:999px;background:var(--d3-campo);position:relative;flex-shrink:0;transition:background .15s;}
+.d3-switch-ui::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .15s;}
+.d3-switch input:checked+.d3-switch-ui{background:var(--d3-ink);}
+.d3-switch input:checked+.d3-switch-ui::after{left:21px;}
+.d3-switch input:focus-visible+.d3-switch-ui{outline:2px solid var(--d3-ink);outline-offset:2px;}
+.d3-labhead-side .d3-riga-azioni .d3-btn-line{flex:1;}
+.d3-secnav{position:sticky;top:-22px;z-index:20;background:var(--d3-bg);display:flex;align-items:center;gap:4px;border-bottom:1px solid var(--d3-bordo);overflow-x:auto;scrollbar-width:none;padding-top:4px;}
+.d3-secnav-gruppo{font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--d3-ink2);padding:0 6px 0 2px;flex-shrink:0;}
+.d3-secnav-sep{width:1px;height:20px;background:var(--d3-bordo);margin:0 6px;flex-shrink:0;}
+.d3-tab{flex-shrink:0;background:none;border:none;border-bottom:2px solid transparent;font-family:inherit;font-size:15px;color:var(--d3-ink2);padding:10px 8px;min-height:44px;cursor:pointer;}
+.d3-tab span{color:var(--d3-grigio);font-size:13px;}
+.d3-tab.attivo{color:var(--d3-ink);font-weight:600;border-bottom-color:var(--d3-ink);}
+.d3-lab-griglia{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:16px;align-items:start;}
+.d3-lab-dx{display:flex;flex-direction:column;gap:16px;min-width:0;}
+.d3-sec{scroll-margin-top:56px;min-width:0;display:flex;flex-direction:column;gap:12px;}
+.d3-sec>.card{margin:0;}
+body.ui-d3 .d3-lab .card-label{font-size:12px;letter-spacing:.09em;color:var(--d3-ink);}
+body.ui-d3 .d3-lab .ing-table th{color:var(--d3-ink2);}
+body.ui-d3 .d3-lab .ing-qty-input{font-family:inherit;font-size:15px;color:var(--d3-ink);}
+body.ui-d3 .d3-lab .ing-table td:nth-child(2) .ing-qty-input{font-weight:700;text-align:right;font-variant-numeric:tabular-nums;}
+body.ui-d3 .d3-lab .step-num{background:var(--d3-sabbia);color:var(--d3-ink);}
+body.ui-d3 .d3-lab .step-text{font-family:inherit;font-size:14px;}
+body.ui-d3 .d3-lab textarea.step-text{field-sizing:content;min-height:44px;}
+body.ui-d3 .d3-lab .btn-lab{background:var(--d3-ink);color:var(--d3-card);}
+body.ui-d3 .d3-lab .btn-outline{color:var(--d3-ink);border-color:var(--d3-bordo);background:var(--d3-card);}
+.d3-dati{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+.d3-dato{padding:16px 18px;display:flex;flex-direction:column;gap:8px;background:var(--d3-bar);border-style:dashed;}
+.d3-dato-testa{display:flex;justify-content:space-between;align-items:center;gap:8px;}
+.d3-dato-titolo{font-size:17px;font-weight:600;color:var(--d3-ink);}
+.d3-dato-desc{font-size:13px;color:var(--d3-ink2);}
+.d3-dato-stato{font-size:12px;color:var(--d3-grigio);margin-top:auto;}
+/* ── Fogli e pannelli (Esporta, Vista) ── */
+.d3-velo{position:fixed;inset:0;z-index:200;background:rgba(35,27,20,.45);display:flex;align-items:center;justify-content:center;padding:16px;}
+.d3-foglio{background:var(--d3-card);border-radius:14px;width:100%;max-width:440px;max-height:calc(100vh - 32px);overflow-y:auto;padding:18px 18px 16px;display:flex;flex-direction:column;gap:12px;box-shadow:0 18px 50px rgba(35,27,20,.3);}
+.d3-maniglia{display:none;}
+.d3-foglio-testa{display:flex;align-items:baseline;gap:10px;}
+.d3-foglio-testa .d3-sub{flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.d3-foglio-titolo{font-size:20px;font-weight:700;color:var(--d3-ink);}
+.d3-chiudi{background:none;border:none;font-size:24px;line-height:1;color:var(--d3-ink2);cursor:pointer;min-width:44px;min-height:44px;}
+.d3-opzione{display:flex;gap:12px;align-items:flex-start;border:1.5px solid var(--d3-bordo);border-radius:10px;padding:14px;cursor:pointer;}
+.d3-opzione.scelta{border-color:var(--d3-ink);}
+.d3-opzione.disabilitata{cursor:not-allowed;background:var(--d3-bar);}
+.d3-opzione input{margin-top:3px;width:18px;height:18px;accent-color:var(--d3-ink);flex-shrink:0;}
+.d3-opz-t{font-size:15px;font-weight:600;color:var(--d3-ink);margin-right:6px;}
+.d3-opz-d{display:block;font-size:13px;color:var(--d3-ink2);margin-top:4px;}
+.d3-opz-lista{list-style:none;margin-top:8px;display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--d3-ink2);}
+.d3-opz-lista li{display:flex;justify-content:space-between;gap:12px;}
+.d3-oggi-t{color:var(--d3-ink);font-weight:600;}
+.d3-prev-t{color:var(--d3-grigio);font-style:italic;}
+.d3-foglio-azioni{display:flex;justify-content:space-between;align-items:center;gap:12px;padding-top:12px;border-top:1px solid var(--d3-bordo);}
+.d3-etichetta{font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--d3-ink2);}
+.d3-segmenti{display:grid;grid-template-columns:1fr 1fr;border:1.5px solid var(--d3-bordo);border-radius:10px;padding:3px;gap:3px;}
+.d3-segmenti button,.d3-chips button{font-family:inherit;font-size:14px;cursor:pointer;min-height:44px;}
+.d3-segmenti button{background:none;border:none;border-radius:8px;color:var(--d3-ink);}
+.d3-segmenti button.attivo{background:var(--d3-ink);color:var(--d3-card);font-weight:600;}
+.d3-chips{display:flex;flex-wrap:wrap;gap:8px;}
+.d3-chips button{background:var(--d3-card);border:1.5px solid var(--d3-bordo);border-radius:999px;padding:0 14px;color:var(--d3-ink);}
+.d3-chips button.attivo{background:var(--d3-ink);border-color:var(--d3-ink);color:var(--d3-card);font-weight:600;}
+.d3-mbar,.d3-actionbar{display:none;}
+/* ── Mobile ── */
+@media(max-width:768px){
+  .d3-solo-mobile{display:flex !important;}
+  .d3-solo-desktop{display:none !important;}
+  body.ui-d3 .main{padding:12px 12px 140px;}
+  .d3-h1{font-size:32px;}
+  .d3-arch-head{align-items:center;}
+  .d3-arch-corpo{display:grid;grid-template-columns:minmax(0,1fr) 22px;gap:4px;align-items:start;}
+  .d3-arch-corpo .d3-solo-mobile{display:block !important;position:sticky;top:0;}
+  .d3-arch-corpo .d3-indice{flex-direction:column;flex-wrap:nowrap;gap:0;}
+  .d3-arch-corpo .d3-indice button,.d3-arch-corpo .d3-indice span{min-width:22px;min-height:20px;font-size:10px;}
+  .d3-arch-riga{grid-template-columns:minmax(0,1fr) 16px;gap:4px 8px;padding:12px 14px;min-height:64px;}
+  .d3-arch-cat,.d3-arch-fam,.d3-arch-cnt{display:none;}
+  .d3-arch-meta-m{display:block;grid-column:1;font-size:12px;color:var(--d3-ink2);}
+  .d3-arch-nome{font-size:19px;}
+  .d3-chev{grid-row:1/span 2;grid-column:2;}
+  .d3-arch-gruppo{padding:6px 14px;}
+  .d3-mbar{position:fixed;left:0;right:0;bottom:56px;z-index:45;background:var(--d3-bar);border-top:1px solid var(--d3-bordo);padding:8px 12px;gap:8px;align-items:center;}
+  .d3-mbar .d3-search{min-height:44px;}
+  .d3-scheda-head{flex-direction:column;align-items:stretch;}
+  .d3-scheda-id .d3-h1{font-size:32px;}
+  .d3-scheda-cta{justify-content:space-between;}
+  .d3-scheda-cta>.d3-btn{flex:1;}
+  .d3-ric{grid-template-columns:minmax(0,1fr);padding:16px 16px 16px 20px;}
+  .d3-ric-nome{font-size:21px;}
+  .d3-ric-azioni{justify-content:stretch;}
+  .d3-ric-azioni>.d3-btn{flex:1;min-width:0;}
+  .d3-labhead{grid-template-columns:minmax(0,1fr);padding:16px 16px 16px 22px;gap:12px;}
+  body.ui-d3 textarea.d3-titolo-input{font-size:26px !important;}
+  .d3-pesi{grid-template-columns:repeat(2,minmax(0,1fr));row-gap:12px;}
+  .d3-peso:nth-child(3){grid-column:1/-1;padding-left:0;border-left:none;}
+  .d3-peso-val{font-size:20px;}
+  .d3-labhead-side .d3-btn-valida,.d3-labhead-side .d3-caption,.d3-labhead-side .d3-riga-azioni{display:none;}
+  .d3-secnav{top:-12px;}
+  .d3-secnav-gruppo,.d3-secnav-sep{display:none;}
+  .d3-lab-griglia{grid-template-columns:minmax(0,1fr);}
+  .d3-lab .d3-sec{display:none;}
+  .d3-lab[data-d3tab="ingredienti"] #d3-sec-ingredienti,.d3-lab[data-d3tab="procedimento"] #d3-sec-procedimento,.d3-lab[data-d3tab="note"] #d3-sec-note,
+  .d3-lab[data-d3tab="ai"] #d3-sec-ai,.d3-lab[data-d3tab="dati"] #d3-sec-dati,.d3-lab[data-d3tab="altro"] #d3-sec-altro{display:flex;}
+  .d3-dati{grid-template-columns:minmax(0,1fr);}
+  .d3-actionbar{position:fixed;left:0;right:0;bottom:56px;z-index:45;background:var(--d3-bar);border-top:1px solid var(--d3-bordo);padding:8px 12px;gap:8px;align-items:center;}
+  .d3-actionbar .d3-btn-primary{flex:1;min-height:48px;font-size:16px;}
+  .d3-actionbar .d3-menu{top:auto;bottom:calc(100% + 6px);}
+  body.ui-d3 .d3-lab .ing-table,body.ui-d3 .d3-lab .ing-table tbody{display:block;}
+  body.ui-d3 .d3-lab .ing-table thead,body.ui-d3 .d3-lab .ing-table tbody td:nth-child(4){display:none;}
+  /* Arrotonda quantità: su mobile resta solo l'interruttore in alto (stessa funzione); pannello e annullamento invariati */
+  body.ui-d3 .d3-lab #lab-round-open{display:none;}
+  body.ui-d3 .d3-lab div:has(> #lab-round-open){margin:0 !important;}
+  body.ui-d3 .d3-lab .ing-table tbody tr{display:grid;grid-template-columns:minmax(0,1fr) 76px 64px 36px;align-items:center;column-gap:6px;padding:6px 0;border-bottom:1px solid var(--d3-sabbia);}
+  body.ui-d3 .d3-lab .ing-table tbody td{display:block;padding:2px 0;border:none;min-width:0;}
+  body.ui-d3 .d3-lab .ing-table tbody tr>td:first-child,body.ui-d3 .d3-lab .ing-table tr.mattoncino-detail>td{grid-column:1/-1;}
+  body.ui-d3 .d3-lab .ing-table tbody td:first-child .ing-qty-input{min-width:0 !important;font-weight:600;}
+  body.ui-d3 .d3-lab .ing-table tbody td:nth-child(2) .ing-qty-input{width:100%;}
+  .d3-velo{align-items:flex-end;padding:0;}
+  .d3-foglio{max-width:none;border-radius:16px 16px 0 0;max-height:85vh;padding-bottom:calc(16px + env(safe-area-inset-bottom));}
+  .d3-maniglia{display:block;width:40px;height:4px;border-radius:2px;background:var(--d3-campo);margin:0 auto;}
+  body.ui-d3.d3-typing .d3-mbar,body.ui-d3.d3-typing .d3-actionbar,body.ui-d3.d3-typing .bottom-nav{display:none !important;}
+}
+/* ══ Direzione 3 — uniformazione di tutte le schermate (solo con body.ui-d3) ══
+   Riferimento: la Ricetta aperta nel LAB. I colori dei sistemi precedenti
+   puntano alla palette D3; i caratteri monospazio e Archivo diventano
+   Instrument Sans (serif solo nei titoli); nessuna struttura HTML cambia. */
+body.ui-d3{
+  --orange:#B4501C;--orange-light:#F6E7DC;--orange-border:rgba(180,80,28,.25);--orange-accessible:#9C4416;
+  --sage:#2E6A45;--sage-light:#E6EFE8;--sage-dark:#2E6A45;
+  --lab:#231B14;--lab-light:#EDE4D3;--lab-border:#E2D7C4;--prod:#9C4416;--prod-light:#F6E7DC;--shadow:none;
+  --dpop-carta:#FFFDF9;--dpop-carta-0-foglio:#FFFDF9;--dpop-carta-1-scrivania:#F4EEE2;--dpop-carta-2-banda:#FAF6EE;--dpop-carta-toccata:#EDE4D3;
+  --dpop-filetto-riga:#E2D7C4;--dpop-grigio-dato:#6B5F55;--dpop-grigio-terziario:#8C8277;--dpop-att-zero:#8C8277;
+  --dpop-inchiostro-struttura:#C9BBA4;--dpop-inchiostro-testo:#231B14;--dpop-lacca-pieno:#B4501C;--dpop-lacca-segno:#9C4416;
+  --dpop-bianco-caldo:#FFFDF9;--dpop-verde-operativo:#2E6A45;--dpop-ocra-bruciata:#8C7B68;--dpop-timestamp-vivo:#6B5F55;--dpop-timestamp-spento:#8C8277;
+}
+body.ui-d3 :is(.labg-count,.labg-env,.labg-fine,.labg-group-conteggio,.labg-row-data,.ms17-card-sub,.ms17-label,.pg-badge,.pg-card-meta,.pg-card-title,.pg-tab,.ph-new-label,.ph-section-title,.prod-btn-condividi,.prod-cesura-nome,.prod-count,.prod-empty,.prod-env,.prod-riga-condivisione>span,.prod-riga-scheda,.prod-staff-riga,.scale-total,.schede-accesso,.schede-cesura-conteggio,.schede-cesura-nome,.schede-count-globale,.schede-empty,.schede-env,.schede-famiglia-riga,.schede-filtro-attivo,.schede-fine,.schede-riga-cat,.schede-riga-censimento,.si-back,.si-btn-elimina,.si-btn-nuova,.si-btn-secondario,.si-categoria label,.si-empty,.si-env,.si-famiglia-tag,.si-meta,.si-riga-btn,.si-riga-sub,.si-scelta-annulla,.si-scelta-partenza-titolo,.si-scelta-riga,.si-sezione-count,.si-sezione-titolo,.si-storia-data,.si-storia-stato){font-family:'Instrument Sans','DM Sans',sans-serif;letter-spacing:.02em;}
+body.ui-d3 .prod-env [style*="Mono"],body.ui-d3 .main>.card [style*="Mono"],body.ui-d3 .main>.prod-header [style*="Mono"]{font-family:'Instrument Sans','DM Sans',sans-serif !important;font-variant-numeric:tabular-nums;}
+body.ui-d3 .main>.card .ing-pct{font-family:inherit;font-variant-numeric:tabular-nums;}
+/* Shell: barra laterale alta quanto la pagina (la riga della ricerca, se nascosta, non conta) */
+body.ui-d3 .shell{grid-template-rows:56px auto minmax(0,1fr);}
+body.ui-d3 .sidebar,body.ui-d3 .main{grid-row:3;}
+body.ui-d3 .main>:is(.prod-env,.labg-env,.prod-header,.card){width:100%;max-width:1180px;margin-left:auto;margin-right:auto;flex-shrink:0;}
+/* Pulsanti comuni (il LAB aperto, riferimento, resta com'e') */
+body.ui-d3 .btn:not(.d3-lab *){font-family:inherit;border-radius:8px;font-weight:600;}
+body.ui-d3 .btn-primary:not(.d3-lab *){background:var(--d3-terra);color:#fff;}
+body.ui-d3 :is(.btn-outline,.btn-ghost):not(.d3-lab *){background:var(--d3-card);color:var(--d3-ink);border:1.5px solid var(--d3-bordo);}
+body.ui-d3 :is(.btn-outline,.btn-ghost):not(.d3-lab *):hover{background:var(--d3-sabbia);}
+body.ui-d3 .btn-ghost-danger{background:transparent;color:#A33A2A;border:1.5px solid #E7C9C2;}
+/* Home */
+.d3-home-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;}
+.d3-home-card{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"t f" "d f" "c f";align-items:center;gap:4px 12px;text-align:left;padding:18px 22px;cursor:pointer;font-family:inherit;color:var(--d3-ink);}
+.d3-home-card:hover{background:var(--d3-bar);border-color:var(--d3-campo);}
+.d3-home-card-titolo{grid-area:t;font-size:26px;line-height:1.15;}
+.d3-home-card-descr{grid-area:d;font-size:14px;color:var(--d3-ink2);}
+.d3-home-card-conteggio{grid-area:c;font-size:14px;font-weight:600;margin-top:6px;font-variant-numeric:tabular-nums;}
+.d3-home-card-freccia{grid-area:f;font-size:24px;color:var(--d3-ink2);}
+.d3-home-azioni{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}
+.d3-home-impostazioni{margin-left:auto;}
+/* Pagine: titolo serif, conteggi e sezioni come nella Scheda */
+body.ui-d3 :is(.prod-env,.labg-env){background:transparent;font-family:inherit;min-height:auto;display:flex;flex-direction:column;gap:14px;}
+body.ui-d3 :is(.prod-env,.labg-env)>*{flex-shrink:0;}
+body.ui-d3 :is(.prod-title,.labg-title){font-family:'Newsreader',Georgia,serif;font-size:40px;line-height:1.1;font-weight:500;letter-spacing:-.01em;color:var(--d3-ink);padding:0;}
+body.ui-d3 :is(.labg-count,.prod-count){font-size:13px;font-weight:400;letter-spacing:0;text-transform:lowercase;color:var(--d3-ink2);padding:0;margin-top:-8px;}
+body.ui-d3 .prod-env [style*="padding:0 22px"]{padding-left:0 !important;padding-right:0 !important;}
+body.ui-d3 :is(.ph-section-title,.ms17-label){font-size:13px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--d3-ink);}
+body.ui-d3 .ph-section{padding:0;gap:10px;}
+body.ui-d3 :is(.ph-empty,.prod-empty){color:var(--d3-ink2);font-size:14px;}
+body.ui-d3 .prod-empty{padding:28px 16px;}
+body.ui-d3 .ph-search{background:var(--d3-card);border:1.5px solid var(--d3-campo);border-radius:8px;min-height:46px;padding:0 14px;font-size:15px;color:var(--d3-ink);}
+body.ui-d3 :is(.ph-history,.ph-back,.ms17-back){min-height:40px;}
+/* Ricette attive: righe compatte in una card */
+body.ui-d3 .ph-recipes{background:var(--d3-card);border:1px solid var(--d3-bordo);border-radius:12px;overflow:hidden;}
+body.ui-d3 .prod-riga{background:var(--d3-card);padding:12px 18px;gap:6px;border-bottom:1px solid var(--d3-sabbia);}
+body.ui-d3 .ph-recipes .prod-riga:last-child{border-bottom:none;}
+body.ui-d3 .ph-expanded .prod-riga{border:1px solid var(--d3-bordo);border-radius:10px;}
+body.ui-d3 .prod-riga-apri{display:flex;align-items:baseline;gap:2px 12px;flex-wrap:wrap;min-height:28px;}
+body.ui-d3 .prod-riga-apri::after{content:'›';margin-left:auto;color:var(--d3-ink2);font-size:18px;line-height:1;}
+body.ui-d3 .prod-riga-nome{display:inline;font-family:inherit;font-size:15px;font-weight:600;color:var(--d3-ink);}
+body.ui-d3 .prod-riga-scheda{display:inline;font-size:13px;letter-spacing:0;color:var(--d3-ink2);margin:0;}
+body.ui-d3 .prod-riga-apri:hover .prod-riga-nome{color:var(--d3-terra);}
+body.ui-d3 .d3-ripetuto{display:none !important;}
+/* Sessioni: card chiare, stato a pillola, Avvia scuro */
+body.ui-d3 .pg-list{padding:0;gap:10px;}
+body.ui-d3 .pg-card{background:var(--d3-card);border:1px solid var(--d3-bordo);border-radius:12px;padding:14px 18px;gap:8px;}
+body.ui-d3 .pg-card-title{font-size:15px;font-weight:600;letter-spacing:0;color:var(--d3-ink);}
+body.ui-d3 .pg-card-variant{color:var(--d3-ink2);font-weight:400;}
+body.ui-d3 .pg-card-meta{font-size:12.5px;letter-spacing:0;color:var(--d3-ink2);}
+body.ui-d3 .pg-badge{font-size:11px;font-weight:700;letter-spacing:.07em;padding:4px 10px;}
+body.ui-d3 .pg-badge-pending{background:transparent;color:#5C4F42;border:1.5px dashed var(--d3-tratto);}
+body.ui-d3 .pg-badge-in-progress{background:var(--d3-terra);color:#fff;}
+body.ui-d3 .pg-badge-completed{background:var(--d3-ink);color:#fff;}
+body.ui-d3 .ph-new{border:1px solid var(--d3-bordo);box-shadow:inset 5px 0 0 var(--d3-terra);}
+body.ui-d3 .ph-new-label{font-size:11px;font-weight:700;letter-spacing:.08em;color:var(--d3-terra2);}
+body.ui-d3 .pg-card .btn.ph-cta{background:var(--d3-ink);color:#FFFDF9;border:1.5px solid var(--d3-ink);font-size:14px;font-weight:600;padding:9px 22px;min-height:42px;border-radius:8px;}
+body.ui-d3 .pg-card .btn.ph-cta:hover{opacity:1;background:#3A2E24;}
+body.ui-d3 .prod-env .pg-list:has(>.pg-card[style*="flex-direction:row"]){gap:0;background:var(--d3-card);border:1px solid var(--d3-bordo);border-radius:12px;overflow:hidden;}
+body.ui-d3 .prod-env .pg-card[style*="flex-direction:row"]{border:none;border-radius:0;border-bottom:1px solid var(--d3-sabbia);padding:6px 16px;min-height:52px;}
+body.ui-d3 .prod-env .pg-card[style*="flex-direction:row"]:last-child{border-bottom:none;}
+body.ui-d3 .ms12-check{min-width:44px;min-height:44px;}
+body.ui-d3 .prod-env .pg-list[style*="padding:0 22px 22px"]{padding:0 !important;}
+body.ui-d3 .pg-card :is(.ms14-timer-start,.ms14-timer-cancel,.ms14-timer-reset){align-self:flex-start;}
+body.ui-d3 #session-note-add{background:var(--d3-ink);color:#FFFDF9;}
+body.ui-d3 #history-search{background:var(--d3-card) !important;border:1.5px solid var(--d3-campo) !important;border-radius:8px !important;min-height:46px;font-size:15px !important;}
+body.ui-d3 .ms13-step-check{min-height:40px;}
+/* Storico: filtri come pulsanti chiari */
+body.ui-d3 .pg-tabs{padding:0;gap:8px;}
+body.ui-d3 .pg-tab{font-size:13px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--d3-ink);background:var(--d3-card);border:1.5px solid var(--d3-bordo);border-radius:999px;padding:8px 14px;min-height:38px;}
+body.ui-d3 .pg-tab-active{background:var(--d3-ink);color:#FFFDF9;border-color:var(--d3-ink);}
+body.ui-d3 .ms17-card-sub{letter-spacing:0;}
+/* Elenco LAB: una card per Scheda, bozze come righe con la banda tratteggiata "In LAB" */
+body.ui-d3 .labg-env{gap:12px;}
+body.ui-d3 .labg-group{border:1px solid var(--d3-bordo);border-radius:12px;background:var(--d3-card);overflow:hidden;}
+body.ui-d3 .labg-group-band{background:var(--d3-card);padding:14px 20px 10px;display:flex;align-items:baseline;gap:4px 10px;flex-wrap:wrap;border-bottom:1px solid var(--d3-sabbia);}
+body.ui-d3 .labg-group-nome{font-family:'Newsreader',Georgia,serif;font-size:21px;}
+body.ui-d3 .labg-group-conteggio{font-size:13px;font-weight:500;letter-spacing:0;text-transform:lowercase;color:var(--d3-ink2);margin:0;}
+body.ui-d3 .labg-group-body{background:var(--d3-card);}
+body.ui-d3 .labg-group-body::before{left:0;width:4px;background:repeating-linear-gradient(to bottom,var(--d3-tratto) 0 7px,transparent 7px 12px);}
+body.ui-d3 .labg-row{margin-left:0;width:100%;padding:12px 20px 12px 24px;min-height:52px;border-bottom:1px solid var(--d3-sabbia);}
+body.ui-d3 .labg-group-body .labg-row:last-child{border-bottom:none;}
+body.ui-d3 .labg-row:hover{background:var(--d3-bar);}
+body.ui-d3 .labg-row:active{background:var(--d3-sabbia);box-shadow:none;}
+body.ui-d3 .labg-row-titolo{font-family:inherit;font-size:15px;font-weight:600;}
+body.ui-d3 .labg-row-data{font-size:12.5px;letter-spacing:0;text-transform:lowercase;color:var(--d3-ink2);}
+body.ui-d3 .labg-row-data.non-tracciata{color:var(--d3-grigio);}
+body.ui-d3 .labg-fine{letter-spacing:.06em;color:var(--d3-grigio);}
+/* Ricetta in Produzione: intestazione come quella del LAB */
+body.ui-d3 .prod-header{background:var(--d3-card);color:var(--d3-ink);border:1px solid var(--d3-bordo);border-radius:12px;padding:22px 24px 22px 28px;}
+body.ui-d3 .prod-header::before{content:'';left:-1px;top:-1px;bottom:-1px;right:auto;width:5px;transform:none;background:var(--d3-ardesia);opacity:1;border-radius:12px 0 0 12px;font-size:0;}
+body.ui-d3 .prod-header:has([onclick^="openMandaInProduzione"])::before{background:var(--d3-verde);}
+body.ui-d3 .prod-header .recipe-name{font-family:'Newsreader',Georgia,serif;font-size:36px;font-weight:500;letter-spacing:-.01em;line-height:1.15;color:var(--d3-ink);}
+body.ui-d3 .prod-header .recipe-meta{color:var(--d3-ink2);font-size:13px;}
+body.ui-d3 .prod-header [style*="rgba(255,255,255"]{background:var(--d3-sabbia) !important;color:var(--d3-ink) !important;border-color:var(--d3-bordo) !important;}
+body.ui-d3 .prod-header .scale-label{color:var(--d3-ink2);}
+body.ui-d3 .prod-header .scale-total{background:var(--d3-bar);border:1px solid var(--d3-bordo);color:var(--d3-ink);font-family:inherit;font-variant-numeric:tabular-nums;font-weight:600;}
+body.ui-d3 :is(.prod-header [onclick^="openMandaInProduzione"],[onclick^="confirmMandaInProduzione"]){background:var(--d3-terra) !important;color:#fff !important;border:1.5px solid var(--d3-terra) !important;font-weight:600;}
+/* Finestre e messaggi */
+body.ui-d3 .modal{border-radius:14px;border:1px solid var(--d3-bordo);}
+body.ui-d3 :is(.toast,.toast-action){background:var(--d3-ink);font-family:inherit;}
+@media(max-width:768px){
+  body.ui-d3 .shell{grid-template-rows:52px auto minmax(0,1fr) 56px;}
+  body.ui-d3 .d3-home-grid{grid-template-columns:1fr;gap:10px;}
+  body.ui-d3 .d3-home-card{padding:14px 18px;}
+  body.ui-d3 .d3-home-card-titolo{font-size:22px;}
+  body.ui-d3 .d3-home-azioni .d3-btn-line{flex:1;}
+  body.ui-d3 .d3-home-impostazioni{margin-left:0;}
+  body.ui-d3 :is(.prod-title,.labg-title){font-size:32px;}
+  body.ui-d3 .prod-header{padding:16px 16px 16px 20px;}
+  body.ui-d3 .prod-header .recipe-name{font-size:26px;}
+  body.ui-d3 :is(.toast,.toast-action){bottom:calc(68px + env(safe-area-inset-bottom));}
+  body.ui-d3:has(.d3-actionbar) :is(.toast,.toast-action){bottom:136px;}
+}
+
 </style>
 </head>
 <body>
@@ -7889,7 +8286,8 @@ function shareVariant(recipeId,variantId){
 
 function exportPDF(recipeId,variantId){
   const recipe=R(recipeId);
-  const vv=recipe&&recipe.validatedVariants.find(v=>v.id===variantId);
+  // Anteprima Direzione 3: anche una bozza del LAB (stessi calcoli e quantita' esatte).
+  const vv=recipe&&(recipe.validatedVariants.find(v=>v.id===variantId)||(recipe.labVersions||[]).find(v=>v.id===variantId));
   if(!vv)return;
   // FIX 2C-R1: pesi e percentuali dalla stessa funzione della vista Produzione
   // (conversioni e rese in grammi), mai somme di quantita' in unita' diverse.
@@ -7908,7 +8306,7 @@ function exportPDF(recipeId,variantId){
       ?`<div class="pdf-weights" style="margin-top:12px">Pesi e percentuali non calcolabili: mancano le conversioni in grammi di ${pesi.missing.map(m=>escAttr(m.ingredientName)+' ('+escAttr(m.currentUnit)+')').join(', ')}.</div>`
       :`<div class="pdf-weights" style="margin-top:12px">Pesi e percentuali non disponibili.</div>`;
   const steps=(vv.steps||[]).length?'<h3 style="margin:24px 0 10px">Procedimento</h3><ol>'+vv.steps.map(s=>`<li style="margin-bottom:6px;line-height:1.6">${s}</li>`).join('')+'</ol>':'';
-  const h=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${recipe.name} — ${vv.name}</title><style>*{box-sizing:border-box}body{font-family:Georgia,serif;max-width:700px;margin:40px auto;padding:0 20px;color:#222;font-size:14px;line-height:1.6}h1{font-size:24px;margin-bottom:4px;letter-spacing:-0.3px}table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}th{text-align:left;border-bottom:2px solid #333;padding:8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em}td{padding:6px 6px;border-bottom:1px solid #ddd}tr:last-child td{border-bottom:none}.meta{color:#888;font-size:12px;margin:6px 0 24px}.badge{background:#C85A1E;color:white;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;margin-left:8px;vertical-align:middle}.steps-list{margin-top:8px;padding-left:20px}.steps-list li{margin-bottom:8px;line-height:1.6}@media print{body{margin:16px;-webkit-print-color-adjust:exact}@page{margin:1.5cm}.badge{-webkit-print-color-adjust:exact}}</style></head><body><h1>${recipe.name}<span class="badge">${vv.name}</span></h1><div class="meta">Validata il ${vv.validatedAt}${targetPrintParts(vv.portionsCount,vv.gramsPerPortion)}</div><table><thead><tr><th>Ingrediente</th><th style="text-align:right">Quantità</th><th style="text-align:right">% crudo${stima?' (stima)':''}</th></tr></thead><tbody>${rows}</tbody></table>${pesiRiga}${steps}<div style="margin-top:40px;font-size:11px;color:#ccc;border-top:1px solid #eee;padding-top:12px">Generato da Khub</div></body></html>`;
+  const h=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${recipe.name} — ${vv.name}</title><style>*{box-sizing:border-box}body{font-family:Georgia,serif;max-width:700px;margin:40px auto;padding:0 20px;color:#222;font-size:14px;line-height:1.6}h1{font-size:24px;margin-bottom:4px;letter-spacing:-0.3px}table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}th{text-align:left;border-bottom:2px solid #333;padding:8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em}td{padding:6px 6px;border-bottom:1px solid #ddd}tr:last-child td{border-bottom:none}.meta{color:#888;font-size:12px;margin:6px 0 24px}.badge{background:#C85A1E;color:white;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;margin-left:8px;vertical-align:middle}.steps-list{margin-top:8px;padding-left:20px}.steps-list li{margin-bottom:8px;line-height:1.6}@media print{body{margin:16px;-webkit-print-color-adjust:exact}@page{margin:1.5cm}.badge{-webkit-print-color-adjust:exact}}</style></head><body><h1>${recipe.name}<span class="badge">${vv.name}</span></h1><div class="meta">${vv.validatedAt?'Validata il '+vv.validatedAt:'Bozza in LAB — non ancora validata'}${targetPrintParts(vv.portionsCount,vv.gramsPerPortion)}</div><table><thead><tr><th>Ingrediente</th><th style="text-align:right">Quantità</th><th style="text-align:right">% crudo${stima?' (stima)':''}</th></tr></thead><tbody>${rows}</tbody></table>${pesiRiga}${steps}<div style="margin-top:40px;font-size:11px;color:#ccc;border-top:1px solid #eee;padding-top:12px">Generato da Khub</div></body></html>`;
   const w=window.open('','_blank');
   if(!w){toast('Popup bloccato — consenti i popup per questo sito','ti-alert-circle');return;}
   w.document.write(h);
@@ -7986,15 +8384,17 @@ function renderSidebar(){
   // Shell v3 — stesse 3 destinazioni della bottom bar mobile: Produzione,
   // Schede, LAB. MichelinAI e Profilo scollegate dalla navigazione primaria
   // (architettura approvata) — codice delle due schermate non toccato.
-  const isRicette=S.view==='home'||S.view==='recipes-all'||S.view==='ricetta-madre'||S.view==='ricetta-madre-v2'||S.view==='recipe'||S.view==='confronto'||S.view==='load'||S.view==='preview';
-  const isProduzione=S.view==='attive'||S.view==='produzione-guidata'||S.view==='sessione-operativa'||S.view==='storico-produzioni';
-  const isLab=S.view==='lab-globale';
+  const nav=d3SezioneNav();
+  const isRicette=nav?nav==='schede':(S.view==='home'||S.view==='recipes-all'||S.view==='ricetta-madre'||S.view==='ricetta-madre-v2'||S.view==='recipe'||S.view==='confronto'||S.view==='load'||S.view==='preview');
+  const isProduzione=nav?nav==='produzione':(S.view==='attive'||S.view==='produzione-guidata'||S.view==='sessione-operativa'||S.view==='storico-produzioni');
+  const isLab=nav?nav==='lab':S.view==='lab-globale';
   return `<button class="new-btn" id="btn-new-recipe"><i class="ti ti-plus"></i> Nuova Scheda</button>
   <button class="load-btn ${S.view==='load'?'active':''}" id="btn-load-view"><i class="ti ti-upload"></i> Carica Scheda</button>
   <div class="sec-label">Navigazione</div>
   <button class="load-btn ${isProduzione?'active':''}" id="sb-produzione"><i class="ti ti-tools-kitchen-2"></i> Produzione</button>
   <button class="load-btn ${isRicette?'active':''}" id="sb-ricette"><i class="ti ti-book-2"></i> Schede</button>
-  <button class="load-btn ${isLab?'active':''}" id="sb-lab"><i class="ti ti-flask"></i> LAB</button>`;
+  <button class="load-btn ${isLab?'active':''}" id="sb-lab"><i class="ti ti-flask"></i> LAB</button>
+  <button class="d3-sb-toggle" onclick="setUiD3(${S.uiD3?'false':'true'})" title="Anteprima della nuova grafica: solo visualizzazione, stessi dati">${S.uiD3?'Anteprima Direzione 3 · torna alla grafica attuale':'Prova la Direzione 3 (anteprima)'}</button>`;
 }
 
 function renderConfronto(recipe){
@@ -8078,6 +8478,46 @@ function programmaFineEvidenzaValidata(variantId){
     if(S.view==='ricetta-madre-v2'&&!occupato)render();
   },EVIDENZA_VALIDATA_MS)};
 }
+// Contenuto in sola lettura di una Ricetta (ingredienti, mattoncini, procedimento).
+function renderContenutoVariante(v){
+  return `
+    ${(v.ingredients||[]).length===0?`
+      <div style="font-size:12px;color:var(--dpop-grigio-dato)">Nessun ingrediente registrato per questa Ricetta.</div>
+    `:`
+      <div style="font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--dpop-grigio-dato);margin-bottom:6px">Ingredienti</div>
+      <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px">
+        ${v.ingredients.map(ing=>{
+          if(!ing.isSubRecipe){
+            return `<div style="font-size:13px;color:var(--dpop-inchiostro-testo);display:flex;justify-content:space-between;max-width:420px">
+              <span>${ing.name}</span><span style="font-family:'IBM Plex Mono',monospace;color:var(--dpop-grigio-dato)">${ing.qty} ${ing.unit}${ing.estimatedYieldPct!=null?' · resa '+ing.estimatedYieldPct+'%':''}</span>
+            </div>`;
+          }
+          const brickInfo=findVariantById(ing.subRecipeId);
+          return `<div style="border-left:3px solid var(--dpop-ocra-bruciata);padding:4px 0 4px 10px">
+            <div style="font-size:13px;color:var(--dpop-inchiostro-testo);display:flex;justify-content:space-between;max-width:400px">
+              <span><i class="ti ti-brick"></i> ${ing.name}</span><span style="font-family:'IBM Plex Mono',monospace;color:var(--dpop-grigio-dato)">${ing.qty} ${ing.unit}</span>
+            </div>
+            ${brickInfo?`
+              <div style="margin-top:3px;display:flex;flex-direction:column;gap:2px">
+                ${(brickInfo.variant.ingredients||[]).map(si=>`
+                  <div style="font-size:11.5px;color:var(--dpop-grigio-dato);display:flex;justify-content:space-between;max-width:360px;padding-left:14px">
+                    <span>${si.name}</span><span style="font-family:'IBM Plex Mono',monospace">${si.qty} ${si.unit}</span>
+                  </div>`).join('')}
+              </div>
+            `:`<div style="font-size:11.5px;color:#c0392b;margin-top:3px;padding-left:14px"><i class="ti ti-alert-triangle"></i> Scheda o Ricetta collegata non più disponibile</div>`}
+          </div>`;
+        }).join('')}
+      </div>
+      <div style="font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--dpop-grigio-dato);margin-bottom:6px">Procedimento</div>
+      ${(v.steps||[]).filter(s=>s&&s.trim()).length===0?`
+        <div style="font-size:12px;color:var(--dpop-grigio-dato)">Nessun passaggio registrato.</div>
+      `:`
+        <ol style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px">
+          ${v.steps.filter(s=>s&&s.trim()).map(s=>`<li style="font-size:13px;color:var(--dpop-inchiostro-testo)">${s}</li>`).join('')}
+        </ol>
+      `}
+    `}`;
+}
 function renderRicettaMadreV2(recipe){
   const all=allVariants(recipe);
   const attive=all.filter(v=>v._type==='active');
@@ -8087,45 +8527,6 @@ function renderRicettaMadreV2(recipe){
 
   // Contenuto in sola lettura di una variante (ingredienti, mattoncini raggruppati, procedimento) —
   // riusata identica a prima, nessuna riscrittura della logica.
-  function renderContenutoVariante(v){
-    return `
-      ${(v.ingredients||[]).length===0?`
-        <div style="font-size:12px;color:var(--dpop-grigio-dato)">Nessun ingrediente registrato per questa Ricetta.</div>
-      `:`
-        <div style="font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--dpop-grigio-dato);margin-bottom:6px">Ingredienti</div>
-        <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px">
-          ${v.ingredients.map(ing=>{
-            if(!ing.isSubRecipe){
-              return `<div style="font-size:13px;color:var(--dpop-inchiostro-testo);display:flex;justify-content:space-between;max-width:420px">
-                <span>${ing.name}</span><span style="font-family:'IBM Plex Mono',monospace;color:var(--dpop-grigio-dato)">${ing.qty} ${ing.unit}${ing.estimatedYieldPct!=null?' · resa '+ing.estimatedYieldPct+'%':''}</span>
-              </div>`;
-            }
-            const brickInfo=findVariantById(ing.subRecipeId);
-            return `<div style="border-left:3px solid var(--dpop-ocra-bruciata);padding:4px 0 4px 10px">
-              <div style="font-size:13px;color:var(--dpop-inchiostro-testo);display:flex;justify-content:space-between;max-width:400px">
-                <span><i class="ti ti-brick"></i> ${ing.name}</span><span style="font-family:'IBM Plex Mono',monospace;color:var(--dpop-grigio-dato)">${ing.qty} ${ing.unit}</span>
-              </div>
-              ${brickInfo?`
-                <div style="margin-top:3px;display:flex;flex-direction:column;gap:2px">
-                  ${(brickInfo.variant.ingredients||[]).map(si=>`
-                    <div style="font-size:11.5px;color:var(--dpop-grigio-dato);display:flex;justify-content:space-between;max-width:360px;padding-left:14px">
-                      <span>${si.name}</span><span style="font-family:'IBM Plex Mono',monospace">${si.qty} ${si.unit}</span>
-                    </div>`).join('')}
-                </div>
-              `:`<div style="font-size:11.5px;color:#c0392b;margin-top:3px;padding-left:14px"><i class="ti ti-alert-triangle"></i> Scheda o Ricetta collegata non più disponibile</div>`}
-            </div>`;
-          }).join('')}
-        </div>
-        <div style="font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--dpop-grigio-dato);margin-bottom:6px">Procedimento</div>
-        ${(v.steps||[]).filter(s=>s&&s.trim()).length===0?`
-          <div style="font-size:12px;color:var(--dpop-grigio-dato)">Nessun passaggio registrato.</div>
-        `:`
-          <ol style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px">
-            ${v.steps.filter(s=>s&&s.trim()).map(s=>`<li style="font-size:13px;color:var(--dpop-inchiostro-testo)">${s}</li>`).join('')}
-          </ol>
-        `}
-      `}`;
-  }
 
   // ═══ A. IDENTITÀ ═══
   const nRic=inLab.length+(recipe.validatedVariants||[]).length; // stessa convenzione già usata nell'ambiente Schede
@@ -8582,7 +8983,11 @@ function renderLabRecipe(recipe){
   // LAB FIX 2B I5: pesi in grammi (conversioni + rese), mai somme di unita' diverse
   const pesiLab=computeFormulationWeights(v.ingredients);
   const sectionsOpen=ensureLabSectionsOpen(recipe,v);
-  return `
+  // Parti con nome (Anteprima Direzione 3): la vista classica e' la loro
+  // concatenazione, identica a prima; la Direzione 3 le riusa con un'altra
+  // intestazione e navigazione, stessi campi e stessi gestori.
+  const P={};
+  P.header=`
   <div class="lab-header">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
       <div style="flex:1">
@@ -8620,7 +9025,8 @@ function renderLabRecipe(recipe){
       ${recipe.validatedVariants.length>=2?`<button class="btn btn-ghost btn-sm" onclick="S.view='confronto';S.confrontoA=null;S.confrontoB=null;render()"><i class="ti ti-columns"></i> Confronta</button>`:''}
       <button class="btn btn-outline btn-sm" onclick="S.mostraConfrontoOrigine=!S.mostraConfrontoOrigine;render()" title="Cosa è cambiato rispetto a com'era all'inizio"><i class="ti ti-git-compare"></i> Confronta con la Ricetta di partenza</button>
     </div>
-  </div>
+  </div>`;
+  P.confronto=`
 
   ${!S.mostraConfrontoOrigine?'':(()=>{
     if(v.originVariantId===null){
@@ -8658,11 +9064,13 @@ function renderLabRecipe(recipe){
         ${modificati.map(d=>`<div style="font-size:13px;color:var(--dark)">${d.ingName} <span style="color:var(--mid);font-size:12px">(${d.campi.join(', ')})</span></div>`).join('')}
       </div>`:''}
     </div>`;
-  })()}
+  })()}`;
+  P.tabs=`
 
   ${recipe.labVersions.length>1?`<div class="lab-version-tabs">
     ${recipe.labVersions.map((lv,i)=>`<button class="lab-vtab ${i===(recipe.currentLabIdx||0)?'active':''}" onclick="upRec('${recipe.id}',r=>({...r,currentLabIdx:${i}}));render()">${lv.label}</button>`).join('')}
-  </div>`:''}
+  </div>`:''}`;
+  P.ingredienti=`
 
   <div class="card">
     <div class="card-label"><i class="ti ti-list-details"></i> Ingredienti</div>
@@ -8752,7 +9160,8 @@ function renderLabRecipe(recipe){
     ${renderLabRoundSection(recipe,v)}
     ${renderLabWeightsPanel(recipe,v,pesiLab)}
     ${renderYieldAnalysisPanel(recipe,v)}
-  </div>
+  </div>`;
+  P.procedimento=`
 
   <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
@@ -8774,7 +9183,8 @@ function renderLabRecipe(recipe){
         <button class="step-del" onclick="delStep('${recipe.id}',${i})"><i class="ti ti-x"></i></button>
       </div>`;}).join('')}
     </div>`:`<div style="font-size:13px;color:var(--light);padding:8px 0">Nessun passo. Clicca "+ Aggiungi passo".</div>`}
-  </div>
+  </div>`;
+  P.varianti=`
 
   ${recipe.validatedVariants.length>0?`
   <div class="card">
@@ -8791,7 +9201,8 @@ function renderLabRecipe(recipe){
         </div>`;
       }).join('')}
     </div>
-  </div>`:''}
+  </div>`:''}`;
+  P.primoConsulto=`
 
   <div class="card">
     ${labSectionHeader(recipe.id,'primoConsulto','ti-sparkles','Primo Consulto',sectionsOpen.primoConsulto)}
@@ -8862,7 +9273,8 @@ function renderLabRecipe(recipe){
       ${legacyPresente?`<div style="font-size:11px;color:var(--light);margin-top:6px">Esiste un Primo Consulto legacy per questa bozza (storico, non convertito, non aggiornato).</div>`:''}
       `;
     })():''}
-  </div>
+  </div>`;
+  P.media=`
 
   <div class="card">
     ${labSectionHeader(recipe.id,'media','ti-photo-video','Foto e video',sectionsOpen.media)}
@@ -8882,7 +9294,8 @@ function renderLabRecipe(recipe){
         <input type="file" id="media-video-input" accept="video/*" style="display:none">
       </div>
     </div>`:''}
-  </div>
+  </div>`;
+  P.voice=`
 
     <div class="card">
     ${labSectionHeader(recipe.id,'voice','ti-microphone','Note vocali',sectionsOpen.voice)}
@@ -8894,12 +9307,14 @@ function renderLabRecipe(recipe){
       ${S.recording&&S.recordingTarget==='notes'?`<div id="voice-preview" style="flex:1;font-size:12px;color:var(--mid);font-style:italic;padding:4px 8px">In ascolto...</div>`:''}
       ${S.pendingVoiceText[recipe.id]?`<div style="width:100%"><div class="voice-note">${S.pendingVoiceText[recipe.id]}</div><div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-outline btn-sm" onclick="voiceToIngredients('${recipe.id}')"><i class="ti ti-list-details"></i> Ingredienti</button><button class="btn btn-outline btn-sm" onclick="voiceToSteps('${recipe.id}')"><i class="ti ti-list-numbers"></i> Procedimento</button><button class="btn btn-outline btn-sm" onclick="voiceToNotes('${recipe.id}')"><i class="ti ti-notebook"></i> Appunti</button><button class="btn btn-outline btn-sm" onclick="voiceClear('${recipe.id}')"><i class="ti ti-x"></i></button></div></div>`:''}
     </div>`:''}
-  </div>
+  </div>`;
+  P.notes=`
 
     <div class="card">
     ${labSectionHeader(recipe.id,'notes','ti-notebook','Appunti',sectionsOpen.notes)}
     ${sectionsOpen.notes?`<textarea class="note-area" id="recipe-notes-area" placeholder="Appunti, osservazioni, idee per future varianti...">${recipe.notes||''}</textarea>`:''}
-  </div>
+  </div>`;
+  P.ai=`
 
   <div class="card">
     ${labSectionHeader(recipe.id,'ai','ti-chef-hat','MichelinAI',sectionsOpen.ai)}
@@ -8929,7 +9344,8 @@ function renderLabRecipe(recipe){
       ${staRispondendo?`<div style="margin-top:10px;font-size:13px;color:var(--mid)"><i class="ti ti-loader-2"></i> MichelinAI sta rispondendo…</div>`:''}
       ${erroreM2?`<div style="margin-top:10px;font-size:13px;color:#c0392b"><i class="ti ti-alert-circle"></i> ${erroreM2}</div>`:''}
     </div>`;})():''}
-  </div>
+  </div>`;
+  P.elimina=`
 
   <div class="card">
     ${S.confirmDeleteId===recipe.id?
@@ -8941,6 +9357,8 @@ function renderLabRecipe(recipe){
       `<button onclick="S.confirmDeleteId='${recipe.id}';render()" style="background:none;border:none;cursor:pointer;color:#c0392b;font-family:inherit;font-size:13px;display:flex;align-items:center;gap:6px;padding:0"><i class="ti ti-trash"></i> Elimina questa Scheda</button>`
     }
   </div>`;
+  if(S.uiD3)return renderLabD3(recipe,v,P,pesiLab);
+  return P.header+P.confronto+P.tabs+P.ingredienti+P.procedimento+P.varianti+P.primoConsulto+P.media+P.voice+P.notes+P.ai+P.elimina;
 }
 
 // ══════════════════════════════════════════════════════════
@@ -9940,9 +10358,10 @@ function renderBottomNav(){
   // MichelinAI e Profilo non sono più destinazioni di navigazione primaria
   // (architettura approvata): il codice delle due schermate resta intatto,
   // solo scollegato da qui. Impostazioni si raggiunge dalla Home.
-  const isRicette=S.view==='home'||S.view==='recipes-all'||S.view==='ricetta-madre'||S.view==='ricetta-madre-v2'||S.view==='recipe'||S.view==='confronto'||S.view==='load'||S.view==='preview';
-  const isProduzione=S.view==='attive'||S.view==='produzione-guidata'||S.view==='sessione-operativa'||S.view==='storico-produzioni';
-  const isLab=S.view==='lab-globale';
+  const nav=d3SezioneNav();
+  const isRicette=nav?nav==='schede':(S.view==='home'||S.view==='recipes-all'||S.view==='ricetta-madre'||S.view==='ricetta-madre-v2'||S.view==='recipe'||S.view==='confronto'||S.view==='load'||S.view==='preview');
+  const isProduzione=nav?nav==='produzione':(S.view==='attive'||S.view==='produzione-guidata'||S.view==='sessione-operativa'||S.view==='storico-produzioni');
+  const isLab=nav?nav==='lab':S.view==='lab-globale';
   return `
     <button class="bnav-btn ${isProduzione?'active':''}" id="bnav-produzione"><i class="ti ti-tools-kitchen-2"></i>Produzione</button>
     <button class="bnav-btn ${isRicette?'active':''}" id="bnav-ricette"><i class="ti ti-book-2"></i>Schede</button>
@@ -9992,6 +10411,7 @@ window.addEventListener('popstate',function(e){
 });
 
 function render(){
+  document.body.classList.toggle('ui-d3',!!S.uiD3); // Anteprima Direzione 3
   // Sidebar
   // Search bar
   var sbc=document.getElementById('search-bar-container');
@@ -10007,7 +10427,9 @@ function render(){
   const shellEl=document.querySelector('.shell');
   // Su desktop, nascondi la sidebar nelle view che non la usano
   if(sidebar){
-    const hideSidebar=S.view==='attive'||S.view==='profilo'||S.view==='load'||S.view==='preview'||S.view==='michelinai-globale'||S.view==='app-home'||S.view==='lab-globale';
+    // Direzione 3: stessa barra laterale su tutte le schermate (tranne le due
+    // schermate segnaposto, scollegate dalla navigazione).
+    const hideSidebar=S.uiD3?(S.view==='profilo'||S.view==='michelinai-globale'):(S.view==='attive'||S.view==='profilo'||S.view==='load'||S.view==='preview'||S.view==='michelinai-globale'||S.view==='app-home'||S.view==='lab-globale');
     sidebar.style.display=hideSidebar?'none':'';
     if(!hideSidebar)sidebar.innerHTML=renderSidebar();
     else sidebar.innerHTML=''; // mai lasciare contenuto vecchio nascosto: id duplicati (es. btn-new-recipe) rubano il click a quelli visibili altrove
@@ -10017,7 +10439,7 @@ function render(){
     if(shellEl)shellEl.classList.toggle('no-sidebar',hideSidebar);
   }
   // app-home è uno schermo a sé (Home v4-B): niente chrome della shell attorno.
-  if(shellEl)shellEl.classList.toggle('app-home-active',S.view==='app-home');
+  if(shellEl)shellEl.classList.toggle('app-home-active',S.view==='app-home'&&!S.uiD3); // Direzione 3: Home con intestazione e navigazione comuni
 
   // Mode switcher
   const ms=document.getElementById('mode-switcher');
@@ -10037,12 +10459,12 @@ function render(){
   const recipe=S.selectedId?R(S.selectedId):null;
   if(S.showSearch&&S.searchQuery.trim()){
     mainContent=renderSearch(S.searchQuery.trim());
-  } else if(S.view==='app-home'){mainContent=renderAppHome();}
-  else if(S.view==='home'){mainContent=renderHome();}
+  } else if(S.view==='app-home'){mainContent=S.uiD3?renderAppHomeD3():renderAppHome();}
+  else if(S.view==='home'){mainContent=S.uiD3?renderHomeD3():renderHome();}
   else if(S.view==='load'){mainContent=renderLoad();}
   else if(S.view==='recipes-all'){mainContent=renderRecipesAll();}
   else if(S.view==='preview'){mainContent=renderPreview();}
-  else if(S.view==='ricetta-madre-v2'&&recipe){mainContent=renderRicettaMadreV2(recipe);}
+  else if(S.view==='ricetta-madre-v2'&&recipe){mainContent=S.uiD3?renderSchedaD3(recipe):renderRicettaMadreV2(recipe);}
   else if(S.view==='confronto'&&recipe){mainContent=renderConfronto(recipe);}
   else if(S.view==='recipe'&&recipe){
     mainContent=S.mode==='lab'?renderLabRecipe(recipe):renderProdRecipe(recipe);
@@ -10062,10 +10484,11 @@ function render(){
   // MS15: render() ricostruisce #main; se si sta scrivendo la nota, cursore e
   // focus vengono ripristinati (il testo e' gia' nella bozza).
   // MS17b: stesso trattamento per la ricerca dello Storico (si filtra a ogni tasto).
-  const noteFocus=(()=>{const a=document.activeElement;return a&&(a.id==='session-note-input'||a.id==='history-search'||a.id==='prod-recipe-search'||a.id==='quick-calc-portions'||a.id==='quick-calc-gpp')?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null;})();
-  if(main)main.innerHTML=mainContent+(S.showFamilyPicker?renderFamilyPicker():'')+(S.showMergePicker?renderMergePicker():'')+(S.showMergeConfirm?renderMergeConfirm():'')+(S.showSchedeFamiglie?renderSchedeFamigliePicker():'')+(S.showCondividiStaff?renderCondividiStaffModal():'')+(S.showOnboarding?renderOnboarding():'')+(S.toastAction?renderToastAction():S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:'')+renderUnitConversionModal()+renderLabConversionModal()+renderMandaInProduzioneModal()+renderConversionPreflightModal();
+  const noteFocus=(()=>{const a=document.activeElement;return a&&(a.id==='session-note-input'||a.id==='history-search'||a.id==='prod-recipe-search'||a.id==='d3-schede-search'||a.id==='d3-schede-search-m'||a.id==='quick-calc-portions'||a.id==='quick-calc-gpp')?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null;})();
+  if(main)main.innerHTML=mainContent+(S.showFamilyPicker?renderFamilyPicker():'')+(S.showMergePicker?renderMergePicker():'')+(S.showMergeConfirm?renderMergeConfirm():'')+(S.uiD3?renderD3Overlays():'')+(S.showSchedeFamiglie?renderSchedeFamigliePicker():'')+(S.showCondividiStaff?renderCondividiStaffModal():'')+(S.showOnboarding?renderOnboarding():'')+(S.toastAction?renderToastAction():S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:'')+renderUnitConversionModal()+renderLabConversionModal()+renderMandaInProduzioneModal()+renderConversionPreflightModal();
 
   if(noteFocus){const ta=document.getElementById(noteFocus.id);if(ta){try{ta.focus();ta.setSelectionRange(noteFocus.s,noteFocus.e);}catch(e){}}}
+  if(S.uiD3){d3Autosize();d3NascondiDuplicati();} // Anteprima Direzione 3: campi alti quanto il testo (Safari); nomi ripetuti nascosti
 
   // Bottom nav
   const bn=document.getElementById('bottom-nav');
@@ -10110,13 +10533,7 @@ function bindEvents(){
 
   // New recipe
   const btnNew=document.getElementById('btn-new-recipe');
-  if(btnNew)btnNew.addEventListener('click',()=>{
-    const id='r'+Date.now();
-    const lab=makeDefaultLab(id,'Nuova Scheda');
-    const r={id,name:'Nuova Scheda',category:CATEGORIA_TECNICA,department:'Cucina',validatedVariants:[],currentLabIdx:0,labVersions:[lab],mediaUrl:null,videoUrl:null,notes:''};
-    S.recipes=[...S.recipes,r];S.selectedId=id;S.view='recipe';S.mode='lab';render();
-    saveToSupabase(r);
-  });
+  if(btnNew)btnNew.addEventListener('click',nuovaScheda);
 
   // Load button
   const btnLoad=document.getElementById('btn-load-view');
@@ -10365,9 +10782,434 @@ function handleLoadImage(file){
 }
 
 // ══════════════════════════════════════════════════════════
+// ANTEPRIMA DIREZIONE 3 — Cucina editoriale (solo presentazione)
+// Attivabile con ?ui=d3 (o dall'interruttore nella barra laterale) e
+// disattivabile con ?ui=classic. Riusa dati, funzioni e gestori esistenti:
+// nessun nuovo calcolo, nessun nuovo salvataggio, nessuna nuova azione
+// server. Spenta, l'app e' identica alla grafica attuale.
+// ══════════════════════════════════════════════════════════
+var D3_UI_KEY='khub_ui';
+function initUiD3(){
+  var v=null;
+  try{var q=new URLSearchParams(location.search).get('ui');if(q==='d3'||q==='classic'){localStorage.setItem(D3_UI_KEY,q);}v=localStorage.getItem(D3_UI_KEY);}catch(e){}
+  S.uiD3=v==='d3';
+  if(!initUiD3.ascolto){
+    initUiD3.ascolto=true;
+    // Tastiera su mobile: mentre si scrive, le barre fisse in basso si nascondono.
+    document.addEventListener('focusin',function(e){if(S.uiD3&&e.target&&/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)&&!e.target.closest('.d3-mbar'))document.body.classList.add('d3-typing');});
+    document.addEventListener('focusout',function(){document.body.classList.remove('d3-typing');});
+    // Menu "⋯": un clic fuori lo chiude.
+    document.addEventListener('click',function(e){
+      if(!S.uiD3||!S.d3Menu)return;
+      if(e.target.closest&&e.target.closest('.d3-menu,.d3-menu-toggle'))return;
+      S.d3Menu=null;render();
+    });
+  }
+}
+function setUiD3(on){
+  try{localStorage.setItem(D3_UI_KEY,on?'d3':'classic');}catch(e){}
+  S.uiD3=!!on;S.d3Menu=null;S.d3Esporta=null;S.d3VistaSheet=false;
+  render();
+}
+// Ripiego per i browser senza `field-sizing: content` (Safari): titolo del LAB
+// e passaggi del procedimento crescono con il testo, senza essere tagliati.
+function d3Autosize(el){
+  if(window.CSS&&CSS.supports&&CSS.supports('field-sizing','content'))return;
+  var elenco=el?[el]:document.querySelectorAll('.d3-lab .d3-titolo-input,.d3-lab textarea.step-text');
+  for(var i=0;i<elenco.length;i++){var t=elenco[i];t.style.height='auto';t.style.height=(t.scrollHeight+t.offsetHeight-t.clientHeight)+'px';}
+}
+// Sezione evidenziata nella navigazione (solo Direzione 3; null = regola classica).
+// La Ricetta aperta appartiene al LAB o alla Produzione secondo la modalita'.
+function d3SezioneNav(){
+  if(!S.uiD3)return null;
+  var v=S.view;
+  if(v==='recipe')return S.mode==='lab'?'lab':'produzione';
+  if(v==='lab-globale')return'lab';
+  if(v==='attive'||v==='produzione-guidata'||v==='sessione-operativa'||v==='storico-produzioni')return'produzione';
+  if(v==='home'||v==='recipes-all'||v==='ricetta-madre'||v==='ricetta-madre-v2'||v==='confronto'||v==='load'||v==='preview')return'schede';
+  return'nessuna';
+}
+// Nomi ripetuti: quando la Ricetta si chiama come la sua Scheda, il secondo
+// nome non aggiunge nulla e viene nascosto (solo presentazione, dopo il disegno).
+function d3NascondiDuplicati(){
+  var uguali=function(a,b){a=(a||'').replace(/^\s*·\s*/,'').trim();b=(b||'').trim();return!!a&&!!b&&confrontaNomiIt(a,b)===0;};
+  document.querySelectorAll('.prod-riga-apri').forEach(function(el){
+    var n=el.querySelector('.prod-riga-nome'),sc=el.querySelector('.prod-riga-scheda');
+    if(n&&sc&&uguali(sc.textContent,n.textContent))sc.classList.add('d3-ripetuto');
+  });
+  document.querySelectorAll('.pg-card-title,.prod-title').forEach(function(el){
+    var v=el.querySelector('.pg-card-variant');if(!v)return;
+    var nome=el.textContent.slice(0,el.textContent.lastIndexOf(v.textContent));
+    if(uguali(v.textContent,nome))v.classList.add('d3-ripetuto');
+  });
+  document.querySelectorAll('.ms17-card-head').forEach(function(el){
+    var n=el.querySelector('.ms17-card-name'),v=el.querySelector('.ms17-card-variant');
+    if(n&&v&&uguali(v.textContent,n.textContent))v.classList.add('d3-ripetuto');
+  });
+}
+// Home della Direzione 3: tre accessi con i conteggi gia' presenti nell'app
+// (stessi calcoli di Produzione, Schede e LAB) e le azioni esistenti.
+function d3ConteggiHome(){
+  var principali=S.recipes.filter(function(r){return!r.parentRecipeId;});
+  var bozze=0,schedeLab=0;
+  principali.forEach(function(r){var n=(r.labVersions||[]).length;bozze+=n;if(n)schedeLab++;});
+  return{attive:activeRecipeEntries(S.recipes).length,schede:S.recipes.length,bozze:bozze,schedeLab:schedeLab};
+}
+function renderAppHomeD3(){
+  var c=d3ConteggiHome();
+  var plur=function(n,uno,molti){return n+' '+(n===1?uno:molti);};
+  var card=function(id,titolo,descr,conteggio){return`<button class="d3-card d3-home-card" id="${id}">
+      <span class="d3-home-card-titolo d3-serif">${titolo}</span>
+      <span class="d3-home-card-descr">${descr}</span>
+      <span class="d3-home-card-conteggio">${conteggio}</span>
+      <span class="d3-home-card-freccia" aria-hidden="true">›</span>
+    </button>`;};
+  return`<div class="d3-wrap d3-home">
+    <div><h1 class="d3-h1 d3-serif">Home</h1></div>
+    <div class="d3-home-grid">
+      ${card('apphome-produzione','Produzione','Sessioni da avviare e in corso, Ricette attive',plur(c.attive,'Ricetta attiva','Ricette attive'))}
+      ${card('apphome-schede','Schede','Archivio delle Schede dalla A alla Z',plur(c.schede,'Scheda','Schede'))}
+      ${card('apphome-lab','LAB','Bozze in sviluppo, Scheda per Scheda',plur(c.bozze,'bozza','bozze')+(c.bozze?' in '+plur(c.schedeLab,'Scheda','Schede'):''))}
+    </div>
+    <div class="d3-home-azioni">
+      <button class="d3-btn d3-btn-line" onclick="nuovaScheda()">+ Nuova Scheda</button>
+      <button class="d3-btn d3-btn-line" onclick="S.view='load';render()">Carica Scheda</button>
+      <button class="d3-btn d3-btn-text d3-home-impostazioni" id="apphome-impostazioni">Impostazioni ›</button>
+    </div>
+  </div>`;
+}
+function d3ToggleMenu(key){S.d3Menu=S.d3Menu===key?null:key;render();}
+function d3Esc(x){return escAttr(x==null?'':String(x));}
+// Pillola di stato: parola + glifo + forma (leggibile anche senza colori).
+function d3Pill(stato){
+  var p={attiva:['d3-pill-attiva','●','Attiva'],validata:['d3-pill-validata','✓','Validata'],lab:['d3-pill-lab','○','In LAB'],archiviata:['d3-pill-archiviata','–','Archiviata']}[stato];
+  return`<span class="d3-pill ${p[0]}"><span aria-hidden="true">${p[1]}</span> ${p[2]}</span>`;
+}
+function d3Previsto(){return'<span class="d3-previsto">Previsto</span>';}
+function d3MenuHtml(key,items){
+  if(S.d3Menu!==key)return'';
+  return`<div class="d3-menu" role="menu">${items.filter(Boolean).map(function(it){
+    return`<button role="menuitem" class="d3-menu-item${it.danger?' danger':''}" onclick="S.d3Menu=null;${it.onclick}">${it.label}</button>`;}).join('')}</div>`;
+}
+function d3MenuButton(key,label){
+  return`<button class="d3-btn d3-btn-icon d3-menu-toggle" aria-label="${label||'Altre azioni'}" aria-expanded="${S.d3Menu===key}" onclick="d3ToggleMenu('${key}')">⋯</button>`;
+}
+function d3DataBreve(iso){
+  if(!iso)return'';
+  var d=new Date(iso);if(isNaN(d))return'';
+  return d.toLocaleDateString('it-IT',{day:'numeric',month:'short'});
+}
+// Famiglie (Ricette non archiviate) di una Scheda: solo nomi, per la lettura.
+function d3FamiglieScheda(r){
+  var ids=[];
+  (r.validatedVariants||[]).forEach(function(vv){if(vv.status==='retired')return;(S.variantFamilies[vv.id]||[]).forEach(function(f){if(ids.indexOf(f)===-1)ids.push(f);});});
+  return ids.map(function(id){var f=S.families.find(function(x){return x.id===id;});return f?f.name:'';}).filter(Boolean)
+    .filter(function(n){return SCHEDE_COLLATOR.compare(n,r.name)!==0;}); // la Famiglia automatica col nome della Scheda non aggiunge informazione
+}
+function d3Conteggi(r){
+  var nRic=(r.labVersions||[]).length+(r.validatedVariants||[]).length,nAtt=activeVariants(r).length;
+  return`<span class="d3-cnt">${nRic} ricett${nRic===1?'a':'e'}</span> <span class="${nAtt?'d3-cnt-att':'d3-cnt-zero'}">${nAtt?'● '+nAtt+' attiv'+(nAtt===1?'a':'e'):'nessuna attiva'}</span>`;
+}
+function d3Lettera(nome){
+  var c=String(nome||'').normalize('NFD').replace(/[̀-ͯ]/g,'').trim().charAt(0).toUpperCase();
+  return /[A-Z]/.test(c)?c:'#';
+}
+function nuovaScheda(){
+  const id='r'+Date.now();
+  const lab=makeDefaultLab(id,'Nuova Scheda');
+  const r={id,name:'Nuova Scheda',category:CATEGORIA_TECNICA,department:'Cucina',validatedVariants:[],currentLabIdx:0,labVersions:[lab],mediaUrl:null,videoUrl:null,notes:''};
+  S.recipes=[...S.recipes,r];S.selectedId=id;S.view='recipe';S.mode='lab';render();
+  saveToSupabase(r);
+}
+
+// ─── A. Archivio Schede ───
+function d3SchedeFiltrate(){
+  var q=historyNormalizeText(S.d3SchedeQuery||'');
+  var fam=S.selectedFamily;
+  return S.recipes.filter(function(r){return!r.parentRecipeId;})
+    .filter(function(r){return!fam||(r.validatedVariants||[]).some(function(vv){return vv.status!=='retired'&&(S.variantFamilies[vv.id]||[]).includes(fam);});})
+    .filter(function(r){if(!q)return true;var hay=historyNormalizeText(r.name+' '+categoriaVisibile(r.category)+' '+d3FamiglieScheda(r).join(' '));return q.split(' ').every(function(t){return hay.indexOf(t)!==-1;});})
+    .sort(function(a,b){return confrontaNomiIt(a.name,b.name);});
+}
+function d3SetQuery(v){S.d3SchedeQuery=v;render();}
+function d3SetFamiglia(id){S.selectedFamily=id||null;render();}
+function d3VaiLettera(l){var el=document.getElementById('d3-l-'+l);if(el)el.scrollIntoView({block:'start',behavior:'smooth'});}
+function renderHomeD3(){
+  var tutte=S.recipes.filter(function(r){return!r.parentRecipeId;});
+  var lista=d3SchedeFiltrate();
+  var vista=schedeVista();
+  var filtri=(vista==='categorie'?1:0)+(S.selectedFamily?1:0);
+  var riga=function(r){
+    var cat=categoriaVisibile(r.category),fam=d3FamiglieScheda(r);
+    var famTxt=fam.length?d3Esc(fam[0])+(fam.length>1?' +'+(fam.length-1):''):'';
+    return`<button class="d3-arch-riga" data-nav="${r.id}">
+      <span class="d3-arch-nome d3-serif">${d3Esc(r.name)}</span>
+      <span class="d3-arch-cat">${cat?d3Esc(cat):'<span class="d3-muto">—</span>'}</span>
+      <span class="d3-arch-fam">${famTxt}</span>
+      <span class="d3-arch-cnt">${d3Conteggi(r)}</span>
+      <span class="d3-arch-meta-m">${[cat?d3Esc(cat):'',famTxt].filter(Boolean).join(' · ')}${cat||famTxt?' · ':''}${d3Conteggi(r)}</span>
+      <span class="d3-chev" aria-hidden="true">›</span>
+    </button>`;
+  };
+  var gruppi=[];
+  if(vista==='categorie'){
+    var per={};
+    lista.forEach(function(r){var c=categoriaVisibile(r.category)||CATEGORIA_TECNICA;var k=Object.keys(per).find(function(x){return SCHEDE_COLLATOR.compare(x,c)===0;})||c;(per[k]=per[k]||[]).push(r);});
+    Object.keys(per).sort(function(a,b){return(a===CATEGORIA_TECNICA)-(b===CATEGORIA_TECNICA)||confrontaNomiIt(a,b);})
+      .forEach(function(k){gruppi.push({id:'c-'+k,titolo:k===CATEGORIA_TECNICA?'Senza categoria':k,conteggio:per[k].length,righe:per[k]});});
+  }else{
+    lista.forEach(function(r){var l=d3Lettera(r.name);var g=gruppi[gruppi.length-1];if(!g||g.lettera!==l){g={id:'l-'+l,lettera:l,titolo:l,righe:[]};gruppi.push(g);}g.righe.push(r);});
+  }
+  var lettere=vista==='alfabetica'?gruppi.map(function(g){return g.lettera;}):[];
+  var indice=vista==='alfabetica'&&lista.length?`<nav class="d3-indice" aria-label="Indice alfabetico">${'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(function(l){return lettere.indexOf(l)!==-1?`<button onclick="d3VaiLettera('${l}')">${l}</button>`:`<span>${l}</span>`;}).join('')}</nav>`:'';
+  var famOpts=S.families.slice().sort(function(a,b){return confrontaNomiIt(a.name,b.name);});
+  var conteggio=lista.length===tutte.length?`${tutte.length} Sched${tutte.length===1?'a':'e'}`:`${lista.length} di ${tutte.length} Schede`;
+  return`<div class="d3-wrap d3-arch">
+    <div class="d3-arch-head">
+      <div><h1 class="d3-h1 d3-serif">Schede</h1><div class="d3-sub">${conteggio}</div></div>
+      <button class="d3-btn d3-btn-line d3-solo-mobile" onclick="nuovaScheda()">+ Nuova</button>
+    </div>
+    <div class="d3-arch-ctrl d3-solo-desktop">
+      <label class="d3-search"><span aria-hidden="true">⌕</span><input id="d3-schede-search" type="search" autocomplete="off" placeholder="Cerca una Scheda, una categoria o una famiglia" value="${d3Esc(S.d3SchedeQuery||'')}" oninput="d3SetQuery(this.value)"></label>
+      <button class="d3-btn d3-btn-line${vista==='categorie'?' attivo':''}" aria-pressed="${vista==='categorie'}" onclick="setSchedeVista('${vista==='categorie'?'alfabetica':'categorie'}')">Per categoria</button>
+      <select class="d3-select" aria-label="Filtra per Famiglia Ricetta" onchange="d3SetFamiglia(this.value)"><option value="">Tutte le famiglie</option>${famOpts.map(function(f){return`<option value="${f.id}" ${S.selectedFamily===f.id?'selected':''}>${d3Esc(f.name)}</option>`;}).join('')}</select>
+    </div>
+    ${vista==='alfabetica'?`<div class="d3-solo-desktop">${indice}</div>`:''}
+    ${!tutte.length?`<div class="d3-card d3-vuoto">Nessuna Scheda ancora. <button class="d3-btn d3-btn-line" onclick="nuovaScheda()">+ Nuova Scheda</button></div>`
+      :!lista.length?`<div class="d3-card d3-vuoto">Nessuna Scheda trovata. <button class="d3-btn d3-btn-text" onclick="S.d3SchedeQuery='';S.selectedFamily=null;render()">Azzera ricerca e filtri</button></div>`
+      :`<div class="d3-arch-corpo"><div class="d3-card d3-arch-lista">
+        <div class="d3-arch-testata d3-solo-desktop"><span>Scheda</span><span>Categoria</span><span>Famiglia</span><span>Ricette</span><span></span></div>
+        ${gruppi.map(function(g){return`<div class="d3-arch-gruppo" id="d3-${g.id}">${d3Esc(g.titolo)}${g.conteggio!=null?`<span>${g.conteggio} sched${g.conteggio===1?'a':'e'}</span>`:''}</div>${g.righe.map(riga).join('')}`;}).join('')}
+      </div>${vista==='alfabetica'?`<div class="d3-solo-mobile">${indice}</div>`:''}</div>`}
+    <div class="d3-anteprima-nota">Anteprima Direzione 3 · <button class="d3-btn-text" onclick="setUiD3(false)">Torna alla grafica attuale</button></div>
+    <div class="d3-mbar d3-solo-mobile">
+      <label class="d3-search"><span aria-hidden="true">⌕</span><input id="d3-schede-search-m" type="search" autocomplete="off" placeholder="Cerca una Scheda" value="${d3Esc(S.d3SchedeQuery||'')}" oninput="d3SetQuery(this.value)"></label>
+      <button class="d3-btn d3-btn-line${filtri?' attivo':''}" onclick="S.d3VistaSheet=true;render()">Vista${filtri?' · '+filtri:''} ▾</button>
+    </div>
+  </div>`;
+}
+function renderD3VistaSheet(){
+  var vista=schedeVista();
+  var n=d3SchedeFiltrate().length;
+  return`<div class="d3-velo" onclick="if(event.target===this){S.d3VistaSheet=false;render();}"><div class="d3-foglio" role="dialog" aria-label="Vista">
+    <div class="d3-maniglia"></div>
+    <div class="d3-foglio-titolo">Vista</div>
+    <div class="d3-etichetta">Ordina</div>
+    <div class="d3-segmenti"><button class="${vista==='alfabetica'?'attivo':''}" onclick="setSchedeVista('alfabetica')">A–Z</button><button class="${vista==='categorie'?'attivo':''}" onclick="setSchedeVista('categorie')">Per categoria</button></div>
+    <div class="d3-etichetta">Famiglia Ricetta</div>
+    <div class="d3-chips"><button class="${!S.selectedFamily?'attivo':''}" onclick="d3SetFamiglia('')">Tutte</button>${S.families.slice().sort(function(a,b){return confrontaNomiIt(a.name,b.name);}).map(function(f){return`<button class="${S.selectedFamily===f.id?'attivo':''}" onclick="d3SetFamiglia('${f.id}')">${d3Esc(f.name)}</button>`;}).join('')}</div>
+    <div class="d3-foglio-azioni"><button class="d3-btn d3-btn-text" onclick="S.selectedFamily=null;setSchedeVista('alfabetica')">Azzera</button><button class="d3-btn d3-btn-ink" onclick="S.d3VistaSheet=false;render()">Mostra ${n} Sched${n===1?'a':'e'}</button></div>
+  </div></div>`;
+}
+
+// ─── B. Scheda aperta ───
+function d3MetaRicetta(v,stato){
+  var parti=[];
+  if(v.declaredYieldQty!=null&&v.declaredYieldUnit)parti.push('Resa '+d3Esc(declaredYieldLabel(v.declaredYieldQty,v.declaredYieldUnit)));
+  if(labTargetIsSet(v.portionsCount))parti.push(d3Esc(v.portionsCount)+' porzioni');
+  if(v.validatedAt)parti.push('validata il '+d3Esc(v.validatedAt));
+  if(stato==='attiva'&&S.productionSessionsLoad==='loaded'){
+    var aperte=(S.productionSessions||[]).filter(function(s){return s.sourceVariantId===v.id&&(s.status==='in_progress'||s.status==='pending');}).length;
+    parti.push(aperte?aperte+' session'+(aperte===1?'e':'i')+' aperte':'nessuna sessione aperta');
+  }
+  return parti.join(' · ');
+}
+function renderSchedaD3(recipe){
+  var all=allVariants(recipe);
+  var attive=all.filter(function(v){return v._type==='active';}),pronte=all.filter(function(v){return v._type==='approved';}),
+      inLab=all.filter(function(v){return v._type==='lab';}),archiviate=all.filter(function(v){return v._type==='retired';});
+  var appena=S.justValidated&&S.justValidated.recipeId===recipe.id?pronte.find(function(v){return v.id===S.justValidated.variantId;}):null;
+  if(appena)programmaFineEvidenzaValidata(appena.id);
+  var cat=categoriaVisibile(recipe.category),fam=d3FamiglieScheda(recipe);
+  var rid=recipe.id;
+  var card=function(v,stato){
+    var key='r-'+v.id;
+    var rinomina=S.renameEdit&&S.renameEdit.kind==='ricetta'&&S.renameEdit.variantId===v.id?renderRinominaForm('ricetta',rid,v.id,v.name):'';
+    var azioni='',menu=[];
+    if(stato==='attiva'){
+      azioni=`<button class="d3-btn d3-btn-line" onclick="S.view='recipe';S.mode='produzione';S.selectedVariantId='${v.id}';render()">Apri in Produzione</button>`;
+      menu=[{label:S.rmv2AttivaEspansa[v.id]?'Chiudi contenuto':'Contenuto e resa',onclick:`S.rmv2AttivaEspansa['${v.id}']=!S.rmv2AttivaEspansa['${v.id}'];render()`},
+        {label:'Rinomina',onclick:`apriRinomina('ricetta','${rid}','${v.id}')`},{label:'Esporta PDF',onclick:`S.d3Esporta={recipeId:'${rid}',variantId:'${v.id}'};render()`},
+        {label:'Disattiva',onclick:`toggleActiveV2('${rid}','${v.id}',true)`}];
+    }else if(stato==='validata'){
+      azioni=(correggibileInPagina(recipe,v)?`<button class="d3-btn d3-btn-text" onclick="riapriProntaInLab('${rid}','${v.id}')" title="Riapre questa Ricetta nel LAB, senza creare una copia">Torna in LAB</button>`:'')
+        +`<button class="d3-btn d3-btn-primary" onclick="rendiAttivaPronta('${rid}','${v.id}')" title="Disponibile in Produzione: non avvia nessuna Sessione">Rendi attiva</button>`;
+      menu=[{label:'Apri',onclick:`S.view='recipe';S.mode='produzione';S.selectedVariantId='${v.id}';render()`},{label:'Rinomina',onclick:`apriRinomina('ricetta','${rid}','${v.id}')`},
+        {label:'Esporta PDF',onclick:`S.d3Esporta={recipeId:'${rid}',variantId:'${v.id}'};render()`},{label:'Archivia',onclick:`retireVariant('${rid}','${v.id}')`,danger:true}];
+    }else if(stato==='lab'){
+      azioni=`<button class="d3-btn d3-btn-line" onclick="S.view='recipe';S.mode='lab';S.recipes=S.recipes.map(r=>r.id==='${rid}'?{...r,currentLabIdx:${v._idx}}:r);S.selectedVariantId=null;render()">Apri nel LAB</button>`;
+      menu=[{label:'Elimina bozza',onclick:`eliminaBozza('${rid}','${v.id}')`,danger:true}];
+    }else{
+      menu=[{label:'Apri',onclick:`S.view='recipe';S.mode='produzione';S.selectedVariantId='${v.id}';render()`}];
+    }
+    var nome=stato==='lab'?v._name:v.name;
+    var meta=stato==='lab'?d3Esc(v.label||'Bozza')+(v.contenutoModificatoIl?' · modificata il '+d3DataBreve(v.contenutoModificatoIl):''):d3MetaRicetta(v,stato);
+    return`<div class="d3-card d3-ric d3-band d3-band-${stato}${appena&&appena.id===v.id?' d3-evidenza':''}">
+      <div class="d3-ric-testo">${d3Pill(stato)}<div class="d3-ric-nome d3-serif">${d3Esc(nome)}</div><div class="d3-ric-meta">${meta}${appena&&appena.id===v.id?' · appena validata':''}</div></div>
+      <div class="d3-ric-azioni">${azioni}<span class="d3-menu-wrap">${d3MenuButton(key)}${d3MenuHtml(key,menu)}</span></div>
+      ${rinomina?`<div class="d3-ric-extra">${rinomina}</div>`:''}
+      ${stato==='attiva'&&S.rmv2AttivaEspansa[v.id]?`<div class="d3-ric-extra">${renderContenutoVariante(v)}${renderActiveYieldSection(recipe,v)}</div>`:''}
+    </div>`;
+  };
+  var sezione=function(titolo,lista,stato){return lista.length?`<div class="d3-sez"><div class="d3-sez-titolo">${titolo} <span>${lista.length}</span></div>${lista.map(function(v){return card(v,stato);}).join('')}</div>`:'';};
+  var scelta=S.pendingDuplicaSceltaRecipeId===rid?`<div class="d3-card d3-scelta"><div class="d3-sez-titolo">Da quale Ricetta attiva vuoi partire?</div>${attive.map(function(v){return`<button class="d3-btn d3-btn-line" onclick="creaBozzaDaAttivaId('${rid}','${v.id}')">${d3Esc(v.name)}</button>`;}).join('')}<button class="d3-btn d3-btn-text" onclick="S.pendingDuplicaSceltaRecipeId=null;render()">Annulla</button></div>`:'';
+  var rinominaScheda=S.renameEdit&&S.renameEdit.kind==='scheda'&&S.renameEdit.recipeId===rid;
+  var conferma=S.confirmDeleteId===rid?`<div class="d3-card d3-conferma"><div>Eliminare la Scheda «${d3Esc(recipe.name)}» e tutte le sue Ricette? L'azione è irreversibile.</div><div class="d3-riga-azioni"><button class="d3-btn d3-btn-line" onclick="S.confirmDeleteId=null;render()">Annulla</button><button class="d3-btn d3-btn-danger" onclick="deleteRecipe('${rid}')">Sì, elimina</button></div></div>`:'';
+  return`<div class="d3-wrap d3-scheda">
+    <div class="d3-crumb"><button onclick="S.view='home';render()">‹ Schede</button>${cat?` › ${d3Esc(cat)}`:''}</div>
+    <div class="d3-scheda-head">
+      <div class="d3-scheda-id">
+        ${rinominaScheda?renderRinominaForm('scheda',rid,null,recipe.name):`<h1 class="d3-h1 d3-serif">${d3Esc(recipe.name)}</h1>`}
+        <div class="d3-chips-statiche">
+          ${S.d3CatEdit===rid?`<span class="d3-cat-edit"><input id="si-categoria-input" type="text" list="si-categorie" maxlength="${CATEGORIA_MAX_LENGTH}" autocomplete="off" placeholder="Nessuna (facoltativa)" value="${d3Esc(cat)}" onchange="S.d3CatEdit=null;onSchedaCategoryChange('${rid}',this.value)" onblur="S.d3CatEdit=null;render()">${datalistCategorie('si-categorie')}</span>`
+            :`<button class="d3-chip-cat" onclick="S.d3CatEdit='${rid}';render();setTimeout(function(){var i=document.getElementById('si-categoria-input');if(i)i.focus();},0)" title="Categoria facoltativa: tocca per cambiarla">${cat?d3Esc(cat):'+ Categoria'}</button>`}
+          ${fam.map(function(f){return`<span class="d3-chip">${d3Esc(f)}</span>`;}).join('')}
+        </div>
+      </div>
+      <div class="d3-scheda-cta"><button class="d3-btn d3-btn-line" onclick="duplicaVersioneLAB('${rid}')">+ Nuova ricetta</button><span class="d3-menu-wrap">${d3MenuButton('scheda-'+rid,'Azioni della Scheda')}${d3MenuHtml('scheda-'+rid,[
+        {label:'Rinomina Scheda',onclick:`apriRinomina('scheda','${rid}')`},
+        recipe.validatedVariants.length>=2?{label:'Confronta Ricette',onclick:`S.view='confronto';S.confrontoA=null;S.confrontoB=null;render()`}:null,
+        {label:"Unisci con un'altra Scheda",onclick:`openMergePicker('${rid}')`},
+        {label:'Elimina Scheda',onclick:`S.confirmDeleteId='${rid}';render()`,danger:true}])}</span></div>
+    </div>
+    ${appena?`<div class="d3-conferma-val" role="status">✓ <strong>«${d3Esc(appena.name)}» è pronta.</strong> Ricetta validata e salvata.</div>`:''}
+    ${scelta}${conferma}
+    ${!attive.length&&!pronte.length&&!inLab.length?`<div class="d3-card d3-vuoto">Nessuna Ricetta in questa Scheda. <button class="d3-btn d3-btn-line" onclick="duplicaVersioneLAB('${rid}')">+ Nuova ricetta</button></div>`:''}
+    ${sezione('Attive',attive,'attiva')}${sezione('Validate',pronte,'validata')}${sezione('In LAB',inLab,'lab')}
+    ${archiviate.length?`<div class="d3-card d3-archiviate"><button class="d3-arch-toggle" onclick="S.d3ShowArchiviate=!S.d3ShowArchiviate;render()" aria-expanded="${!!S.d3ShowArchiviate}"><span>– Archiviate · ${archiviate.length} · ${archiviate.map(function(v){return d3Esc(v.name);}).join(', ')}</span><span>${S.d3ShowArchiviate?'Nascondi':'Mostra'} ›</span></button></div>${S.d3ShowArchiviate?archiviate.map(function(v){return card(v,'archiviata');}).join(''):''}`:''}
+  </div>`;
+}
+
+// ─── C. LAB ───
+function d3SetLabTab(t){
+  S.d3LabTab=t;render();
+  var el=document.getElementById('d3-sec-'+t);
+  if(el&&window.matchMedia&&!window.matchMedia('(max-width: 768px)').matches)el.scrollIntoView({block:'start',behavior:'smooth'});
+  // Su mobile la barra delle sezioni scorre in orizzontale: la sezione scelta resta visibile
+  var b=document.querySelector('.d3-tab.attivo');
+  if(b&&b.parentElement)b.parentElement.scrollLeft=Math.max(0,b.offsetLeft-b.parentElement.offsetLeft-16);
+}
+function d3ToggleArrotonda(recipeId,on){
+  if(on){S.d3LabTab='ingredienti';openLabRound(recipeId);setTimeout(function(){var p=document.querySelector('.lab-round-panel');if(p)p.scrollIntoView({block:'center',behavior:'smooth'});},0);}
+  else closeLabRound();
+}
+// Resa dichiarata e pesi: stessa logica di renderLabFormulationBand (stessi id e
+// stesso onLabDeclaredYield), presentazione della Direzione 3.
+function renderLabFormulazioneD3(recipe,v,w){
+  var pending=S.labYieldInput[v.id];
+  var state=declaredYieldState(v);
+  var qtyText=pending?pending.qty:declaredYieldInputText(v.declaredYieldQty);
+  var unitText=pending?pending.unit:declaredYieldInputText(v.declaredYieldUnit);
+  var stima=labWeightsStima(w);
+  var crudo=w.status==='complete'?labGrams(w.raw):'—',finito=w.status==='complete'?labGrams(w.finished):'—';
+  var calo=w.status==='complete'&&w.raw>0?Math.round((w.finished-w.raw)/w.raw*100):null;
+  var avviso=pending?`<div class="lab-yield-error d3-errore">${d3Esc(pending.error)} Non ancora salvata. <button class="d3-btn-text" onclick="discardLabDeclaredYieldInput('${recipe.id}')">Ripristina</button></div>`
+    :state.status==='invalid'?`<div class="lab-yield-error d3-errore">La resa salvata non è valida: ${d3Esc(declaredYieldErrorMessage(state.error))}</div>`:'';
+  var nota=w.status==='incomplete'?'pesi incompleti: mancano conversioni':w.status==='invalid'?'pesi non calcolabili':w.status==='empty'?'nessun ingrediente':(stima?'calcolato · stima':'calcolato');
+  return`<div class="d3-pesi" id="lab-formulation">
+    <div class="d3-peso lab-w-raw"><div class="d3-peso-label">Peso totale a crudo</div><div class="d3-peso-val">${crudo}</div><div class="d3-peso-nota">${nota}</div></div>
+    <div class="d3-peso lab-w-finished"><div class="d3-peso-label">Peso finito teorico</div><div class="d3-peso-val">${finito}</div><div class="d3-peso-nota">${w.status==='complete'?'calcolato'+(calo!=null&&calo!==0?' · '+(calo>0?'+':'−')+Math.abs(calo)+'%':'')+(stima?' · stima':''):nota}</div></div>
+    <div class="d3-peso d3-resa"><div class="d3-peso-label">Resa dichiarata</div>
+      <div class="d3-resa-campi"><input id="lab-yield-qty" type="text" inputmode="decimal" autocomplete="off" placeholder="es. 30" value="${d3Esc(qtyText)}" onchange="onLabDeclaredYield('${recipe.id}','qty',this.value)" aria-label="Resa dichiarata: quantità"><input id="lab-yield-unit" type="text" list="lab-yield-units" maxlength="${DECLARED_YIELD_UNIT_MAX_LENGTH}" autocomplete="off" placeholder="es. bignè" value="${d3Esc(unitText)}" onchange="onLabDeclaredYield('${recipe.id}','unit',this.value)" aria-label="Resa dichiarata: unità"></div>
+      <datalist id="lab-yield-units">${['pz','porzioni','bignè','vasetti','filoni','teglie','g','kg','ml','l'].map(function(u){return'<option value="'+u+'">';}).join('')}</datalist>
+      <div class="d3-peso-nota">correggibile · non cambia gli ingredienti</div>
+    </div>
+  </div>${avviso}`;
+}
+function renderDatiTecniciD3(){
+  var card=function(t,d){return`<div class="d3-card d3-dato"><div class="d3-dato-testa"><span class="d3-dato-titolo">${t}</span>${d3Previsto()}</div><div class="d3-dato-desc">${d}</div><div class="d3-dato-stato">Non ancora disponibile · non richiesto per validare</div></div>`;};
+  return`<div class="d3-sez-titolo">Dati tecnici <span>facoltativi · funzioni previste, nessun dato viene salvato</span></div>
+    <div class="d3-dati">${card('Nutrienti','Valori per 100 g e per porzione, calcolati dagli ingredienti.')}${card('Allergeni','Ricavati dagli ingredienti, con eventuali tracce da verificare.')}${card('Strumenti','Utensili e macchinari legati ai passaggi del procedimento.')}</div>`;
+}
+function renderLabD3(recipe,v,P,pesiLab){
+  var rid=recipe.id;
+  var tab=S.d3LabTab||'ingredienti';
+  var nIng=(v.ingredients||[]).length,nPass=(v.steps||[]).length;
+  var cat=categoriaVisibile(recipe.category);
+  var roundAperto=!!(S.labRound&&S.labRound.recipeId===rid&&S.labRound.labVersionId===v.id);
+  var attiveOra=activeVariants(recipe);
+  var menuItems=[
+    {label:'Nuova bozza',onclick:`duplicaVersioneLAB('${rid}')`},
+    {label:'Crea Scheda da questa bozza',onclick:`creaSchedaDaLab('${rid}')`},
+    {label:'Famiglie Ricetta',onclick:`openLabFamilyPicker('${rid}')`},
+    {label:(S.mostraConfrontoOrigine?'Nascondi':'Mostra')+' confronto con la Ricetta di partenza',onclick:`S.mostraConfrontoOrigine=!S.mostraConfrontoOrigine;render()`},
+    recipe.validatedVariants.length>=2?{label:'Confronta Ricette',onclick:`S.view='confronto';S.confrontoA=null;S.confrontoB=null;render()`}:null,
+    attiveOra.length?{label:'Vai in Produzione',onclick:`S.mode='produzione';S.selectedVariantId=${attiveOra.length===1?"'"+attiveOra[0].id+"'":'null'};render()`}:null,
+    {label:'Elimina questa bozza',onclick:`eliminaBozza('${rid}','${v.id}')`,danger:true}];
+  var tabs=[['ingredienti','Ingredienti',nIng],['procedimento','Procedimento',nPass],['note','Note',null],['ai','MichelinAI',null],['dati','Dati tecnici',null],['altro','Altro',null]];
+  var navBtn=function(t){return`<button class="d3-tab${tab===t[0]?' attivo':''}" onclick="d3SetLabTab('${t[0]}')">${t[1]}${t[2]!=null?` <span>${t[2]}</span>`:''}</button>`;};
+  return`<div class="d3-wrap d3-lab" data-d3tab="${tab}">
+    <div class="d3-lab-top">
+      <div class="d3-crumb"><button onclick="S.view='home';render()">Schede</button>${cat?` › ${d3Esc(cat)}`:''} › <button onclick="S.view='ricetta-madre-v2';render()">${d3Esc(recipe.name)}</button></div>
+      <div class="d3-bozze" role="tablist" aria-label="Bozze in LAB">${recipe.labVersions.map(function(lv,i){var att=i===(recipe.currentLabIdx||0);return`<button role="tab" aria-selected="${att}" class="d3-bozza${att?' attiva':''}" onclick="upRec('${rid}',r=>({...r,currentLabIdx:${i}}));render()">${d3Esc(lv.label||'Bozza')}${lv.contenutoModificatoIl?`<span>${d3DataBreve(lv.contenutoModificatoIl)}</span>`:''}</button>`;}).join('')}<button class="d3-bozza d3-bozza-piu" onclick="duplicaVersioneLAB('${rid}')" aria-label="Nuova bozza" title="Nuova bozza (copia di quella aperta)">+</button></div>
+    </div>
+    <div class="d3-card d3-band d3-band-lab d3-labhead">
+      <div class="d3-labhead-main">
+        ${d3Pill('lab')}
+        <textarea class="d3-titolo-input d3-serif" rows="1" oninput="d3Autosize(this)" onchange="onLabDraftNameChange('${rid}',this.value.replace(/\s*\n\s*/g,' '))" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" aria-label="Nome della Ricetta" title="Tocca per modificare il nome">${d3Esc(v.name||recipe.name)}</textarea>
+        <div class="d3-sub">${[cat?d3Esc(cat):'',d3Esc(v.label||''),nIng+' ingredient'+(nIng===1?'e':'i'),nPass+' passagg'+(nPass===1?'io':'i')].filter(Boolean).join(' · ')}</div>
+        ${renderLabFormulazioneD3(recipe,v,pesiLab)}
+      </div>
+      <div class="d3-labhead-side">
+        <button class="d3-btn d3-btn-primary d3-btn-valida" id="btn-show-validate" title="Salva questa bozza come Ricetta validata, senza metterla in produzione">✓ Valida</button>
+        <div class="d3-caption">Passa alla Scheda come VALIDATA</div>
+        <label class="d3-switch"><span>Arrotonda quantità</span><input type="checkbox" ${roundAperto?'checked':''} onchange="d3ToggleArrotonda('${rid}',this.checked)"><span class="d3-switch-ui" aria-hidden="true"></span></label>
+        <div class="d3-riga-azioni"><button class="d3-btn d3-btn-line" onclick="S.d3Esporta={recipeId:'${rid}',variantId:'${v.id}'};render()">↓ Esporta</button><span class="d3-menu-wrap">${d3MenuButton('lab-'+v.id,'Altre azioni della bozza')}${d3MenuHtml('lab-'+v.id,menuItems)}</span></div>
+      </div>
+    </div>
+    <nav class="d3-secnav" aria-label="Sezioni della Ricetta">
+      <span class="d3-secnav-gruppo">Formulazione</span>${tabs.slice(0,3).map(navBtn).join('')}
+      <span class="d3-secnav-sep"></span>${navBtn(tabs[3])}
+      <span class="d3-secnav-sep"></span><span class="d3-secnav-gruppo">Dati tecnici</span>${navBtn(tabs[4])}
+      <span class="d3-secnav-sep"></span>${navBtn(tabs[5])}
+    </nav>
+    ${P.confronto}
+    <div class="d3-lab-griglia">
+      <section class="d3-sec" id="d3-sec-ingredienti">${P.ingredienti}</section>
+      <div class="d3-lab-dx">
+        <section class="d3-sec" id="d3-sec-procedimento">${P.procedimento}</section>
+        <section class="d3-sec" id="d3-sec-note">${P.notes}${P.voice}</section>
+      </div>
+    </div>
+    <section class="d3-sec" id="d3-sec-ai"><div class="d3-sez-titolo">MichelinAI</div>${P.primoConsulto}${P.ai}</section>
+    <section class="d3-sec" id="d3-sec-dati">${renderDatiTecniciD3()}</section>
+    <section class="d3-sec" id="d3-sec-altro"><div class="d3-sez-titolo">Altro</div>${P.media}${P.varianti}${P.elimina}</section>
+    <div class="d3-actionbar d3-solo-mobile">
+      <button class="d3-btn d3-btn-primary" onclick="onValidate()">✓ Valida</button>
+      <button class="d3-btn d3-btn-line" onclick="S.d3Esporta={recipeId:'${rid}',variantId:'${v.id}'};render()">↓ Esporta</button>
+      <span class="d3-menu-wrap">${d3MenuButton('labm-'+v.id,'Altre azioni della bozza')}${d3MenuHtml('labm-'+v.id,menuItems)}</span>
+    </div>
+  </div>`;
+}
+
+// ─── Esporta: un solo pannello, PDF ricetta oggi, Scheda tecnica prevista ───
+function d3Esporta(){
+  var e=S.d3Esporta;if(!e)return;
+  S.d3Esporta=null;render();
+  exportPDF(e.recipeId,e.variantId);
+}
+function renderD3Esporta(){
+  var e=S.d3Esporta;var r=e&&R(e.recipeId);if(!r)return'';
+  var v=r.validatedVariants.find(function(x){return x.id===e.variantId;})||r.labVersions.find(function(x){return x.id===e.variantId;});
+  if(!v)return'';
+  var voce=function(t,o){return`<li><span>${t}</span><span class="${o?'d3-oggi-t':'d3-prev-t'}">${o?'oggi':'previsto'}</span></li>`;};
+  return`<div class="d3-velo" onclick="if(event.target===this){S.d3Esporta=null;render();}"><div class="d3-foglio d3-esporta" role="dialog" aria-label="Esporta">
+    <div class="d3-maniglia"></div>
+    <div class="d3-foglio-testa"><div class="d3-foglio-titolo">Esporta</div><span class="d3-sub">${d3Esc(v.name||r.name)}</span><button class="d3-chiudi" aria-label="Chiudi" onclick="S.d3Esporta=null;render()">×</button></div>
+    <label class="d3-opzione scelta"><input type="radio" name="d3-esp" checked><span><span class="d3-opz-t">PDF ricetta</span><span class="d3-oggi">Oggi</span><span class="d3-opz-d">Il PDF di sempre: ingredienti con le quantità esatte salvate, pesi, resa e procedimento.</span></span></label>
+    <label class="d3-opzione disabilitata" title="Funzione prevista, non ancora disponibile"><input type="radio" name="d3-esp" disabled><span><span class="d3-opz-t">Scheda tecnica professionale</span>${d3Previsto()}<ul class="d3-opz-lista">${voce('Formulazione, pesi e resa',true)}${voce('Procedimento',true)}${voce('Valori nutrizionali per 100 g',false)}${voce('Allergeni (Reg. UE 1169/2011)',false)}${voce('Strumenti e macchinari',false)}${voce('Stato e data di validazione',true)}</ul></span></label>
+    <div class="d3-foglio-azioni"><span class="d3-sub">Formato PDF · A4</span><button class="d3-btn d3-btn-ink" onclick="d3Esporta()">Esporta PDF</button></div>
+  </div></div>`;
+}
+function renderD3Overlays(){
+  return(S.d3VistaSheet&&S.view==='home'?renderD3VistaSheet():'')+(S.d3Esporta?renderD3Esporta():'');
+}
+
+// ══════════════════════════════════════════════════════════
 // INIT
 // ══════════════════════════════════════════════════════════
 (async()=>{
+  initUiD3();
   render();
   await loadFromSupabase();
   // START-01: la Home (app-home) e' l'entry point canonico anche senza
