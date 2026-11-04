@@ -279,16 +279,29 @@ function makeClientD3(fetchImpl, opts = {}, src = SRC_D3) {
     function render(){log.renders++;} function autosave(){} function toast(msg){log.toasts.push(msg);}
     function openLabRound(id){S.labRound={recipeId:id};} function closeLabRound(){S.labRound=null;}
     ${src}
+    ${opts.autosaveReale ? AUTOSAVE_REALE + '\nfunction showSaveIndicator(){log.indicatore=(log.indicatore||0)+1;}' : ''}
     return {S, loadFromSupabase, saveToSupabase, renderLabRecipe, renderRicettaMadreV2, renderHomeD3, renderSchedaD3, renderDatiTecniciD3, renderD3Esporta,
       initUiD3, setUiD3, d3ToggleArrotonda, d3SetLabTab, d3SchedeFiltrate, d3SetQuery, exportPDF, nuovaScheda, R,
       renderSidebar, renderBottomNav, renderAppHome, renderAppHomeD3, renderLabGlobale, renderAttive, d3SezioneNav, d3ConteggiHome,
       renderLabGlobaleD3, d3GruppiLab, d3SetLabOrdine, d3LabOrdine,
-      renderSearch, renderConfronto, renderOnboarding, renderProdRecipe, renderLabConversionModal, renderProfiloPlaceholder, renderMichelinAIGlobalePlaceholder, d3NomeUnita, d3StatoRicetta};
+      renderSearch, renderConfronto, renderOnboarding, renderProdRecipe, renderLabConversionModal, renderProfiloPlaceholder, renderMichelinAIGlobalePlaceholder, d3NomeUnita, d3StatoRicetta,
+      // Gestore inline di un attributo on* come lo esegue il browser: codice dell'attributo, this = elemento.
+      eseguiInline: function (codice, el) { return (function () { return eval(codice); }).call(el); }};
   `)(fetchImpl, log, doc, () => opts.confirm !== false, { getItem: k => (k in storage ? storage[k] : null), setItem: (k, v) => { storage[k] = String(v); } },
     { search: opts.search || '' }, win);
   c.log = log; c.storage = storage; c.bodyClasses = bodyClasses; return c;
 }
 const makeClientD3Src = (fetchImpl, src) => makeClientD3(fetchImpl, {}, src);
+// Salvataggio automatico reale dell'app (timer di 1500 ms, poi saveToSupabase).
+const AUTOSAVE_REALE = extractFunction('function autosave(id)');
+// Testo di un attributo HTML come lo legge il browser (solo le entita' usate qui).
+const attributo = (h, sel, nome) => {
+  const tag = (h.match(new RegExp('<' + sel + '[^>]*>')) || [])[0];
+  if (!tag) throw new Error('elemento non trovato: ' + sel);
+  const m = tag.match(new RegExp('\\s' + nome + '="([^"]*)"'));
+  if (!m) throw new Error('attributo non trovato: ' + nome);
+  return m[1].replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+};
 
 // Codice di main prima dell'anteprima (e683f77): confronto delle funzioni.
 const BASE = 'e683f77';
@@ -654,6 +667,37 @@ function clientMain(fetchImpl, nomi) {
     assert.ok(!/new Date\(tb\)-new Date\(ta\)/.test(fn.d3GruppiLab + fn.renderLabGlobale) && /new Date\(tb\)-new Date\(ta\)/.test(fn.confrontaUltimaModificaBozze), 'il criterio vive in un solo punto');
     assert.strictEqual((html.match(/makeDefaultLab\(id,'Nuova Scheda'\)/g) || []).length, 1, 'un solo gestore Nuova Scheda');
     assert.ok(/d3AggiornaScorrimento\(\);\}/.test(fn.render) && /\.d3-scorre-dx\{-webkit-mask-image/.test(html));
+  });
+
+  await test('P23. nome della Ricetta nel titolo del LAB (Direzione 3): il gestore reale aggiorna lo stato, il salvataggio automatico lo scrive e sopravvive a un nuovo caricamento', async () => {
+    const c = await setup({ autosaveReale: true }); c.S.uiD3 = true;
+    c.nuovaScheda(); await new Promise(r => setTimeout(r, 50)); // salvataggio iniziale della creazione
+    const id = c.S.selectedId, r0 = rec(c, id);
+    assert.ok(id && r0 && c.S.view === 'recipe' && c.S.mode === 'lab', 'Nuova Scheda aperta nel LAB');
+    const h = c.renderLabRecipe(r0);
+    const codice = attributo(h, 'textarea class="d3-titolo-input', 'onchange');
+    assert.ok(codice.includes('onLabDraftNameChange('), 'il titolo usa il gestore esistente');
+    // Il codice dell'attributo e' JavaScript valido (prima: espressione regolare spezzata da un a capo).
+    assert.doesNotThrow(() => new Function(codice), 'gestore onchange non valido: ' + JSON.stringify(codice));
+    const salvatiPrima = saves.length;
+    c.eseguiInline(codice, { value: 'Crema di prova\n  al limone' }); // a capo incollato -> uno spazio
+    const v = rec(c, id).labVersions[0];
+    assert.deepStrictEqual([v.name, v.label], ['Crema di prova al limone', 'Crema di prova al limone'], 'stato aggiornato');
+    assert.strictEqual(saves.length, salvatiPrima, 'nessun salvataggio prima del ritardo del salvataggio automatico');
+    await new Promise(r => setTimeout(r, 1800)); // ritardo reale di autosave (1500 ms) + scrittura
+    const ultimo = saves[saves.length - 1];
+    assert.ok(saves.length > salvatiPrima && ultimo.recipe.id === id, 'salvataggio automatico eseguito');
+    assert.strictEqual(ultimo.variants.find(x => x.id === v.id).name, 'Crema di prova al limone', 'nome nel salvataggio');
+    assert.strictEqual(fake.tables.variants.find(x => x.id === v.id).name, 'Crema di prova al limone', 'nome nel database');
+    // Nuovo caricamento (come aggiornare la pagina): stesso database, client nuovo.
+    const c2 = makeClientD3(clientFetch); await c2.loadFromSupabase(); c2.S.uiD3 = true;
+    const r2 = rec(c2, id);
+    assert.ok(r2, 'Scheda presente dopo il ricaricamento');
+    assert.strictEqual(r2.labVersions[0].name, 'Crema di prova al limone', 'nome presente dopo il ricaricamento');
+    assert.ok(c2.renderLabRecipe(r2).includes('>Crema di prova al limone</textarea>'), 'titolo mostrato dopo il ricaricamento');
+    // Titolo vuoto: ignorato come nella grafica classica (nessun nome cancellato).
+    c2.eseguiInline(attributo(c2.renderLabRecipe(r2), 'textarea class="d3-titolo-input', 'onchange'), { value: '  \n ' });
+    assert.strictEqual(rec(c2, id).labVersions[0].name, 'Crema di prova al limone', 'titolo vuoto ignorato');
   });
 
   console.log('\n' + passed + ' passed, ' + failed + ' failed');

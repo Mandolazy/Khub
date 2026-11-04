@@ -11397,7 +11397,7 @@ function renderLabD3(recipe,v,P,pesiLab){
     <div class="d3-card d3-band d3-band-lab d3-labhead">
       <div class="d3-labhead-main">
         ${d3Pill('lab')}
-        <textarea class="d3-titolo-input d3-serif" rows="1" oninput="d3Autosize(this)" onchange="onLabDraftNameChange('${rid}',this.value.replace(/\s*\n\s*/g,' '))" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" aria-label="Nome della Ricetta" title="Tocca per modificare il nome">${d3Esc(v.name||recipe.name)}</textarea>
+        <textarea class="d3-titolo-input d3-serif" rows="1" oninput="d3Autosize(this)" onchange="onLabDraftNameChange('${rid}',this.value.replace(/\\s*\\n\\s*/g,' '))" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}" aria-label="Nome della Ricetta" title="Tocca per modificare il nome">${d3Esc(v.name||recipe.name)}</textarea>
         <div class="d3-sub">${[cat?d3Esc(cat):'',d3Esc(v.label||''),nIng+' ingredient'+(nIng===1?'e':'i'),nPass+' passagg'+(nPass===1?'io':'i')].filter(Boolean).join(' · ')}</div>
         ${renderLabFormulazioneD3(recipe,v,pesiLab)}
       </div>
