@@ -1,4 +1,9 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import http from 'node:http';
+import https from 'node:https';
+import dns from 'node:dns';
+import net from 'node:net';
+import zlib from 'node:zlib';
 
 // ══════════════════════════════════════════════════════════
 // M1 — PRIMO CONSULTO
@@ -395,6 +400,157 @@ function genericUpdateProblem(table, data) {
   return null;
 }
 
+// ══════════════════════════════════════════════════════════
+// P0-a — LETTURA SICURA DI UNA PAGINA WEB (importazione da link)
+// Sostituisce il fetch libero di body.fetchUrl. Protezioni:
+//   - solo http/https, niente credenziali nell'URL, porte 80/443;
+//   - DNS risolto UNA volta; ogni indirizzo deve essere pubblico (BlockList:
+//     loopback, reti private, link-local/metadati cloud, CGNAT, riservati,
+//     multicast, IPv6 locali; gli IPv4-mapped sono valutati sull'IPv4);
+//   - la connessione usa SOLO gli indirizzi validati (lookup fissato): nessuna
+//     seconda risoluzione, quindi nessun rebinding DNS tra controllo e uso;
+//   - redirect seguiti a mano (max 5), ciascuno rivalidato da capo;
+//   - tempo massimo complessivo, dimensione massima (anche dopo la
+//     decompressione), solo HTML, stato HTTP della fonte restituito;
+//   - intestazioni verso i siti invariate rispetto a prima.
+// Le opzioni servono solo ai test (risolvi/consentito/porte/timeoutMs/maxBytes):
+// l'handler la chiama sempre senza opzioni.
+// ══════════════════════════════════════════════════════════
+const PAGINA_TIMEOUT_MS = 15000;
+const PAGINA_MAX_BYTES = Math.floor(3.5 * 1024 * 1024); // sotto i 4,5 MB della risposta di una funzione Vercel
+const PAGINA_MAX_REDIRECT = 5;
+const PAGINA_URL_MAX = 2048;
+const PAGINA_TIPI = ['text/html', 'application/xhtml+xml'];
+const PAGINA_INTESTAZIONI = { 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html', 'Accept-Language': 'it-IT,it;q=0.9', 'Accept-Encoding': 'gzip, deflate, br' };
+
+const PAGINA_RETI_VIETATE = (() => {
+  const b = new net.BlockList();
+  [['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12],
+    ['192.0.0.0', 24], ['192.0.2.0', 24], ['192.88.99.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15],
+    ['198.51.100.0', 24], ['203.0.113.0', 24], ['224.0.0.0', 4], ['240.0.0.0', 4]].forEach(([a, p]) => b.addSubnet(a, p, 'ipv4'));
+  // Non aggiungere ::ffff:0:0/96: in BlockList bloccherebbe ogni IPv4.
+  [['::', 128], ['::1', 128], ['64:ff9b::', 96], ['64:ff9b:1::', 48], ['100::', 64], ['2001::', 32], ['2001:db8::', 32],
+    ['2002::', 16], ['fc00::', 7], ['fe80::', 10], ['fec0::', 10], ['ff00::', 8]].forEach(([a, p]) => b.addSubnet(a, p, 'ipv6'));
+  return b;
+})();
+
+export function paginaIndirizzoPubblico(ip) {
+  const v = net.isIP(String(ip || ''));
+  if (v === 4) return !PAGINA_RETI_VIETATE.check(ip, 'ipv4');
+  if (v === 6) return !PAGINA_RETI_VIETATE.check(ip, 'ipv6');
+  return false;
+}
+
+function paginaErrore(codice) { const e = new Error(codice); e.codice = codice; return e; }
+
+function paginaRisolviDns(host) {
+  return new Promise((ok, ko) => {
+    try { dns.lookup(host, { all: true }, (err, lista) => (err ? ko(err) : ok(lista))); } catch (e) { ko(e); }
+  });
+}
+
+async function paginaIndirizzi(host, risolvi, consentito) {
+  const ipLetterale = net.isIP(host);
+  let lista;
+  if (ipLetterale) lista = [{ address: host, family: ipLetterale }];
+  else {
+    try { lista = await risolvi(host); }
+    catch (e) { throw paginaErrore(e && (e.code === 'ENOTFOUND' || e.code === 'EAI_AGAIN' || e.code === 'ENODATA') ? 'dns' : 'rete'); }
+  }
+  if (!Array.isArray(lista) || !lista.length) throw paginaErrore('dns');
+  if (lista.some(a => !a || !consentito(a.address))) throw paginaErrore('host_non_consentito');
+  return lista.map(a => ({ address: a.address, family: a.family || net.isIP(a.address) }));
+}
+
+function paginaRichiesta(u, host, indirizzi, scadenza, maxBytes) {
+  return new Promise((ok, ko) => {
+    const https_ = u.protocol === 'https:';
+    const lib = https_ ? https : http;
+    let finito = false;
+    const chiudi = (fn, v) => { if (finito) return; finito = true; clearTimeout(timer); fn(v); };
+    const opzioni = {
+      method: 'GET', hostname: host, port: u.port || (https_ ? 443 : 80), path: (u.pathname || '/') + (u.search || ''),
+      headers: PAGINA_INTESTAZIONI, agent: false,
+      // Connessione fissata agli indirizzi gia' validati.
+      lookup: (h, opts, cb) => {
+        if (typeof opts === 'function') { cb = opts; opts = {}; }
+        if (opts && opts.all) return cb(null, indirizzi);
+        cb(null, indirizzi[0].address, indirizzi[0].family);
+      },
+    };
+    if (https_ && !net.isIP(host)) opzioni.servername = host;
+    let req;
+    const timer = setTimeout(() => { chiudi(ko, paginaErrore('timeout')); if (req) req.destroy(); }, Math.max(0, scadenza - Date.now()));
+    try {
+      req = lib.request(opzioni, res => {
+        const st = res.statusCode || 0;
+        if (st >= 300 && st < 400 && res.headers.location) { res.resume(); return chiudi(ok, { status: st, redirect: String(res.headers.location) }); }
+        if (st < 200 || st > 299) { res.resume(); return chiudi(ok, { status: st }); }
+        const tipo = String(res.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+        if (tipo && !PAGINA_TIPI.includes(tipo)) { res.destroy(); return chiudi(ko, paginaErrore('non_html')); }
+        const cod = String(res.headers['content-encoding'] || '').trim().toLowerCase();
+        let flusso = res;
+        if (cod === 'gzip' || cod === 'x-gzip') flusso = res.pipe(zlib.createGunzip());
+        else if (cod === 'deflate') flusso = res.pipe(zlib.createInflate());
+        else if (cod === 'br') flusso = res.pipe(zlib.createBrotliDecompress());
+        else if (cod && cod !== 'identity') { res.destroy(); return chiudi(ko, paginaErrore('non_html')); }
+        const pezzi = []; let byte = 0; let troncato = false;
+        const fine = () => {
+          const corpo = Buffer.concat(pezzi);
+          const inizio = corpo.subarray(0, 1024);
+          if (inizio.includes(0)) return chiudi(ko, paginaErrore('non_html')); // contenuto binario
+          const testo = corpo.toString('utf8');
+          if (!tipo && !/^\s*</.test(testo.replace(/^﻿/, ''))) return chiudi(ko, paginaErrore('non_html'));
+          chiudi(ok, { status: st, html: testo, troncato });
+        };
+        flusso.on('data', d => {
+          if (finito || troncato) return;
+          const resto = maxBytes - byte;
+          if (d.length >= resto) { pezzi.push(d.subarray(0, resto)); byte = maxBytes; troncato = true; fine(); res.destroy(); if (flusso !== res) flusso.destroy(); return; }
+          pezzi.push(d); byte += d.length;
+        });
+        flusso.on('end', () => { if (!troncato) fine(); });
+        flusso.on('error', () => chiudi(ko, paginaErrore('rete')));
+        res.on('error', () => chiudi(ko, paginaErrore('rete')));
+      });
+      req.on('error', e => chiudi(ko, paginaErrore(e && e.codice ? e.codice : 'rete')));
+      req.end();
+    } catch (e) { chiudi(ko, paginaErrore('rete')); }
+  });
+}
+
+export async function acquisisciPagina(input, opzioni) {
+  const o = opzioni || {};
+  const risolvi = o.risolvi || paginaRisolviDns;
+  const consentito = o.consentito || paginaIndirizzoPubblico;
+  const maxBytes = o.maxBytes || PAGINA_MAX_BYTES;
+  const porte = o.porte || ['80', '443'];
+  const scadenza = Date.now() + (o.timeoutMs || PAGINA_TIMEOUT_MS);
+  if (typeof input !== 'string' || !input.trim() || input.length > PAGINA_URL_MAX) return { ok: false, code: 'url_non_valido' };
+  let u;
+  try { u = new URL(input.trim()); } catch (e) { return { ok: false, code: 'url_non_valido' }; }
+  for (let salti = 0; ; salti++) {
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, code: 'url_non_valido' };
+    if (u.username || u.password) return { ok: false, code: 'url_non_valido' };
+    if (u.port && !porte.includes(u.port)) return { ok: false, code: 'host_non_consentito' };
+    const host = u.hostname.replace(/^\[|\]$/g, '');
+    if (!host) return { ok: false, code: 'url_non_valido' };
+    let r;
+    try {
+      const indirizzi = await paginaIndirizzi(host, risolvi, consentito);
+      if (Date.now() >= scadenza) return { ok: false, code: 'timeout' };
+      r = await paginaRichiesta(u, host, indirizzi, scadenza, maxBytes);
+    } catch (e) { return { ok: false, code: (e && e.codice) || 'rete' }; }
+    if (r.redirect) {
+      if (salti >= PAGINA_MAX_REDIRECT) return { ok: false, code: 'troppi_redirect' };
+      try { u = new URL(r.redirect, u); } catch (e) { return { ok: false, code: 'url_non_valido' }; }
+      continue;
+    }
+    if (r.status < 200 || r.status > 299) return { ok: false, code: 'http_' + r.status, status: r.status };
+    return { ok: true, html: r.html, finalUrl: u.href, status: r.status, troncato: !!r.troncato };
+  }
+}
+
 export default async function handler(req, res) {
   const denied = khubAccessDenied(req);
   if (denied) return res.status(denied.status).json({ error: denied.error });
@@ -485,12 +641,13 @@ export default async function handler(req, res) {
       return { row: rows.length === 1 ? rows[0] : null };
     }
 
-    if (body.fetchUrl) {
-      const pageRes = await fetch(body.fetchUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0', 'Accept': 'text/html', 'Accept-Language': 'it-IT,it;q=0.9' }
-      });
-      const html = await pageRes.text();
-      return res.status(200).json({ html });
+    // P0-a: lettura protetta della pagina (vedi acquisisciPagina). Nessun
+    // dettaglio interno nella risposta: solo l'esito e un codice.
+    if (body && Object.prototype.hasOwnProperty.call(body, 'fetchUrl')) {
+      const esito = await acquisisciPagina(body.fetchUrl);
+      if (esito.ok) return res.status(200).json(esito);
+      const stato = (esito.code === 'url_non_valido' || esito.code === 'host_non_consentito') ? 422 : esito.code === 'timeout' ? 504 : 502;
+      return res.status(stato).json({ ok: false, code: esito.code, error: 'Pagina non acquisita' });
     }
 
 

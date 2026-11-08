@@ -315,8 +315,13 @@ const sha = s => require('crypto').createHash('sha256').update(s).digest('hex').
   });
 
   await test('P5. nomi protetti nelle note', async () => {
+    // P0-a: il markup restituito dall'AI non entra piu' nei dati (neutralizzato
+    // all'importazione): nessun <img> nella nota. L'escape dei nomi nella nota si
+    // verifica con caratteri speciali che restano nel nome (& e < non seguito da lettera).
     let r = await anteprima([I('Zucchero', 150, 'g'), I('<img src=x onerror=alert(1)>', 200, 'ml')]);
-    assert.ok(r.note.includes('&lt;img src=x onerror=alert(1)&gt; (ml)') && !r.note.includes('<img'), r.note);
+    assert.ok(!r.note.includes('<img'), r.note);
+    r = await anteprima([I('Zucchero', 150, 'g'), I('Sale & "pepe" <1 g', 200, 'ml')]);
+    assert.ok(r.note.includes('Sale &amp; \u201Dpepe\u201D &lt;1 g (ml)') && !r.note.includes('<1'), r.note);
     r = await anteprima([I('Farina', 150, 'g'), I('Uova', 4, 'n')]);
     assert.ok(!/<(?!\/?strong)/.test(r.note));
   });

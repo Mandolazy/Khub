@@ -1363,6 +1363,7 @@ const S = {
   loadImageB64: null,
   loadImagePreviewUrl: null,
   loadVideoUrl: '',
+  loadError: null, // P0-a: esito non riuscito dell'importazione {msg, offriTesto} mostrato nella scheda di caricamento
   loadPreview: null,
   loadDestinazione: 'nuova', // 'nuova' | 'esistente' — dove atterra la Ricetta importata
   loadDestinazioneSchedaId: null, // Scheda scelta quando loadDestinazione==='esistente'
@@ -2949,16 +2950,97 @@ async function deleteVariant(recipeId,variantId){
 // ══════════════════════════════════════════════════════════
 async function extractRecipe(){
   const type=S.loadTab;
+  // P0-a — Importazione sicura e onesta. Funzioni di supporto interne (nessuna
+  // nuova dipendenza globale): esito non riuscito mostrato nella scheda di
+  // caricamento, testo restituito dall'AI neutralizzato prima di entrare nei
+  // dati, pagina web letta da un documento inerte, errori distinti.
+  const fallisci=(msg,offriTesto)=>{S.loadError={msg:msg,offriTesto:!!offriTesto};S.isLoading=false;render();};
+  // Testo dall'AI o da una fonte esterna: mai markup. Entita' decodificate (piu'
+  // passaggi), tag completi o aperti rimossi, nessuna entita' residua,
+  // virgolette dritte -> tipografiche. Restano apostrofi, simboli e "<80 °C".
+  const ENTITA={lt:'<',gt:'>',amp:'&',quot:'"',apos:"'",nbsp:' '};
+  const testoSicuro=(s,max)=>{
+    let t=String(s==null?'':s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,'');
+    for(let k=0;k<4;k++){
+      const d=t.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);?/gi,(m0,c)=>{
+        if(c[0]==='#'){const n=(c[1]==='x'||c[1]==='X')?parseInt(c.slice(2),16):parseInt(c.slice(1),10);return n>0&&n<0x110000?String.fromCodePoint(n):m0;}
+        const v=ENTITA[c.toLowerCase()];return v!==undefined?v:m0;
+      });
+      if(d===t)break;t=d;
+    }
+    t=t.replace(/<[a-z!\/?][^>]*>/gi,' ').replace(/<(?=[a-z!\/?])/gi,'').replace(/&(?=[#a-z0-9])/gi,'& ').replace(/"/g,'\u201D').replace(/[^\S\r\n]+/g,' ').trim();
+    return max&&t.length>max?t.slice(0,max):t;
+  };
+  const sicuroSeTesto=(s,max)=>typeof s==='string'?testoSicuro(s,max):s;
+  // Pagina web: documento inerte (DOMParser non esegue script ne' gestori come
+  // onerror); stesso testo di prima (documentElement, stessi elementi rimossi).
+  const testoPagina=html=>{
+    const d=new DOMParser().parseFromString(String(html),'text/html');
+    d.querySelectorAll('script,style,nav,header,footer,aside').forEach(el=>el.remove());
+    return((d.documentElement&&d.documentElement.textContent)||'').replace(/\s+/g,' ').trim().slice(0,6000);
+  };
+  const PAGINA_MIN_CARATTERI=200;
+  const SEGNI_BLOCCO=/just a moment|checking your browser|verify you are human|verifica di essere umano|attention required|access denied|accesso negato|enable javascript and cookies|are you a robot|captcha|cf-chl/i;
+  const MSG_FONTE={
+    url_non_valido:'Indirizzo non valido: inserisci il link completo della pagina (http:// o https://).',
+    host_non_consentito:'Questo indirizzo non puo\' essere letto da KHUB (rete locale, privata o porta non consentita).',
+    dns:'Sito non trovato: controlla l\'indirizzo.',
+    timeout:'Il sito non ha risposto in tempo.',
+    rete:'Il sito non e\' raggiungibile in questo momento.',
+    troppi_redirect:'Il link rimanda troppe volte ad altre pagine: apri la pagina e copia l\'indirizzo finale.',
+    non_html:'Il link non porta a una pagina web leggibile (formato non supportato).',
+  };
+  const messaggioFonte=esito=>{
+    const c=esito&&typeof esito.code==='string'?esito.code:'';
+    if(MSG_FONTE[c])return MSG_FONTE[c];
+    const st=/^http_(\d{3})$/.test(c)?Number(c.slice(5)):0;
+    if(st===401||st===403)return'Il sito ha rifiutato l\'accesso automatico (errore '+st+').';
+    if(st===404||st===410)return'Pagina non trovata (errore '+st+').';
+    if(st===429)return'Il sito sta limitando le richieste (errore 429): riprova piu\' tardi.';
+    if(st>=500)return'Il sito ha restituito un errore (errore '+st+').';
+    if(st)return'Il sito ha risposto con un errore (errore '+st+').';
+    if(c==='sessione')return'Sessione scaduta: accedi di nuovo e riprova.';
+    return'Connessione interrotta durante la lettura della pagina: riprova.';
+  };
+  // Errori del servizio AI: dal codice HTTP e dal tipo d'errore, mai dettagli
+  // interni (nessun messaggio del server, prompt o stack mostrato).
+  const MSG_AI_LIMITE='Contenuto troppo grande per essere elaborato (limite tecnico): usa un\'immagine piu\' leggera o incolla una parte del testo.';
+  const erroreAI=(res,data)=>{
+    if(!res)return'Connessione al servizio AI interrotta o troppo lenta: riprova.';
+    const st=res.status;
+    const tipo=data&&data.error&&typeof data.error==='object'?data.error.type:null;
+    const daKhub=data&&typeof data.error==='string';
+    if(daKhub&&st===401)return'Sessione scaduta: accedi di nuovo e riprova.';
+    if(daKhub&&st===403)return'Richiesta non consentita: ricarica la pagina e riprova.';
+    if(st===413||tipo==='request_too_large')return MSG_AI_LIMITE;
+    if(tipo==='authentication_error'||tipo==='permission_error'||st===401||st===403)return'Servizio AI non configurato o non disponibile in questo ambiente.';
+    if(tipo==='rate_limit_error'||st===429)return'Servizio AI momentaneamente occupato: riprova tra qualche minuto.';
+    if(tipo==='overloaded_error'||tipo==='api_error'||st>=500)return'Servizio AI temporaneamente non disponibile: riprova tra poco.';
+    if(tipo==='invalid_request_error'||st===400)return'Il contenuto non e\' in un formato accettato dal servizio AI (formato non supportato o troppo grande).';
+    if(!res.ok)return'Servizio AI non disponibile (errore '+st+').';
+    if(data&&data.stop_reason==='max_tokens')return'La ricetta e\' troppo lunga per una sola estrazione (limite tecnico): incolla una parte alla volta.';
+    if(data&&data.stop_reason==='refusal')return'Il servizio AI non ha elaborato questo contenuto.';
+    return null;
+  };
+  S.loadError=null;
+  // Video: KHUB non acquisisce ne' analizza audio, fotogrammi o descrizioni dei
+  // video. Nessuna chiamata AI con il solo indirizzo.
+  if(type==='video'){
+    fallisci('Il video non e\' stato acquisito ne\' analizzato: KHUB non legge ancora i contenuti video. Incolla la didascalia, la descrizione o la trascrizione nella scheda Testo.',true);
+    return;
+  }
   S.isLoading=true;render();
   try{
     let messages=[];
     // Resa dichiarata: testo della fonte su cui verificare la citazione
-    // (testo, pagina del link); foto e video non verificabili ("da verificare");
-    // link senza testo letto: nessuna fonte, nessuna resa.
+    // (testo, pagina del link); la foto non e' verificabile ("da verificare").
     let fonteResa={text:null,verifiable:false,none:false};
     const PROMPT=`Estrai la ricetta e rispondi SOLO con JSON valido. La fonte può essere in qualsiasi lingua (francese, inglese, spagnolo, ecc.): TRADUCI SEMPRE in italiano il nome della ricetta, i nomi degli ingredienti e i passi del procedimento, anche se il testo originale è in un'altra lingua. Converti unità di misura locali (es. cuillère à soupe, cup, oz) nel loro equivalente in g/ml quando possibile. Elenca TUTTI gli ingredienti uno per uno con quantità numeriche esatte. Formato: {"name":"nome","category":"categoria suggerita, breve, in italiano (preferisci una di quelle gia' usate: ${categorieUsate().join(', ')||'nessuna'}); stringa vuota se non e' chiara","portionsCount":null,"gramsPerPortion":null,"declaredYield":{"qty":null,"unit":null,"range":null,"source":null},"ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo 1"],"subRecipes":[{"name":"Nome Prep","declaredYield":{"qty":null,"unit":null,"range":null,"source":null},"ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo"]}]}. Unità: g,ml,kg,l,n,tbsp,tsp,cl. Gli ingredienti nella ricetta principale devono avere quantità reali anche se appartengono a sub-preparazioni. portionsCount (numero intero di porzioni) e gramsPerPortion (grammi per porzione) vanno indicati SOLO se la fonte li riporta esplicitamente; se la fonte non li fornisce usa null. Non stimarli, non calcolarli dagli ingredienti e non trasformare una resa (per esempio "30 bignè", "1 torta" o "per 6 persone") in porzioni o grammi per porzione. declaredYield è la resa dichiarata nella fonte (quanto produce la ricetta): compilala SOLO se la fonte la indica esplicitamente (per esempio "per 6 persone", "dosi per 4", "produce 30 bignè", "per 2 teglie", "makes", "serves", "yield"), altrimenti usa null. qty è il numero; unit è l'unità tradotta in italiano (persone e coperti diventano "porzioni"); source è la frase della fonte copiata esattamente, nella lingua originale e senza tradurla. Se la fonte indica un intervallo (per esempio "4-6 persone" o "20-24 bignè") usa qty null e range {"min":4,"max":6}: non scegliere un numero. Non calcolare mai la resa dagli ingredienti e non stimarla. Ogni elemento di subRecipes ha la propria declaredYield, solo se la fonte la indica per quella preparazione.`;
 
     if(type==='foto'&&S.loadImageB64){
+      if(['image/jpeg','image/png','image/gif','image/webp'].indexOf(S.loadImageB64.mediaType)===-1){
+        fallisci('Formato immagine non supportato: usa JPG, PNG, WebP o GIF.',false);return;
+      }
       messages=[{role:'user',content:[
         {type:'image',source:{type:'base64',media_type:S.loadImageB64.mediaType,data:S.loadImageB64.data}},
         {type:'text',text:'Estrai la ricetta da questa immagine. '+PROMPT}
@@ -2967,31 +3049,58 @@ async function extractRecipe(){
       fonteResa={text:S.loadText,verifiable:true,none:false};
       messages=[{role:'user',content:`Estrai la ricetta dal seguente testo. ${PROMPT}\n\nTESTO:\n${S.loadText}`}];
     }else if(type==='link'&&S.loadUrl.trim()){
-      let pageText='';
+      // La ricetta nasce solo dal testo realmente letto: pagina non raggiungibile,
+      // errore HTTP, formato diverso, verifica anti-bot o testo insufficiente ->
+      // nessuna chiamata AI, nessuna ricetta dedotta dall'indirizzo.
+      let esito=null;
       try{
         const pr=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fetchUrl:S.loadUrl})});
-        const pd=await pr.json();
-        if(pd.html){const t=document.createElement('div');t.innerHTML=pd.html;t.querySelectorAll('script,style,nav,header,footer,aside').forEach(el=>el.remove());pageText=(t.innerText||t.textContent||'').replace(/\s+/g,' ').trim().slice(0,6000);}
-      }catch(e){}
-      fonteResa=pageText?{text:pageText,verifiable:true,none:false}:{text:null,verifiable:false,none:true};
-      if(pageText){messages=[{role:'user',content:`Estrai la ricetta dal testo (fonte: ${S.loadUrl}). ${PROMPT}\n\nTESTO:\n${pageText}`}];}
-      else{messages=[{role:'user',content:`Estrai la ricetta da questo URL: ${S.loadUrl}. Usa il nome nell\\'URL per dedurre la ricetta. ${PROMPT}`}];}
-    }else if(type==='video'&&S.loadVideoUrl.trim()){
-      messages=[{role:'user',content:`Analizza questo video/reel di ricetta: ${S.loadVideoUrl}. ${PROMPT}. Estrai ingredienti e procedimento dal titolo, descrizione e contesto del video.`}];
+        esito=await pr.json().catch(()=>null);
+        if((pr.status===401||pr.status===403)&&esito&&!esito.code)esito={ok:false,code:'sessione'};
+      }catch(e){esito=null;}
+      if(!esito||esito.ok!==true||typeof esito.html!=='string'){fallisci(messaggioFonte(esito)+' Puoi aprire la pagina, copiare il testo della ricetta e incollarlo nella scheda Testo.',true);return;}
+      const pageText=testoPagina(esito.html);
+      if(pageText.length<PAGINA_MIN_CARATTERI){fallisci('La pagina non contiene abbastanza testo leggibile: potrebbe essere caricata con JavaScript o protetta. Copia il testo della ricetta e incollalo nella scheda Testo.',true);return;}
+      if(pageText.length<2000&&SEGNI_BLOCCO.test(pageText)){fallisci('Il sito mostra una verifica anti-bot invece della ricetta. Copia il testo della ricetta dalla pagina e incollalo nella scheda Testo.',true);return;}
+      fonteResa={text:pageText,verifiable:true,none:false};
+      messages=[{role:'user',content:`Estrai la ricetta dal testo (fonte: ${S.loadUrl}). ${PROMPT}\n\nTESTO:\n${pageText}`}];
     }else{
       S.isLoading=false;render();
       toast('Inserisci contenuto da importare','ti-alert-circle');return;
     }
 
-    const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-5-5',max_tokens:8000,output_config:{effort:'low'},messages})});
-    const data=await res.json();
-    const text=(data.content||[]).map(c=>c.text||'').join('');
+    let res=null,data=null;
+    const ctrl=typeof AbortController==='function'?new AbortController():null;
+    const timer=ctrl?setTimeout(()=>ctrl.abort(),120000):null;
+    try{
+      res=await fetch('/api/chat',Object.assign({method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:'claude-sonnet-5-5',max_tokens:8000,output_config:{effort:'low'},messages})},ctrl?{signal:ctrl.signal}:{}));
+      data=await res.json().catch(()=>null);
+    }catch(e){res=null;}
+    if(timer)clearTimeout(timer);
+    const problemaAI=erroreAI(res,data);
+    if(problemaAI){fallisci(problemaAI,type!=='testo');return;}
+    const text=((data&&data.content)||[]).map(c=>c.text||'').join('');
     const clean=text.replace(/```json|```/g,'').trim();
     let parsed;
-    try{parsed=JSON.parse(clean);}catch(e){
-      S.isLoading=false;render();
-      toast('Errore nel parsing della ricetta','ti-alert-circle');return;
+    try{parsed=JSON.parse(clean);}catch(e){parsed=null;}
+    if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)){
+      fallisci('La risposta del servizio AI non e\' interpretabile: riprova o incolla il testo della ricetta.',type!=='testo');return;
     }
+    const nIng=Array.isArray(parsed.ingredients)?parsed.ingredients.length:0;
+    const nPassi=Array.isArray(parsed.steps)?parsed.steps.length:0;
+    if(!nIng&&!nPassi){
+      fallisci('Nella fonte non e\' stata riconosciuta una ricetta (nessun ingrediente e nessun passaggio): controlla il contenuto.',type!=='testo');return;
+    }
+    // Neutralizzazione dei testi prima che entrino in anteprima, Schede e LAB.
+    parsed.name=sicuroSeTesto(parsed.name,300);
+    parsed.category=sicuroSeTesto(parsed.category,300);
+    const ingredientiSicuri=list=>(Array.isArray(list)?list:[]).map(i=>(i&&typeof i==='object')?{...i,name:sicuroSeTesto(i.name,300),unit:sicuroSeTesto(i.unit,40)}:i);
+    const passiSicuri=list=>Array.isArray(list)?list.map(s=>sicuroSeTesto(s,5000)):list;
+    const resaSicura=dy=>(dy&&typeof dy==='object')?{...dy,unit:sicuroSeTesto(dy.unit,40)}:dy;
+    parsed.ingredients=ingredientiSicuri(parsed.ingredients);
+    parsed.steps=passiSicuri(parsed.steps);
+    parsed.declaredYield=resaSicura(parsed.declaredYield);
+    parsed.subRecipes=(Array.isArray(parsed.subRecipes)?parsed.subRecipes:[]).map(sr=>(sr&&typeof sr==='object')?{...sr,name:sicuroSeTesto(sr.name,300),ingredients:ingredientiSicuri(sr.ingredients),steps:passiSicuri(sr.steps),declaredYield:resaSicura(sr.declaredYield)}:sr);
     parsed.ingredients=(parsed.ingredients||[]).map((i,idx)=>({
       ...i,id:uid(),isSubRecipe:false,subRecipeId:null,
       qty:parseFloat(i.qty)||0,unit:UNITS.includes(i.unit)?i.unit:'g'
@@ -3005,7 +3114,7 @@ async function extractRecipe(){
     }));
     S.loadPreview=parsed;
     S.view='preview';
-  }catch(e){console.error(e);toast('Errore nell\'estrazione','ti-alert-circle');}
+  }catch(e){console.error(e);S.loadError={msg:'Errore imprevisto durante l\'estrazione: riprova.',offriTesto:false};}
   S.isLoading=false;render();
 }
 
@@ -8419,15 +8528,15 @@ function exportPDF(recipeId,variantId){
   const stima=pesiOk&&pesi.referenceDataUsed.length>0;
   const stimaIds=stima?pesi.referenceDataUsed.map(x=>String(x.id)):[];
   const pctCell=i=>pesiOk&&pesi.byId[i.id]?pesi.byId[i.id].pct.toFixed(1)+'%'+(stimaIds.indexOf(String(i.id))!==-1?' *':''):'—';
-  const rows=vv.ingredients.map(i=>`<tr><td>${i.name}</td><td style="text-align:right;font-family:monospace">${i.qty} ${i.unit}</td><td class="pdf-pct" style="text-align:right;color:#888;font-family:monospace">${pctCell(i)}</td></tr>`).join('');
+  const rows=vv.ingredients.map(i=>`<tr><td>${escAttr(i.name)}</td><td style="text-align:right;font-family:monospace">${escAttr(i.qty)} ${escAttr(i.unit)}</td><td class="pdf-pct" style="text-align:right;color:#888;font-family:monospace">${pctCell(i)}</td></tr>`).join('');
   const pesiRiga=pesiOk
     ?`<div class="pdf-weights" style="margin-top:12px">Peso a crudo: ${formatQuickCalcQty(pesi.raw,'g')} g · Peso finito teorico: ${formatQuickCalcQty(pesi.finished,'g')} g${stima?' (stima)':''}</div>`
       +(stima?`<div class="pdf-estimate" style="margin-top:4px;font-size:12px;color:#888">(stima) Pesi e percentuali calcolati con pesi di riferimento non confermati per ${pesi.referenceDataUsed.map(x=>'* '+escAttr(x.name)+' ('+escAttr(x.unit)+')').join(', ')}: tutti i valori dipendono da questa stima.</div>`:'')
     :pesi.status==='missing_conversions'
       ?`<div class="pdf-weights" style="margin-top:12px">Pesi e percentuali non calcolabili: mancano le conversioni in grammi di ${pesi.missing.map(m=>escAttr(m.ingredientName)+' ('+escAttr(m.currentUnit)+')').join(', ')}.</div>`
       :`<div class="pdf-weights" style="margin-top:12px">Pesi e percentuali non disponibili.</div>`;
-  const steps=(vv.steps||[]).length?'<h3 style="margin:24px 0 10px">Procedimento</h3><ol>'+vv.steps.map(s=>`<li style="margin-bottom:6px;line-height:1.6">${s}</li>`).join('')+'</ol>':'';
-  const h=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${recipe.name} — ${vv.name}</title><style>*{box-sizing:border-box}body{font-family:Georgia,serif;max-width:700px;margin:40px auto;padding:0 20px;color:#222;font-size:14px;line-height:1.6}h1{font-size:24px;margin-bottom:4px;letter-spacing:-0.3px}table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}th{text-align:left;border-bottom:2px solid #333;padding:8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em}td{padding:6px 6px;border-bottom:1px solid #ddd}tr:last-child td{border-bottom:none}.meta{color:#888;font-size:12px;margin:6px 0 24px}.badge{background:#C85A1E;color:white;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;margin-left:8px;vertical-align:middle}.steps-list{margin-top:8px;padding-left:20px}.steps-list li{margin-bottom:8px;line-height:1.6}@media print{body{margin:16px;-webkit-print-color-adjust:exact}@page{margin:1.5cm}.badge{-webkit-print-color-adjust:exact}}</style></head><body><h1>${recipe.name}<span class="badge">${vv.name}</span></h1><div class="meta">${vv.validatedAt?'Validata il '+vv.validatedAt:'Bozza in LAB — non ancora validata'}${targetPrintParts(vv.portionsCount,vv.gramsPerPortion)}</div><table><thead><tr><th>Ingrediente</th><th style="text-align:right">Quantità</th><th style="text-align:right">% crudo${stima?' (stima)':''}</th></tr></thead><tbody>${rows}</tbody></table>${pesiRiga}${steps}<div style="margin-top:40px;font-size:11px;color:#ccc;border-top:1px solid #eee;padding-top:12px">Generato da Khub</div></body></html>`;
+  const steps=(vv.steps||[]).length?'<h3 style="margin:24px 0 10px">Procedimento</h3><ol>'+vv.steps.map(s=>`<li style="margin-bottom:6px;line-height:1.6">${escAttr(s)}</li>`).join('')+'</ol>':'';
+  const h=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escAttr(recipe.name)} — ${escAttr(vv.name)}</title><style>*{box-sizing:border-box}body{font-family:Georgia,serif;max-width:700px;margin:40px auto;padding:0 20px;color:#222;font-size:14px;line-height:1.6}h1{font-size:24px;margin-bottom:4px;letter-spacing:-0.3px}table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}th{text-align:left;border-bottom:2px solid #333;padding:8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em}td{padding:6px 6px;border-bottom:1px solid #ddd}tr:last-child td{border-bottom:none}.meta{color:#888;font-size:12px;margin:6px 0 24px}.badge{background:#C85A1E;color:white;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;margin-left:8px;vertical-align:middle}.steps-list{margin-top:8px;padding-left:20px}.steps-list li{margin-bottom:8px;line-height:1.6}@media print{body{margin:16px;-webkit-print-color-adjust:exact}@page{margin:1.5cm}.badge{-webkit-print-color-adjust:exact}}</style></head><body><h1>${escAttr(recipe.name)}<span class="badge">${escAttr(vv.name)}</span></h1><div class="meta">${vv.validatedAt?'Validata il '+vv.validatedAt:'Bozza in LAB — non ancora validata'}${targetPrintParts(vv.portionsCount,vv.gramsPerPortion)}</div><table><thead><tr><th>Ingrediente</th><th style="text-align:right">Quantità</th><th style="text-align:right">% crudo${stima?' (stima)':''}</th></tr></thead><tbody>${rows}</tbody></table>${pesiRiga}${steps}<div style="margin-top:40px;font-size:11px;color:#ccc;border-top:1px solid #eee;padding-top:12px">Generato da Khub</div></body></html>`;
   const w=window.open('','_blank');
   if(!w){toast('Popup bloccato — consenti i popup per questo sito','ti-alert-circle');return;}
   w.document.write(h);
@@ -8616,19 +8725,19 @@ function renderContenutoVariante(v){
         ${v.ingredients.map(ing=>{
           if(!ing.isSubRecipe){
             return `<div style="font-size:13px;color:var(--dpop-inchiostro-testo);display:flex;justify-content:space-between;max-width:420px">
-              <span>${ing.name}</span><span style="font-family:'IBM Plex Mono',monospace;color:var(--dpop-grigio-dato)">${ing.qty} ${ing.unit}${ing.estimatedYieldPct!=null?' · resa '+ing.estimatedYieldPct+'%':''}</span>
+              <span>${escAttr(ing.name)}</span><span style="font-family:'IBM Plex Mono',monospace;color:var(--dpop-grigio-dato)">${escAttr(ing.qty)} ${escAttr(ing.unit)}${ing.estimatedYieldPct!=null?' · resa '+ing.estimatedYieldPct+'%':''}</span>
             </div>`;
           }
           const brickInfo=findVariantById(ing.subRecipeId);
           return `<div style="border-left:3px solid var(--dpop-ocra-bruciata);padding:4px 0 4px 10px">
             <div style="font-size:13px;color:var(--dpop-inchiostro-testo);display:flex;justify-content:space-between;max-width:400px">
-              <span><i class="ti ti-brick"></i> ${ing.name}</span><span style="font-family:'IBM Plex Mono',monospace;color:var(--dpop-grigio-dato)">${ing.qty} ${ing.unit}</span>
+              <span><i class="ti ti-brick"></i> ${escAttr(ing.name)}</span><span style="font-family:'IBM Plex Mono',monospace;color:var(--dpop-grigio-dato)">${escAttr(ing.qty)} ${escAttr(ing.unit)}</span>
             </div>
             ${brickInfo?`
               <div style="margin-top:3px;display:flex;flex-direction:column;gap:2px">
                 ${(brickInfo.variant.ingredients||[]).map(si=>`
                   <div style="font-size:11.5px;color:var(--dpop-grigio-dato);display:flex;justify-content:space-between;max-width:360px;padding-left:14px">
-                    <span>${si.name}</span><span style="font-family:'IBM Plex Mono',monospace">${si.qty} ${si.unit}</span>
+                    <span>${escAttr(si.name)}</span><span style="font-family:'IBM Plex Mono',monospace">${escAttr(si.qty)} ${escAttr(si.unit)}</span>
                   </div>`).join('')}
               </div>
             `:`<div style="font-size:11.5px;color:#c0392b;margin-top:3px;padding-left:14px"><i class="ti ti-alert-triangle"></i> Scheda o Ricetta collegata non più disponibile</div>`}
@@ -8640,7 +8749,7 @@ function renderContenutoVariante(v){
         <div style="font-size:12px;color:var(--dpop-grigio-dato)">Nessun passaggio registrato.</div>
       `:`
         <ol style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px">
-          ${v.steps.filter(s=>s&&s.trim()).map(s=>`<li style="font-size:13px;color:var(--dpop-inchiostro-testo)">${s}</li>`).join('')}
+          ${v.steps.filter(s=>s&&s.trim()).map(s=>`<li style="font-size:13px;color:var(--dpop-inchiostro-testo)">${escAttr(s)}</li>`).join('')}
         </ol>
       `}
     `}`;
@@ -8665,7 +8774,7 @@ function renderRicettaMadreV2(recipe){
     <button class="si-back" onclick="S.view='home';render()"><i class="ti ti-arrow-left"></i> Schede</button>
     <div class="si-identita">
       ${S.renameEdit&&S.renameEdit.kind==='scheda'&&S.renameEdit.recipeId===recipe.id?renderRinominaForm('scheda',recipe.id,null,recipe.name)
-        :`<div class="si-nome">${recipe.name} <button class="si-riga-btn" id="btn-rinomina-scheda" style="font-size:11px;vertical-align:middle" onclick="apriRinomina('scheda','${recipe.id}')" title="Correggi il nome della Scheda">Rinomina</button></div>`}
+        :`<div class="si-nome">${escAttr(recipe.name)} <button class="si-riga-btn" id="btn-rinomina-scheda" style="font-size:11px;vertical-align:middle" onclick="apriRinomina('scheda','${recipe.id}')" title="Correggi il nome della Scheda">Rinomina</button></div>`}
       <div class="si-meta">${categoriaVisibile(recipe.category)?escAttr(categoriaVisibile(recipe.category))+' · ':''}${recipe.department||''} — ${nRic} RIC · ${nAtt} ATT</div>
       <div class="si-categoria"><label for="si-categoria-input">Categoria</label><input id="si-categoria-input" type="text" list="si-categorie" maxlength="${CATEGORIA_MAX_LENGTH}" autocomplete="off" placeholder="Nessuna (facoltativa)" value="${escAttr(categoriaVisibile(recipe.category))}" onchange="onSchedaCategoryChange('${recipe.id}',this.value)" title="Facoltativa: scegli una categoria già usata o scrivine una nuova">${datalistCategorie('si-categorie')}</div>
       ${famiglieRicettaNomi.length?`<div class="si-famiglie">${famiglieRicettaNomi.map(n=>`<span class="si-famiglia-tag">${n}</span>`).join('')}</div>`:''}
@@ -8676,7 +8785,7 @@ function renderRicettaMadreV2(recipe){
   const zonaAzionePrincipale=S.pendingDuplicaSceltaRecipeId===recipe.id?`
     <div class="si-scelta-partenza">
       <div class="si-scelta-partenza-titolo">Da quale Ricetta attiva vuoi partire?</div>
-      ${attive.map(v=>`<button class="si-scelta-riga" onclick="creaBozzaDaAttivaId('${recipe.id}','${v.id}')">${v.name}</button>`).join('')}
+      ${attive.map(v=>`<button class="si-scelta-riga" onclick="creaBozzaDaAttivaId('${recipe.id}','${v.id}')">${escAttr(v.name)}</button>`).join('')}
       <button class="si-scelta-annulla" onclick="S.pendingDuplicaSceltaRecipeId=null;render()">Annulla</button>
     </div>`:`
     <div class="si-azione-principale">
@@ -8690,7 +8799,7 @@ function renderRicettaMadreV2(recipe){
       const espansa=!!S.rmv2AttivaEspansa[v.id];
       return `<div class="si-riga">
         <button class="si-riga-apri" onclick="S.view='recipe';S.mode='produzione';S.selectedVariantId='${v.id}';render()">
-          <span class="si-riga-nome">${v.name}</span>
+          <span class="si-riga-nome">${escAttr(v.name)}</span>
           <span class="si-riga-sub">${targetSummaryShort(v.portionsCount,v.gramsPerPortion)} · dal ${v.validatedAt}</span>
         </button>
         <div class="si-riga-azioni">
@@ -8707,7 +8816,7 @@ function renderRicettaMadreV2(recipe){
     <div class="si-sezione-cesura"><span class="si-sezione-notch lacca"></span><span class="si-sezione-titolo">In LAB — lavoro in corso</span><span class="si-sezione-count">${inLab.length}</span></div>
     ${inLab.map(v=>`<div class="si-riga">
       <button class="si-riga-apri" onclick="S.view='recipe';S.mode='lab';S.recipes=S.recipes.map(r=>r.id==='${recipe.id}'?{...r,currentLabIdx:${v._idx}}:r);S.selectedVariantId=null;render()">
-        <span class="si-riga-nome">${v._name}</span>
+        <span class="si-riga-nome">${escAttr(v._name)}</span>
         <span class="si-riga-sub">Bozza in sviluppo</span>
       </button>
       <div class="si-riga-azioni"><button class="si-riga-btn" onclick="S.view='recipe';S.mode='lab';S.recipes=S.recipes.map(r=>r.id==='${recipe.id}'?{...r,currentLabIdx:${v._idx}}:r);S.selectedVariantId=null;render()">Apri LAB</button></div>
@@ -8724,7 +8833,7 @@ function renderRicettaMadreV2(recipe){
     <div class="si-sezione-cesura"><span class="si-sezione-notch neutro"></span><span class="si-sezione-titolo">Pronte, non ancora attive</span><span class="si-sezione-count">${pronte.length}</span></div>
     ${pronte.map(v=>`<div class="si-riga${appenaValidata&&appenaValidata.id===v.id?' si-riga-evidenziata':''}">
       <button class="si-riga-apri" onclick="S.view='recipe';S.mode='produzione';S.selectedVariantId='${v.id}';render()">
-        <span class="si-riga-nome">${v.name}</span>
+        <span class="si-riga-nome">${escAttr(v.name)}</span>
         <span class="si-riga-sub">Pronta il ${v.validatedAt}${appenaValidata&&appenaValidata.id===v.id?' · appena validata':''}</span>
       </button>
       <div class="si-riga-azioni">
@@ -8755,7 +8864,7 @@ function renderRicettaMadreV2(recipe){
     ${consolidate.length===0?`<div class="si-empty"><i class="ti ti-history"></i> Nessuna Ricetta consolidata ancora.</div>`:
       consolidate.map(v=>`<button class="si-storia-riga" onclick="S.view='recipe';S.mode='produzione';S.selectedVariantId='${v.id}';render()">
         <span class="si-storia-data">${v.validatedAt||'—'}</span>
-        <span class="si-storia-corpo"><span class="si-storia-nome">${v.name}</span><span class="si-storia-stato">${statoLabel[v._type]||v._type}</span></span>
+        <span class="si-storia-corpo"><span class="si-storia-nome">${escAttr(v.name)}</span><span class="si-storia-stato">${statoLabel[v._type]||v._type}</span></span>
       </button>`).join('')}`;
 
   // ═══ Azioni secondarie: Confronta, Unisci, Elimina — legacy, preservate ═══
@@ -8926,7 +9035,7 @@ function renderSearch(query){
         var onclick=searchResultOnclick(r);
         return `<div class="search-result-item" onclick="${onclick}">
           <div style="width:36px;height:36px;border-radius:50%;background:var(--cream);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">${r.emoji}</div>
-          <div style="flex:1"><div class="search-result-name">${r.name}</div><div class="search-result-meta">${r.meta}</div></div>
+          <div style="flex:1"><div class="search-result-name">${escAttr(r.name)}</div><div class="search-result-meta">${escAttr(r.meta)}</div></div>
           <i class="ti ti-chevron-right" style="color:var(--border);font-size:14px"></i>
         </div>`;
       }).join("")}
@@ -8944,28 +9053,35 @@ function renderLoad(){
     </div>
     ${S.loadTab==='foto'?`
       <div class="load-area" id="drop-area">
-        ${S.loadImagePreviewUrl?`<img src="${S.loadImagePreviewUrl}" style="max-height:200px;border-radius:var(--r-md)">`:
+        ${S.loadImagePreviewUrl?`<img src="${escAttr(S.loadImagePreviewUrl)}" style="max-height:200px;border-radius:var(--r-md)">`:
         `<i class="ti ti-photo" style="font-size:40px;color:var(--light)"></i>
         <div style="font-size:13px;color:var(--mid);margin-top:8px">Trascina foto o clicca per selezionare</div>
-        <div style="font-size:11px;color:var(--light)">JPG, PNG, HEIC</div>`}
+        <div style="font-size:11px;color:var(--light)">JPG, PNG, WebP</div>`}
       </div>
       <input type="file" id="foto-input" accept="image/*" style="display:none">
     `:''}
     ${S.loadTab==='testo'?`
-      <textarea class="load-text-area" id="text-input" placeholder="Incolla qui il testo della ricetta...">${S.loadText}</textarea>
+      <textarea class="load-text-area" id="text-input" placeholder="Incolla qui il testo della ricetta...">${escAttr(S.loadText)}</textarea>
     `:''}
     ${S.loadTab==='link'?`
-      <input class="load-url-input" id="url-input" type="url" placeholder="https://..." value="${S.loadUrl}">
+      <input class="load-url-input" id="url-input" type="url" placeholder="https://..." value="${escAttr(S.loadUrl)}">
       <div style="font-size:11px;color:var(--light);margin-top:6px">Alcuni siti bloccano l'accesso esterno. In quel caso usa Testo.</div>
     `:''}
     ${S.loadTab==='video'?`
-      <input class="load-url-input" id="video-input" type="url" placeholder="https://youtube.com/... o https://instagram.com/..." value="${S.loadVideoUrl}">
-      <div style="font-size:11px;color:var(--light);margin-top:6px">Link YouTube, Instagram Reel, TikTok</div>
+      <div class="load-video-avviso" role="note" style="font-size:13px;color:var(--dark);background:var(--cream);border:1px solid var(--border);border-radius:var(--r-md);padding:12px 14px;line-height:1.45">
+        <strong>KHUB non legge ancora i video.</strong> Audio, immagini e descrizioni di YouTube, Instagram, TikTok o Facebook non vengono acquisiti né analizzati, e nessuna ricetta viene ricavata dal solo link.
+        Per importare la ricetta di un video, copia la didascalia, la descrizione o la trascrizione e incollala nella scheda Testo.
+      </div>
     `:''}
+    ${S.loadError?`<div class="load-errore" role="alert" style="margin-top:14px;font-size:13px;color:var(--dark);background:var(--white);border:1px solid var(--orange-accessible,#B4501C);border-left-width:4px;border-radius:var(--r-md);padding:10px 14px;line-height:1.45">
+        <div><i class="ti ti-alert-circle"></i> ${escAttr(S.loadError.msg)}</div>
+        ${S.loadError.offriTesto&&S.loadTab!=='testo'?`<button class="btn btn-outline btn-sm" id="btn-load-incolla-testo" style="margin-top:8px" onclick="S.loadTab='testo';S.loadError=null;render()"><i class="ti ti-text-size"></i> Incolla il testo</button>`:''}
+      </div>`:''}
     <div style="display:flex;gap:10px;margin-top:14px">
+      ${S.loadTab==='video'?`<button class="btn btn-primary" id="btn-load-vai-testo" onclick="S.loadTab='testo';S.loadError=null;render()"><i class="ti ti-text-size"></i> Vai a Testo</button>`:`
       <button class="btn btn-primary" id="btn-extract" ${S.isLoading?'disabled':''}>
         ${S.isLoading?'<i class="ti ti-loader" style="animation:spin 1s linear infinite"></i> Analisi in corso...':'<i class="ti ti-sparkles"></i> Estrai ricetta'}
-      </button>
+      </button>`}
     </div>
   </div>
   <style>@keyframes spin{to{transform:rotate(360deg)}}</style>`;
@@ -9002,12 +9118,12 @@ function renderPreview(){
     <div class="form-row" style="margin-bottom:14px">
       <div class="form-group">
         <label class="form-label">Nome ricetta</label>
-        <input class="form-input" id="prev-name" value="${p.name||''}">
+        <input class="form-input" id="prev-name" value="${escAttr(p.name||'')}">
       </div>
       <div class="form-group">
         <label class="form-label">${destinazioneEsistente?'Categoria della Scheda':'Categoria (facoltativa)'}</label>
         ${destinazioneEsistente?
-          `<div class="form-input" style="background:var(--cream);color:var(--mid);cursor:not-allowed">${schedaScelta?schedaScelta.category:'—'}</div>`
+          `<div class="form-input" style="background:var(--cream);color:var(--mid);cursor:not-allowed">${schedaScelta?escAttr(schedaScelta.category):'—'}</div>`
           :`<input class="form-input" id="prev-cat" type="text" list="prev-categorie" maxlength="${CATEGORIA_MAX_LENGTH}" autocomplete="off" placeholder="Nessuna (facoltativa)" value="${escAttr(categoriaVisibile(p.category))}">${datalistCategorie('prev-categorie')}`}
       </div>
     </div>
@@ -9019,8 +9135,8 @@ function renderPreview(){
     <div class="card-label"><i class="ti ti-list-details"></i> Ingredienti (${p.ingredients.length})</div>
     ${p.ingredients.map((ing,idx)=>`
     <div class="preview-ing-row">
-      <span class="preview-ing-name">${ing.name}</span>
-      <input class="preview-ing-qty" type="number" value="${ing.qty}" data-prev-ing="${idx}" data-field="qty">
+      <span class="preview-ing-name">${escAttr(ing.name)}</span>
+      <input class="preview-ing-qty" type="number" value="${escAttr(ing.qty)}" data-prev-ing="${idx}" data-field="qty">
       <select class="preview-ing-unit" data-prev-ing="${idx}" data-field="unit">
         ${UNITS.map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}
       </select>
@@ -9030,11 +9146,11 @@ function renderPreview(){
     ${p.steps&&p.steps.length?`
     <div class="card-label" style="margin-top:18px"><i class="ti ti-list-numbers"></i> Procedimento</div>
     <div class="preview-steps">
-      ${p.steps.map((s,i)=>`<div class="preview-step"><span style="font-weight:600;color:var(--mid);margin-right:6px">${i+1}.</span>${s}</div>`).join('')}
+      ${p.steps.map((s,i)=>`<div class="preview-step"><span style="font-weight:600;color:var(--mid);margin-right:6px">${i+1}.</span>${escAttr(s)}</div>`).join('')}
     </div>`:''}
     ${p.subRecipes&&p.subRecipes.length?`
     <div style="margin-top:16px;background:var(--lab-light);border:1px solid var(--lab-border);border-radius:var(--r-md);padding:10px 14px;font-size:12px;color:var(--lab)">
-      <i class="ti ti-sparkles"></i> Verranno create anche: <strong>${p.subRecipes.map(s=>s.name).join(', ')}</strong>
+      <i class="ti ti-sparkles"></i> Verranno create anche: <strong>${p.subRecipes.map(s=>escAttr(s.name)).join(', ')}</strong>
     </div>
     <div style="margin-top:12px">${p.subRecipes.map((sr,i)=>renderImportYieldFields(sr.declaredYield,'prev-sr-yield-'+i,'Resa dichiarata di '+escAttr(sr.name||'preparazione '+(i+1)))).join('')}</div>`:''}
 
@@ -9049,7 +9165,7 @@ function renderPreview(){
         <label class="form-label">Scegli la Scheda</label>
         <select class="form-input" id="prev-scheda-esistente" onchange="S.loadDestinazioneSchedaId=this.value||null;render()">
           <option value="">— seleziona —</option>
-          ${[...S.recipes].sort((a,b)=>a.name.localeCompare(b.name)).map(r=>`<option value="${r.id}" ${S.loadDestinazioneSchedaId===r.id?'selected':''}>${r.name}</option>`).join('')}
+          ${[...S.recipes].sort((a,b)=>a.name.localeCompare(b.name)).map(r=>`<option value="${escAttr(r.id)}" ${S.loadDestinazioneSchedaId===r.id?'selected':''}>${escAttr(r.name)}</option>`).join('')}
         </select>
       </div>`:''}
     </div>
@@ -9125,7 +9241,7 @@ function renderLabRecipe(recipe){
       <div style="flex:1">
         <input
           class="recipe-name"
-          value="${(v.name||recipe.name).replace(/"/g,'&quot;')}"
+          value="${escAttr(v.name||recipe.name)}"
           onchange="onLabDraftNameChange('${recipe.id}',this.value)"
           style="background:transparent;border:none;border-bottom:1.5px solid rgba(255,255,255,0.3);color:white;font-family:inherit;font-size:24px;font-weight:600;letter-spacing:-0.5px;width:100%;outline:none;padding:0 0 2px 0;cursor:text;"
           onfocus="this.style.borderBottomColor='white'"
@@ -9133,8 +9249,8 @@ function renderLabRecipe(recipe){
           title="Clicca per modificare il nome"
         >
         <div class="recipe-meta">
-          <span>${recipe.category}</span>
-          <span>${v.label}</span>
+          <span>${escAttr(recipe.category)}</span>
+          <span>${escAttr(v.label)}</span>
           <span>${recipe.labVersions.length} bozz${recipe.labVersions.length!==1?'e':'a'} LAB</span>
         </div>
       </div>
@@ -9175,14 +9291,14 @@ function renderLabRecipe(recipe){
     const risultato=contaVariabiliCambiate(origine.variant.ingredients,v.ingredients);
     if(risultato.numeroIngredientiCoinvolti===0){
       return `<div class="card" style="margin-top:12px;background:var(--sage-light)">
-        <div style="font-size:13px;color:var(--sage-dark)"><i class="ti ti-circle-check"></i> Nessuna differenza rispetto a "${origine.variant.name}".</div>
+        <div style="font-size:13px;color:var(--sage-dark)"><i class="ti ti-circle-check"></i> Nessuna differenza rispetto a "${escAttr(origine.variant.name)}".</div>
       </div>`;
     }
     const aggiunti=risultato.dettaglio.filter(d=>d.tipo==='aggiunto');
     const rimossi=risultato.dettaglio.filter(d=>d.tipo==='rimosso');
     const modificati=risultato.dettaglio.filter(d=>d.tipo==='modificato');
     return `<div class="card" style="margin-top:12px">
-      <div style="font-size:11px;color:var(--light);margin-bottom:10px">Confronto con "${origine.variant.name}" — ${risultato.numeroIngredientiCoinvolti} ingredient${risultato.numeroIngredientiCoinvolti===1?'e coinvolto':'i coinvolti'}</div>
+      <div style="font-size:11px;color:var(--light);margin-bottom:10px">Confronto con "${escAttr(origine.variant.name)}" — ${risultato.numeroIngredientiCoinvolti} ingredient${risultato.numeroIngredientiCoinvolti===1?'e coinvolto':'i coinvolti'}</div>
       ${aggiunti.length?`<div style="margin-bottom:10px">
         <div style="font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--sage-dark);margin-bottom:4px">Aggiunti</div>
         ${aggiunti.map(d=>`<div style="font-size:13px;color:var(--dark)">+ ${d.ingName}</div>`).join('')}
@@ -9200,7 +9316,7 @@ function renderLabRecipe(recipe){
   P.tabs=`
 
   ${recipe.labVersions.length>1?`<div class="lab-version-tabs">
-    ${recipe.labVersions.map((lv,i)=>`<button class="lab-vtab ${i===(recipe.currentLabIdx||0)?'active':''}" onclick="upRec('${recipe.id}',r=>({...r,currentLabIdx:${i}}));render()">${lv.label}</button>`).join('')}
+    ${recipe.labVersions.map((lv,i)=>`<button class="lab-vtab ${i===(recipe.currentLabIdx||0)?'active':''}" onclick="upRec('${recipe.id}',r=>({...r,currentLabIdx:${i}}));render()">${escAttr(lv.label)}</button>`).join('')}
   </div>`:''}`;
   P.ingredienti=`
 
@@ -9214,7 +9330,7 @@ function renderLabRecipe(recipe){
           const brickInfo=isBrick?findVariantById(ing.subRecipeId):null;
           const rigaPrincipale=`
         <tr${isBrick?' style="background:var(--sage-light)"':''}>
-          <td>${isBrick?'<i class="ti ti-brick" style="color:var(--sage-dark);margin-right:5px" title="Mattoncino: questo ingrediente è un\'altra Scheda"></i>':''}<input class="ing-qty-input" style="width:100%;min-width:100px" value="${ing.name}" onchange="onIngName('${recipe.id}','${ing.id}',this.value)"></td>
+          <td>${isBrick?'<i class="ti ti-brick" style="color:var(--sage-dark);margin-right:5px" title="Mattoncino: questo ingrediente è un\'altra Scheda"></i>':''}<input class="ing-qty-input" style="width:100%;min-width:100px" value="${escAttr(ing.name)}" onchange="onIngName('${recipe.id}','${ing.id}',this.value)"></td>
           <td><input class="ing-qty-input" type="number" value="${ing.qty}" onchange="onIngQty('${recipe.id}','${ing.id}',this.value)"></td>
           <td><select class="ing-unit-select" onchange="onIngUnit('${recipe.id}','${ing.id}',this.value)">${UNITS.map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}</select></td>
           <td class="ing-pct">${pesiLab.status==='complete'&&pesiLab.raw>0&&pesiLab.byId[ing.id]?(pesiLab.byId[ing.id].rawGrams/pesiLab.raw*100).toFixed(1)+'%':'—'}</td>
@@ -9237,12 +9353,12 @@ function renderLabRecipe(recipe){
         <tr class="mattoncino-detail">
           <td colspan="6" style="background:var(--cream);border-left:3px solid var(--sage);padding:8px 10px 10px 22px">
             <div style="font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--sage-dark);margin-bottom:5px">
-              <i class="ti ti-brick"></i> Contenuto di ${brickInfo.recipe.name}${brickInfo.variant.label?' — '+brickInfo.variant.label:''}
+              <i class="ti ti-brick"></i> Contenuto di ${escAttr(brickInfo.recipe.name)}${brickInfo.variant.label?' — '+escAttr(brickInfo.variant.label):''}
             </div>
             <div style="display:flex;flex-direction:column;gap:3px">
               ${(brickInfo.variant.ingredients||[]).map(si=>`
               <div style="font-size:12px;color:var(--mid);display:flex;justify-content:space-between;max-width:360px">
-                <span>${si.name}</span><span style="font-family:'DM Mono',monospace;margin-left:12px">${si.qty} ${si.unit}</span>
+                <span>${escAttr(si.name)}</span><span style="font-family:'DM Mono',monospace;margin-left:12px">${escAttr(si.qty)} ${escAttr(si.unit)}</span>
               </div>`).join('')}
             </div>
           </td>
@@ -9274,8 +9390,8 @@ function renderLabRecipe(recipe){
               return `<div style="position:absolute;top:100%;left:0;right:0;background:var(--white);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:var(--shadow);z-index:20;max-height:220px;overflow-y:auto;margin-top:4px">
                 ${risultati.length===0?`<div style="padding:10px 12px;font-size:13px;color:var(--light)">Nessuna Scheda validata trovata</div>`:
                   risultati.map(m=>`<button class="mattoncino-result" data-recipe-id="${escAttr(m.recipeId)}" data-variant-id="${escAttr(m.variantId)}" data-recipe-name="${escAttr(m.recipeName)}" data-variant-label="${escAttr(m.variantLabel)}" data-category="${escAttr(m.category)}" style="display:block;width:100%;text-align:left;padding:8px 12px;background:none;border:none;cursor:pointer;font-family:inherit;font-size:13px;border-bottom:1px solid var(--border)">
-                    <div style="color:var(--dark)">${m.recipeName}${m.variantLabel?' — '+m.variantLabel:''}</div>
-                    <div style="font-size:11px;color:var(--light)">${m.category}</div>
+                    <div style="color:var(--dark)">${escAttr(m.recipeName)}${m.variantLabel?' — '+escAttr(m.variantLabel):''}</div>
+                    <div style="font-size:11px;color:var(--light)">${escAttr(m.category)}</div>
                   </button>`).join('')}
               </div>`;
             })():''}
@@ -9307,7 +9423,7 @@ function renderLabRecipe(recipe){
         return `<div class="step-item" draggable="true" data-step-idx="${i}" data-recipe="${recipe.id}">
         <button class="step-drag" title="Trascina per riordinare"><i class="ti ti-grip-vertical"></i></button>
         <div class="step-num">${i+1}</div>
-        <textarea class="step-text" rows="2" onchange="onStepText('${recipe.id}',${i},this.value)">${s}</textarea>
+        <textarea class="step-text" rows="2" onchange="onStepText('${recipe.id}',${i},this.value)">${escAttr(s)}</textarea>
         <div class="step-duration-wrap">
           <div class="step-duration-label">min</div>
           <input class="step-duration" type="number" min="0" step="0.5" inputmode="decimal" placeholder="—" title="Tempo previsto (minuti). Lascia vuoto per nessun tempo previsto." value="${durMin}" onchange="onStepDuration('${recipe.id}',${i},this.value)">
@@ -9327,7 +9443,7 @@ function renderLabRecipe(recipe){
         const isRetired=vv.status==='retired';
         return `<div class="variant-card ${isActive?'production':''}">
           <div class="vc-dot ${isActive?'production':'validated'}"></div>
-          <div style="flex:1"><div class="vc-name">${vv.name}</div><div class="vc-meta">${targetSummaryShort(vv.portionsCount,vv.gramsPerPortion)} · ${vv.validatedAt}</div></div>
+          <div style="flex:1"><div class="vc-name">${escAttr(vv.name)}</div><div class="vc-meta">${targetSummaryShort(vv.portionsCount,vv.gramsPerPortion)} · ${vv.validatedAt}</div></div>
           ${isActive?'<span class="vc-prod-badge">Attiva</span>':isRetired?'<span class="vc-prod-badge" style="color:var(--light)">Archiviata</span>':'<span class="vc-prod-badge validated">Pronta</span>'}
           <button onclick="deleteVariant('${recipe.id}','${vv.id}')" title="Elimina" style="background:none;border:none;cursor:pointer;color:var(--light);font-size:13px;padding:4px;transition:color 0.12s" onmouseover="this.style.color='#c0392b'" onmouseout="this.style.color='var(--light)'"><i class="ti ti-trash"></i></button>
         </div>`;
@@ -9370,14 +9486,14 @@ function renderLabRecipe(recipe){
         <div style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--lab);margin-bottom:${testoFresco||osservazioniM1.length?'12px':'0'}">
           <i class="ti ti-circle-check"></i> Primo Consulto effettuato
         </div>
-        ${testoFresco?`<div style="font-size:14px;color:var(--dark);line-height:1.5;white-space:pre-wrap;margin-bottom:${osservazioniM1.length?'12px':'0'}">${testoFresco}</div>`:''}
+        ${testoFresco?`<div style="font-size:14px;color:var(--dark);line-height:1.5;white-space:pre-wrap;margin-bottom:${osservazioniM1.length?'12px':'0'}">${escAttr(testoFresco)}</div>`:''}
         ${osservazioniAttuali.length?`
         <div style="display:flex;flex-direction:column;gap:10px">
           ${!testoFresco?`<div style="font-size:12px;color:var(--mid)">Osservazioni emerse dal Primo Consulto:</div>`:''}
           ${osservazioniAttuali.map(o=>`
             <div style="border-left:3px solid var(--lab);padding:6px 0 6px 12px">
-              <div style="font-size:12px;font-weight:600;color:var(--lab);margin-bottom:2px">${(o.content&&o.content.label)||'Osservazione'}</div>
-              <div style="font-size:14px;color:var(--dark);line-height:1.4">${(o.content&&o.content.text)||''}</div>
+              <div style="font-size:12px;font-weight:600;color:var(--lab);margin-bottom:2px">${escAttr((o.content&&o.content.label)||'Osservazione')}</div>
+              <div style="font-size:14px;color:var(--dark);line-height:1.4">${escAttr((o.content&&o.content.text)||'')}</div>
             </div>
           `).join('')}
         </div>`:(!testoFresco&&osservazioniRisolte.length===0?`<div style="font-size:13px;color:var(--mid)">Nessuna osservazione strutturata registrata.</div>`:'')}
@@ -9386,12 +9502,12 @@ function renderLabRecipe(recipe){
           <div style="font-size:11px;color:var(--light);text-transform:uppercase;letter-spacing:.03em">Risolte / evolute</div>
           ${osservazioniRisolte.map(o=>`
             <div style="border-left:3px solid var(--border);padding:6px 0 6px 12px;opacity:0.7">
-              <div style="font-size:12px;font-weight:600;color:var(--mid);margin-bottom:2px">${(o.content&&o.content.label)||'Osservazione'}</div>
-              <div style="font-size:13px;color:var(--mid);line-height:1.4">${(o.content&&o.content.text)||''}</div>
+              <div style="font-size:12px;font-weight:600;color:var(--mid);margin-bottom:2px">${escAttr((o.content&&o.content.label)||'Osservazione')}</div>
+              <div style="font-size:13px;color:var(--mid);line-height:1.4">${escAttr((o.content&&o.content.text)||'')}</div>
             </div>
           `).join('')}
         </div>`:''}
-        ${tsM1?`<div style="font-size:11px;color:var(--light);margin-top:10px">Consulto di ${v.label||'questa bozza'} del ${tsM1}</div>`:''}
+        ${tsM1?`<div style="font-size:11px;color:var(--light);margin-top:10px">Consulto di ${escAttr(v.label||'questa bozza')} del ${tsM1}</div>`:''}
         `;
       }
       return`
@@ -9401,7 +9517,7 @@ function renderLabRecipe(recipe){
         </button>
       </div>
       ${erroreM1?`<div style="font-size:13px;color:#c0392b;margin-bottom:10px"><i class="ti ti-alert-circle"></i> ${erroreM1}</div>`:''}
-      <div style="font-size:13px;color:var(--light)">Chiedi a MichelinAI un primo sguardo tecnico su ${v.label||'questa bozza'}.</div>
+      <div style="font-size:13px;color:var(--light)">Chiedi a MichelinAI un primo sguardo tecnico su ${escAttr(v.label||'questa bozza')}.</div>
       ${legacyPresente?`<div style="font-size:11px;color:var(--light);margin-top:6px">Esiste un Primo Consulto legacy per questa bozza (storico, non convertito, non aggiornato).</div>`:''}
       `;
     })():''}
@@ -10091,9 +10207,9 @@ function renderLabConversionModal(){
 function renderToastAction(){
   var ta=S.toastAction;if(!ta)return "";
   var btns=ta.actions.map(function(a,i){
-    return `<button class="toast-action-btn" style="${a.primary?"background:var(--orange);color:white":"background:rgba(255,255,255,0.15);color:white"}" id="ta-btn-${i}">${a.label}</button>`;
+    return `<button class="toast-action-btn" style="${a.primary?"background:var(--orange);color:white":"background:rgba(255,255,255,0.15);color:white"}" id="ta-btn-${i}">${escAttr(a.label)}</button>`;
   }).join("");
-  return `<div class="toast-action"><span>${ta.msg}</span>${btns}</div>`;
+  return `<div class="toast-action"><span>${escAttr(ta.msg)}</span>${btns}</div>`;
 }
 
 // ── FASE 1: PLACEHOLDER NUOVE VIEW ──────────────────────
@@ -10627,7 +10743,7 @@ function render(){
   // focus vengono ripristinati (il testo e' gia' nella bozza).
   // MS17b: stesso trattamento per la ricerca dello Storico (si filtra a ogni tasto).
   const noteFocus=(()=>{const a=document.activeElement;return a&&(a.id==='session-note-input'||a.id==='history-search'||a.id==='prod-recipe-search'||a.id==='d3-schede-search'||a.id==='d3-schede-search-m'||a.id==='quick-calc-portions'||a.id==='quick-calc-gpp')?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null;})();
-  if(main)main.innerHTML=mainContent+(S.showFamilyPicker?renderFamilyPicker():'')+(S.showMergePicker?renderMergePicker():'')+(S.showMergeConfirm?renderMergeConfirm():'')+(S.uiD3?renderD3Overlays():'')+(S.showSchedeFamiglie?renderSchedeFamigliePicker():'')+(S.showCondividiStaff?renderCondividiStaffModal():'')+(S.showOnboarding?renderOnboarding():'')+(S.toastAction?renderToastAction():S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${S.toast.msg}</div>`:'')+renderUnitConversionModal()+renderLabConversionModal()+renderMandaInProduzioneModal()+renderConversionPreflightModal();
+  if(main)main.innerHTML=mainContent+(S.showFamilyPicker?renderFamilyPicker():'')+(S.showMergePicker?renderMergePicker():'')+(S.showMergeConfirm?renderMergeConfirm():'')+(S.uiD3?renderD3Overlays():'')+(S.showSchedeFamiglie?renderSchedeFamigliePicker():'')+(S.showCondividiStaff?renderCondividiStaffModal():'')+(S.showOnboarding?renderOnboarding():'')+(S.toastAction?renderToastAction():S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${escAttr(S.toast.msg)}</div>`:'')+renderUnitConversionModal()+renderLabConversionModal()+renderMandaInProduzioneModal()+renderConversionPreflightModal();
 
   if(noteFocus){const ta=document.getElementById(noteFocus.id);if(ta){try{ta.focus();ta.setSelectionRange(noteFocus.s,noteFocus.e);}catch(e){}}}
   if(S.uiD3){d3Autosize();d3NascondiDuplicati();d3AggiornaScorrimento();} // Anteprima Direzione 3: campi alti quanto il testo (Safari); nomi ripetuti nascosti
@@ -10719,7 +10835,7 @@ function bindEvents(){
 
   // Load tabs
   document.querySelectorAll('[data-tab]').forEach(el=>{
-    el.addEventListener('click',()=>{S.loadTab=el.dataset.tab;render();});
+    el.addEventListener('click',()=>{S.loadTab=el.dataset.tab;S.loadError=null;render();});
   });
 
   // Foto drop area

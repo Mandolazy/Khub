@@ -368,7 +368,10 @@ function clientMain(fetchImpl, nomi) {
       // Finalizzazione D3: solo presentazione (ramo S.uiD3) e criterio "Ultima modifica" estratto in una funzione condivisa.
       'renderConfronto', 'renderLabConversionModal', 'renderLabGlobale', 'renderMichelinAIGlobalePlaceholder', 'renderOnboarding', 'renderProdRecipe', 'renderProfiloPlaceholder', 'renderSearch',
       // Finalizzazione: errori di persistenza visibili (HTTP non 2xx, {ok:false}, risposte non valide); test E1-E9.
-      'loadFromSupabase', 'saveToSupabase'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
+      'loadFromSupabase', 'saveToSupabase',
+      // P0-a: sicurezza dell'importazione (lettura inerte delle pagine, nessuna ricetta dal solo URL o dal video,
+      // errori distinti, escape dei testi); test test-import-p0a-*.
+      'extractRecipe', 'renderLoad', 'renderPreview', 'renderToastAction'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
     assert.deepStrictEqual(rimosse, [], 'nessuna funzione rimossa');
     for (const n of ['computeFormulationWeights', 'deriveYieldPerUnit', 'computeLabRounding', 'applyLabRound', 'undoLabRound', 'computeSessionScaling', 'createProductionSession', 'buildValidatedVariantPayload', 'onValidate', 'confirmValidate', 'rendiAttivaPronta', 'riapriProntaInLab', 'onLabDeclaredYield', 'onIngQty', 'onStepText'])
       assert.ok(n in b && a[n] === b[n], 'invariata: ' + n);

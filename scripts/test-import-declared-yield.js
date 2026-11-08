@@ -313,7 +313,6 @@ const sha = s => require('crypto').createHash('sha256').update(s).digest('hex').
       ['assente', ai({}), {}], ['null', ai({ declaredYield: null }), {}],
       ['senza citazione', ai({ declaredYield: DY(30, 'bignè', null) }), {}],
       ['dedotta dagli ingredienti', ai({ declaredYield: DY(404, 'g', 'totale circa 404 g') }), { text: 'Farina 150 g, uova 4, latte 250 ml.' }],
-      ['link senza testo', ai({ declaredYield: DY(30, 'bignè', 'produce 30 bignè') }), { tab: 'link' }],
     ];
     for (const [nome, reply, opt] of CASI) {
       freshDb();
@@ -322,10 +321,20 @@ const sha = s => require('crypto').createHash('sha256').update(s).digest('hex').
       assert.ok(!('declared_yield_qty' in r.payload[0]) && !('declared_yield_unit' in r.payload[0]), nome + ': chiavi non inviate');
       assert.deepStrictEqual([r.nuove[0].declared_yield_qty ?? null, r.nuove[0].declared_yield_unit ?? null], [null, null], nome + ' DB');
     }
+    // P0-a: link senza testo letto -> nessuna ricetta dedotta dall'indirizzo: nessuna
+    // chiamata AI, nessuna anteprima, nessuna resa, nulla salvato.
+    freshDb();
+    const c = makeClient(clientFetch, ai({ declaredYield: DY(30, 'bignè', 'produce 30 bignè') })); await c.loadFromSupabase();
+    const prima = fake.tables.variants.length;
+    c.S.loadTab = 'link'; c.S.loadUrl = 'https://esempio.test/ricetta';
+    await c.extractRecipe();
+    assert.strictEqual(c.log.aiRequests.length, 0, 'link senza testo: nessuna chiamata AI');
+    assert.strictEqual(c.S.loadPreview, null, 'link senza testo: nessuna anteprima');
+    assert.strictEqual(fake.tables.variants.length, prima, 'link senza testo: nulla salvato');
   });
 
-  await test('R3. foto e video: resa proposta "da verificare"; testo e link verificati non lo sono', async () => {
-    for (const tab of ['foto', 'video']) {
+  await test('R3. foto: resa proposta "da verificare"; testo e link verificati non lo sono; video: nessuna chiamata AI (P0-a)', async () => {
+    for (const tab of ['foto']) {
       freshDb();
       const r = await importa(ai({ declaredYield: DY(30, 'bignè', 'Produce 30 bignè') }), { tab });
       assert.deepStrictEqual(r.view.main, ['30', 'bignè']);
@@ -335,6 +344,13 @@ const sha = s => require('crypto').createHash('sha256').update(s).digest('hex').
     freshDb();
     const t = await importa(ai({ declaredYield: DY(30, 'bignè', 'Produce 30 bignè') }), { text: 'Produce 30 bignè.' });
     assert.ok(!t.h.includes('da verificare'));
+    // P0-a: il video non e' acquisito ne' analizzato -> nessuna ricetta e nessuna resa dal solo link.
+    freshDb();
+    const v = makeClient(clientFetch, ai({ declaredYield: DY(30, 'bignè', 'Produce 30 bignè') })); await v.loadFromSupabase();
+    v.S.loadTab = 'video'; v.S.loadVideoUrl = 'https://video.test/reel';
+    await v.extractRecipe();
+    assert.strictEqual(v.log.aiRequests.length, 0, 'video: nessuna chiamata AI');
+    assert.strictEqual(v.S.loadPreview, null, 'video: nessuna anteprima');
   });
 
   await test('R4. intervalli: nessun numero scelto; pulsanti minimo/massimo, valore manuale o vuoto; nota con l\'intervallo originale', async () => {
