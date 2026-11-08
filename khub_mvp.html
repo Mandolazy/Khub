@@ -2406,8 +2406,20 @@ function firmaContenutoBozza(v){
 async function loadFromSupabase(){
   try{
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'load'})});
-    const data=await res.json();
-    if(!data.recipes||!Array.isArray(data.recipes))return;
+    const data=await res.json().catch(()=>null);
+    // Caricamento valido SOLO con HTTP 2xx e l'elenco delle Schede: altrimenti
+    // lo stato in memoria resta com'e' (nulla viene svuotato o sostituito) e
+    // l'utente lo sa.
+    if(!res.ok||!data||!Array.isArray(data.recipes)){
+      console.error('[Supabase] caricamento non riuscito:',res.status,(data&&(data.code||data.error))||'risposta non valida');
+      const motivoCaricamento=res.status===401?'sessione scaduta, accedi di nuovo'
+        :res.status===403?'richiesta non consentita'
+        :res.status===503?(data&&data.code==='db_config'?'database non configurato':'servizio non disponibile')
+        :!res.ok?'errore del server ('+res.status+')'
+        :'risposta non valida dal server';
+      toast('Caricamento delle Schede non riuscito: '+motivoCaricamento+'. I dati mostrati potrebbero non essere aggiornati.','ti-alert-circle');
+      return false;
+    }
     _knownIngredientIdsByVariant=buildKnownIngredientIds(data.ingredients);
     // PSL: mapping L2 (Ricetta-scoped) — riusato sia per le Bozze in LAB sia
     // per le Ricette validate/attive, perche' L2 segue la stessa variant.id
@@ -2563,7 +2575,8 @@ async function loadFromSupabase(){
         });
       }
     }catch(e){console.error('Load conversions error',e);}
-  }catch(e){console.error('Load error',e);}
+    return true;
+  }catch(e){console.error('Load error',e);toast('Caricamento delle Schede non riuscito: connessione assente o interrotta. I dati mostrati potrebbero non essere aggiornati.','ti-alert-circle');return false;}
 }
 
 function parseSteps(raw){
@@ -2712,19 +2725,27 @@ async function saveToSupabase(recipe){
     const saveRes=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
       supabaseAction:'save',data:{recipe:recipeData,variants:allVariants,ingredients:allIngredients,deletedIngredients,l2Items:allL2Items,l3Items:allL3Items}
     })});
-    const saveResult=await saveRes.json();
+    const saveResult=await saveRes.json().catch(()=>null);
     // Gli id inviati restano sempre noti (cosi' una rimozione futura li
     // cancella); le cancellazioni si danno per fatte solo a save confermato.
     const salvataggioConfermato=saveRes.ok&&saveResult&&saveResult.ok===true;
     updateKnownIngredientIds(_knownIngredientIdsByVariant,currentIngredientIds,salvataggioConfermato?deletedIngredients:[]);
-    if(salvataggioConfermato)Object.assign(_persistedValidatedSig,sentValidatedSig);
-    if(saveResult&&saveResult.ok===false){
-      console.error('[Supabase] errori di salvataggio:',saveResult.errors);
-      toast('Alcuni dati potrebbero non essere stati salvati. Controlla la connessione.','ti-alert-circle');
-      return false;
-    }
-    return true;
-  }catch(e){console.error('Save error',e);toast('Errore salvataggio: '+e.message,'ti-alert-circle');return false;}
+    if(salvataggioConfermato){Object.assign(_persistedValidatedSig,sentValidatedSig);return true;}
+    // Successo SOLO con HTTP 2xx e {ok:true}: errori HTTP (401, 403, 500,
+    // 503...), {ok:false} e risposte non valide sono fallimenti visibili.
+    // Lo stato locale non viene toccato: le modifiche restano nella pagina e
+    // il prossimo salvataggio le reinvia.
+    const codiceSalvataggio=saveResult&&saveResult.code;
+    console.error('[Supabase] salvataggio non riuscito:',saveRes.status,codiceSalvataggio||'',(saveResult&&(saveResult.errors||saveResult.error))||'risposta non valida');
+    const motivoSalvataggio=saveRes.status===401?'sessione scaduta, accedi di nuovo'
+      :saveRes.status===403?'richiesta non consentita'
+      :saveRes.status===503?(codiceSalvataggio==='db_config'?'database non configurato':'servizio non disponibile')
+      :!saveRes.ok?'errore del server ('+saveRes.status+')'
+      :saveResult&&saveResult.ok===false?'il database ha rifiutato i dati'
+      :'risposta non valida dal server';
+    toast('Salvataggio non riuscito: '+motivoSalvataggio+'. Le modifiche restano in questa pagina ma non sono salvate: non ricaricarla.','ti-alert-circle');
+    return false;
+  }catch(e){console.error('Save error',e);toast('Salvataggio non riuscito: connessione assente o interrotta. Le modifiche restano in questa pagina ma non sono salvate: non ricaricarla.','ti-alert-circle');return false;}
 }
 
 // Eliminazione sul server con esito verificato: l'interfaccia si aggiorna solo

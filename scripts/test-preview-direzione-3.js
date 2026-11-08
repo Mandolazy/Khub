@@ -203,8 +203,8 @@ const PROTETTE = {
   "function computeSessionScaling(input)": "ddfc1febb5010cdc",
   "async function createProductionSession(preparedInput)": "185ca85dcee49397",
   "function buildValidatedVariantPayload(recipeId,vv)": "4186aeae0c1330e6",
-  "async function saveToSupabase(recipe)": "e3c83f1bdb507136",
-  "async function loadFromSupabase()": "115ba063990470c0",
+  "async function saveToSupabase(recipe)": "55d82322a3c2285f",
+  "async function loadFromSupabase()": "0f20790b79f681e3",
   "function firmaContenutoBozza(v)": "9426d786f4588837",
   "function toggleActiveV2(recipeId,variantId,currentActive)": "ca8f22881e9ba641",
   "async function confirmActiveYieldEdit()": "92f6565ceacf884a",
@@ -363,9 +363,11 @@ function clientMain(fetchImpl, nomi) {
     const rimosse = Object.keys(a).filter(n => !(n in b));
     assert.deepStrictEqual(cambiate, ['bindEvents', 'confirmMerge', 'deleteRecipe', 'deleteVariant', 'eliminaBozza', 'exportPDF', 'render', 'renderBottomNav', 'renderLabRecipe', 'renderRicettaMadreV2', 'renderSidebar', 'rendiAttiva',
       // Finalizzazione D3: solo presentazione (ramo S.uiD3) e criterio "Ultima modifica" estratto in una funzione condivisa.
-      'renderConfronto', 'renderLabConversionModal', 'renderLabGlobale', 'renderMichelinAIGlobalePlaceholder', 'renderOnboarding', 'renderProdRecipe', 'renderProfiloPlaceholder', 'renderSearch'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato)');
+      'renderConfronto', 'renderLabConversionModal', 'renderLabGlobale', 'renderMichelinAIGlobalePlaceholder', 'renderOnboarding', 'renderProdRecipe', 'renderProfiloPlaceholder', 'renderSearch',
+      // Finalizzazione: errori di persistenza visibili (HTTP non 2xx, {ok:false}, risposte non valide); test E1-E9.
+      'loadFromSupabase', 'saveToSupabase'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
     assert.deepStrictEqual(rimosse, [], 'nessuna funzione rimossa');
-    for (const n of ['computeFormulationWeights', 'deriveYieldPerUnit', 'computeLabRounding', 'applyLabRound', 'undoLabRound', 'computeSessionScaling', 'createProductionSession', 'saveToSupabase', 'loadFromSupabase', 'buildValidatedVariantPayload', 'onValidate', 'confirmValidate', 'rendiAttivaPronta', 'riapriProntaInLab', 'onLabDeclaredYield', 'onIngQty', 'onStepText'])
+    for (const n of ['computeFormulationWeights', 'deriveYieldPerUnit', 'computeLabRounding', 'applyLabRound', 'undoLabRound', 'computeSessionScaling', 'createProductionSession', 'buildValidatedVariantPayload', 'onValidate', 'confirmValidate', 'rendiAttivaPronta', 'riapriProntaInLab', 'onLabDeclaredYield', 'onIngQty', 'onStepText'])
       assert.ok(n in b && a[n] === b[n], 'invariata: ' + n);
     // Il segnaposto "MichelinAI" e' solo una card di testo (presentazione), non il motore.
     const michelin = Object.keys(a).filter(n => /michelin|m1|m2|primoConsulto/i.test(n) && n !== 'renderMichelinAIGlobalePlaceholder');
@@ -698,6 +700,75 @@ function clientMain(fetchImpl, nomi) {
     // Titolo vuoto: ignorato come nella grafica classica (nessun nome cancellato).
     c2.eseguiInline(attributo(c2.renderLabRecipe(r2), 'textarea class="d3-titolo-input', 'onchange'), { value: '  \n ' });
     assert.strictEqual(rec(c2, id).labVersions[0].name, 'Crema di prova al limone', 'titolo vuoto ignorato');
+  });
+
+  // ── Errori di persistenza: mai un successo silenzioso, stato locale intatto ──
+  const risposta = (status, corpo) => () => ({ ok: status >= 200 && status < 300, status, json: async () => (corpo === undefined ? JSON.parse('non json') : clone(corpo)) });
+  const GUASTI = [
+    ['401', risposta(401, { error: 'Accesso non autorizzato' }), /sessione scaduta, accedi di nuovo/],
+    ['403', risposta(403, { error: 'Origine non consentita' }), /richiesta non consentita/],
+    ['500', risposta(500, { error: 'Proxy error', details: 'x' }), /errore del server \(500\)/],
+    ['503 db_config', risposta(503, { error: 'Database non configurato', code: 'db_config' }), /database non configurato/],
+    ['503 generico', risposta(503, {}), /servizio non disponibile/],
+    ['ok:false', risposta(200, { ok: false, errors: ['recipes: PGRST204'] }), /il database ha rifiutato i dati/],
+    ['200 senza ok', risposta(200, {}), /risposta non valida dal server/],
+    ['200 non JSON', risposta(200, undefined), /risposta non valida dal server/],
+    ['rete', () => { throw new TypeError('fetch failed'); }, /connessione assente o interrotta/],
+  ];
+  // Client con un fetch che si puo' guastare per una sola azione.
+  async function setupGuastabile() {
+    const g = { azione: null, fn: null };
+    const f = async (url, o) => { const b = JSON.parse(o.body); if (g.fn && b.supabaseAction === g.azione) return g.fn(b); return clientFetch(url, o); };
+    fake = withPatch((() => { const x = makeFakeSupabase(); seed(x); return x; })(), {}); globalThis.fetch = fake.fetch; saves = [];
+    const c = makeClientD3(f); await c.loadFromSupabase(); c.S.selectedId = 'rB'; c.g = g; return c;
+  }
+
+  await test('E1. salvataggio: 401, 403, 500, 503, ok:false, risposte non valide e rete -> false, messaggio comprensibile, stato locale e database intatti', async () => {
+    for (const [nome, guasto, motivo] of GUASTI) {
+      const c = await setupGuastabile(); const r = labOf(c);
+      const lab = r.labVersions[r.currentLabIdx]; lab.name = 'Bozza modificata ' + nome; lab.ingredients = lab.ingredients.slice(1); // rinomina + ingrediente tolto
+      const statoPrima = clone(c.S.recipes), dbPrima = clone(fake.tables);
+      c.g.azione = 'save'; c.g.fn = guasto;
+      assert.strictEqual(await c.saveToSupabase(r), false, nome + ': fallimento riconosciuto');
+      const msg = c.log.toasts.join(' | ');
+      assert.ok(/Salvataggio non riuscito: /.test(msg) && motivo.test(msg) && /restano in questa pagina ma non sono salvate/.test(msg), nome + ': ' + msg);
+      assert.deepStrictEqual(c.S.recipes, statoPrima, nome + ': stato locale non toccato');
+      assert.deepStrictEqual(fake.tables, dbPrima, nome + ': database invariato');
+      // Il prossimo salvataggio riuscito reinvia tutto, compresa l'eliminazione dell'ingrediente.
+      c.g.fn = null; c.log.toasts.length = 0;
+      assert.strictEqual(await c.saveToSupabase(r), true, nome + ': nuovo tentativo riuscito');
+      assert.deepStrictEqual(c.log.toasts, [], nome + ': nessun messaggio di errore al successo');
+      assert.strictEqual(fake.tables.variants.find(v => v.id === lab.id).name, 'Bozza modificata ' + nome, nome + ': nome salvato al nuovo tentativo');
+      // (per nome: gli id sintetici di 4 caratteri vengono rigenerati da saveToSupabase, come sempre)
+      assert.deepStrictEqual(fake.tables.ingredients.filter(i => i.variant_id === lab.id).map(i => i.name).sort(), lab.ingredients.map(i => i.name).sort(), nome + ': eliminazione applicata al nuovo tentativo');
+    }
+  });
+
+  await test('E2. salvataggio con il server reale senza chiave valida: 503 db_config mostrato, nulla perso', async () => {
+    const c = await setupGuastabile(); const r = labOf(c); r.labVersions[r.currentLabIdx].name = 'Non salvata';
+    const chiave = process.env.SUPABASE_SECRET_KEY; const statoPrima = clone(c.S.recipes), dbPrima = clone(fake.tables);
+    process.env.SUPABASE_SECRET_KEY = 'sb_publishable_non_valida_qui';
+    try { assert.strictEqual(await c.saveToSupabase(r), false); } finally { process.env.SUPABASE_SECRET_KEY = chiave; }
+    assert.ok(/database non configurato/.test(c.log.toasts.join(' ')), c.log.toasts.join(' | '));
+    assert.deepStrictEqual([c.S.recipes, fake.tables], [statoPrima, dbPrima]);
+  });
+
+  await test('E3. caricamento: 401, 403, 500, 503, risposte non valide e rete -> false, messaggio, Schede in memoria non svuotate ne\' sostituite', async () => {
+    for (const [nome, guasto, motivo] of GUASTI.filter(x => x[0] !== 'ok:false')) {
+      const c = await setupGuastabile(); labOf(c).labVersions[0].name = 'Modifica locale non salvata';
+      const statoPrima = clone(c.S.recipes); c.g.azione = 'load'; c.g.fn = guasto;
+      assert.strictEqual(await c.loadFromSupabase(), false, nome);
+      const msg = c.log.toasts.join(' | ');
+      assert.ok(/Caricamento delle Schede non riuscito: /.test(msg) && motivo.test(msg), nome + ': ' + msg);
+      assert.deepStrictEqual(c.S.recipes, statoPrima, nome + ': stato in memoria intatto');
+    }
+    // Primo caricamento fallito: nessuna Scheda inventata, messaggio visibile; poi caricamento riuscito.
+    const g = { fn: risposta(503, { code: 'db_config' }) };
+    const c = makeClientD3(async (u, o) => (g.fn ? g.fn() : clientFetch(u, o)));
+    assert.strictEqual(await c.loadFromSupabase(), false);
+    assert.deepStrictEqual(c.S.recipes, []); assert.ok(/database non configurato/.test(c.log.toasts.join(' ')));
+    g.fn = null; c.log.toasts.length = 0;
+    assert.strictEqual(await c.loadFromSupabase(), true); assert.ok(c.S.recipes.length > 0); assert.deepStrictEqual(c.log.toasts, []);
   });
 
   console.log('\n' + passed + ' passed, ' + failed + ' failed');

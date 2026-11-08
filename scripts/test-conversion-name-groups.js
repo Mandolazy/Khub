@@ -192,7 +192,7 @@ const PROTETTE = {
   "async function saveIngredientConversion(ingredientName,fromUnit,toUnit,factor,sourceType,sourceDetail)": "e3916db5353173da",
   "async function createProductionSession(preparedInput)": "185ca85dcee49397",
   "function buildSessionSnapshotV1(meta,computed)": "1fd7615c172e0ce2",
-  "async function saveToSupabase(recipe)": "e3c83f1bdb507136",
+  "async function saveToSupabase(recipe)": "55d82322a3c2285f",
 };
 
 // Funzioni reali: harness di I3 (caricamento, LAB, conversioni) + Produzione (Manda in Produzione, preflight, Sessione).

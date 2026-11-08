@@ -411,7 +411,9 @@ function makeClient(fetchImpl) {
       'function onVarIngUnit(recipeId,varId,ingId,val)': 'bd2537533a1563d7',
       // Conversioni per nomi equivalenti (approvato): loadFromSupabase usa selectConversionFacts e
       // confirmConversionPreflightStep salva il marcatore di gruppo; impronte aggiornate solo per queste due funzioni.
-      'async function loadFromSupabase()': '978ff5e7d1c09e7b', 'async function saveToSupabase(recipe)': '42a1765ea7f27644',
+      // Errori di persistenza visibili (Direzione 3, finalizzazione): load e save trattano come
+      // fallimento HTTP non 2xx, {ok:false} e risposte non valide; impronte aggiornate solo per queste due.
+      'async function loadFromSupabase()': '6c09c0dca1b39b51', 'async function saveToSupabase(recipe)': '092375a4ed25929a',
     };
     // LAB FIX 2B I4 aggiunge a load/save SOLO righe della resa dichiarata:
     // tolte quelle righe, le due funzioni sono identiche a main.

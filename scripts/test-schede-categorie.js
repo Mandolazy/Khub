@@ -405,7 +405,7 @@ const tick = () => new Promise(r => setTimeout(r, 30));
     const chat = fs.readFileSync(path.join(ROOT, 'api/chat.js'), 'utf8');
     assert.ok((chat.match(/categoria: ' \+ \(recipe\.category \|\| 'n\/d'\)/g) || []).length === 2, 'M1/M2 lato server: categoria mancante -> n/d (invariato)');
     const PROTETTE = {
-      'async function loadFromSupabase()': '115ba063990470c0', 'async function saveToSupabase(recipe)': 'e3c83f1bdb507136',
+      'async function loadFromSupabase()': '0f20790b79f681e3', 'async function saveToSupabase(recipe)': '55d82322a3c2285f',
       // Finalizzazione D3: solo il ramo S.uiD3 di "Elimina" (classico identico a main, test-preview-direzione-3 P10).
       'function renderProdRecipe(recipe)': '3c3eaeaff0e02ea8', 'function costruisciPayloadM2(recipeId, message, classification)': '9850def5ee757a1c',
       'async function runM1(recipeId)': 'c65f22895bf0d242', 'async function createProductionSession(preparedInput)': '185ca85dcee49397',

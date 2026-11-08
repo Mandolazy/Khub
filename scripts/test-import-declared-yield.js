@@ -190,9 +190,9 @@ const SAVE_HANDLER = extractSaveHandler();
 // Impronte prese da 58fca45 (FIX 2C + R1 in Production): queste funzioni non devono cambiare.
 const PROTETTE = {
   "function firmaContenutoBozza(v)": "9426d786f4588837",
-  "async function saveToSupabase(recipe)": "e3c83f1bdb507136",
+  "async function saveToSupabase(recipe)": "55d82322a3c2285f",
   // Conversioni per nomi equivalenti (approvato): caricamento con selectConversionFacts; impronta aggiornata solo qui.
-  "async function loadFromSupabase()": "115ba063990470c0",
+  "async function loadFromSupabase()": "0f20790b79f681e3",
   "function buildValidatedVariantPayload(recipeId,vv)": "4186aeae0c1330e6",
   "function declaredYieldFromRow(row)": "1a670be06f8aeba4",
   "function copyDeclaredYield(src)": "f990f25c54e140b4",

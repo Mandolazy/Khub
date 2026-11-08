@@ -403,8 +403,8 @@ const box = (h, cls) => { const m = h.match(new RegExp('class="' + cls + '"[^>]*
   await test('D9. codice: motore di Produzione, salvataggio, firme, MichelinAI e gestori esistenti invariati', async () => {
     const PROTETTE = {
       'function computeSessionScaling(input)': 'ddfc1febb5010cdc', 'async function createProductionSession(preparedInput)': '185ca85dcee49397',
-      'function buildValidatedVariantPayload(recipeId,vv)': '4186aeae0c1330e6', 'async function saveToSupabase(recipe)': 'e3c83f1bdb507136',
-      'async function loadFromSupabase()': '115ba063990470c0', 'function firmaContenutoBozza(v)': '9426d786f4588837',
+      'function buildValidatedVariantPayload(recipeId,vv)': '4186aeae0c1330e6', 'async function saveToSupabase(recipe)': '55d82322a3c2285f',
+      'async function loadFromSupabase()': '0f20790b79f681e3', 'function firmaContenutoBozza(v)': '9426d786f4588837',
       'function computeFormulationWeights(ingredients,resolveFact)': '765b3d8a8edde206', 'function costruisciPayloadM2(recipeId, message, classification)': '9850def5ee757a1c',
       'async function runM1(recipeId)': 'c65f22895bf0d242', 'function onIngQty(recipeId,ingId,val)': 'f70be59577371d4a',
       'function onLabDeclaredYield(recipeId,field,value)': '7bbbd369b9438f26', 'function toggleActiveV2(recipeId,variantId,currentActive)': 'ca8f22881e9ba641',
