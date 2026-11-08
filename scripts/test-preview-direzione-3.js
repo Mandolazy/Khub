@@ -345,7 +345,7 @@ function clientMain(fetchImpl, nomi) {
   const labOf = c => { const r = rec(c); r.currentLabIdx = r.labVersions.findIndex(v => v.id === 'lvB'); return r; };
   console.log('Anteprima Direzione 3 (solo presentazione)');
 
-  await test('P1. grafica attuale invariata: LAB e Scheda classici identici a main quando l\'anteprima e\' spenta', async () => {
+  await test('P1. grafica classica invariata: LAB e Scheda classici (?ui=classic) identici a main', async () => {
     assert.ok(baseHtml, 'storia git con ' + BASE + ' necessaria');
     const c = await setup(); const cm = clientMain(clientFetch, ['renderLabRecipe', 'renderRicettaMadreV2']);
     cm.S.recipes = clone(c.S.recipes); cm.S.selectedId = 'rB';
@@ -353,7 +353,10 @@ function clientMain(fetchImpl, nomi) {
     assert.strictEqual(c.renderLabRecipe(rec(c)), cm.renderLabRecipe(rec(cm)), 'LAB classico');
     for (const k of [c, cm]) k.S.view = 'ricetta-madre-v2';
     assert.strictEqual(c.renderRicettaMadreV2(rec(c)), cm.renderRicettaMadreV2(rec(cm)), 'Scheda classica');
-    assert.ok(!c.bodyClasses.has('ui-d3') && c.S.uiD3 !== true, 'anteprima spenta di default');
+    const k = await setup({ search: '?ui=classic' }); k.initUiD3();
+    assert.ok(k.S.uiD3 === false && !k.bodyClasses.has('ui-d3'), 'grafica classica con ?ui=classic');
+    k.S.mode = 'lab'; k.S.view = 'recipe'; labOf(k);
+    assert.strictEqual(k.renderLabRecipe(rec(k)), cm.renderLabRecipe(rec(cm)), 'LAB classico con ?ui=classic identico a main');
   });
 
   await test('P2. motore preservato: LAB, scaling, rese, conversioni, Sessioni, salvataggio e MichelinAI identici a main; cambiano solo le funzioni di presentazione', async () => {
@@ -442,14 +445,24 @@ function clientMain(fetchImpl, nomi) {
     assert.deepStrictEqual(saves, [], 'nessun salvataggio');
   });
 
-  await test('P8. attivazione dell\'anteprima: ?ui=d3 / ?ui=classic / interruttore; preferenza solo nel browser', async () => {
+  await test('P8. scelta della grafica: Direzione 3 predefinita; ?ui=classic / ?ui=d3 / interruttore; preferenza solo nel browser', async () => {
     let c = await setup({ search: '?ui=d3' }); c.initUiD3();
     assert.strictEqual(c.S.uiD3, true); assert.strictEqual(c.storage.khub_ui, 'd3');
     c = await setup({ search: '?ui=classic', storage: { khub_ui: 'd3' } }); c.initUiD3();
     assert.strictEqual(c.S.uiD3, false); assert.strictEqual(c.storage.khub_ui, 'classic');
     c = await setup({ storage: { khub_ui: 'd3' } }); c.initUiD3(); assert.strictEqual(c.S.uiD3, true, 'preferenza ricordata');
     c.setUiD3(false); assert.deepStrictEqual([c.S.uiD3, c.storage.khub_ui], [false, 'classic']);
-    c = await setup(); c.initUiD3(); assert.strictEqual(c.S.uiD3, false, 'senza preferenza: grafica attuale');
+    c = await setup(); c.initUiD3(); assert.strictEqual(c.S.uiD3, true, 'senza preferenza: Direzione 3 predefinita');
+    assert.strictEqual(c.storage.khub_ui, undefined, 'la predefinita non scrive preferenze');
+    c = await setup({ search: '?ui=classic' }); c.initUiD3(); assert.deepStrictEqual([c.S.uiD3, c.storage.khub_ui], [false, 'classic'], '?ui=classic');
+    c = await setup({ storage: { khub_ui: 'classic' } }); c.initUiD3(); assert.strictEqual(c.S.uiD3, false, 'classica ricordata senza parametro');
+    c = await setup({ search: '?ui=d3', storage: { khub_ui: 'classic' } }); c.initUiD3(); assert.deepStrictEqual([c.S.uiD3, c.storage.khub_ui], [true, 'd3'], 'ritorno con ?ui=d3');
+    c = await setup({ search: '?ui=altro', storage: { khub_ui: 'classic' } }); c.initUiD3(); assert.deepStrictEqual([c.S.uiD3, c.storage.khub_ui], [false, 'classic'], 'valore sconosciuto ignorato');
+    c = await setup({ search: '?ui=altro' }); c.initUiD3(); assert.strictEqual(c.S.uiD3, true, 'valore sconosciuto: predefinita');
+    c.setUiD3(true); assert.strictEqual(c.storage.khub_ui, 'd3', 'interruttore verso la Direzione 3');
+    // Interruttore e nota del LAB: testi coerenti con la Direzione 3 predefinita.
+    c.S.uiD3 = true; assert.ok(/passa alla grafica classica/.test(c.renderSidebar()));
+    c.S.uiD3 = false; assert.ok(/Passa alla Direzione 3/.test(c.renderSidebar()) && !/anteprima/i.test(text(c.renderSidebar())));
     assert.ok(!/khub_ui/.test(fs.readFileSync(path.join(ROOT, 'api/chat.js'), 'utf8')), 'nessun dato sul server');
   });
 
@@ -700,6 +713,26 @@ function clientMain(fetchImpl, nomi) {
     // Titolo vuoto: ignorato come nella grafica classica (nessun nome cancellato).
     c2.eseguiInline(attributo(c2.renderLabRecipe(r2), 'textarea class="d3-titolo-input', 'onchange'), { value: '  \n ' });
     assert.strictEqual(rec(c2, id).labVersions[0].name, 'Crema di prova al limone', 'titolo vuoto ignorato');
+  });
+
+  await test('P24. stesso comportamento funzionale nelle due grafiche: predefinita (Direzione 3) e ?ui=classic -> nome della bozza, salvataggio automatico, ricaricamento, stesso pulsante Valida', async () => {
+    for (const [modo, search, sel] of [['Direzione 3 (predefinita)', '', 'textarea class="d3-titolo-input'], ['classica', '?ui=classic', 'input\\s+class="recipe-name"']]) {
+      const c = await setup({ search, autosaveReale: true }); c.initUiD3();
+      assert.strictEqual(c.S.uiD3, !search, modo + ': grafica attesa');
+      c.S.mode = 'lab'; c.S.view = 'recipe'; const r = labOf(c), lab = r.labVersions[r.currentLabIdx];
+      const h = c.renderLabRecipe(r);
+      assert.strictEqual(/d3-titolo-input/.test(h), !search, modo + ': markup della grafica');
+      assert.ok(/id="btn-show-validate"/.test(h), modo + ': stesso pulsante Valida');
+      const codice = attributo(h.replace(/\n\s*/g, ' '), sel, 'onchange');
+      assert.ok(codice.startsWith("onLabDraftNameChange('rB',"), modo + ': stesso gestore del nome');
+      c.eseguiInline(codice, { value: 'Nome ' + modo });
+      assert.strictEqual(rec(c).labVersions[r.currentLabIdx].name, 'Nome ' + modo, modo + ': stato');
+      await new Promise(x => setTimeout(x, 1800));
+      assert.strictEqual(fake.tables.variants.find(v => v.id === lab.id).name, 'Nome ' + modo, modo + ': salvato automaticamente');
+      const c2 = makeClientD3(clientFetch, { search }); c2.initUiD3(); await c2.loadFromSupabase();
+      assert.strictEqual(c2.S.uiD3, !search, modo + ': grafica dopo il ricaricamento');
+      assert.strictEqual(rec(c2).labVersions.find(v => v.id === lab.id).name, 'Nome ' + modo, modo + ': nome dopo il ricaricamento');
+    }
   });
 
   // ── Errori di persistenza: mai un successo silenzioso, stato locale intatto ──

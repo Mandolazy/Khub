@@ -8515,7 +8515,7 @@ function renderSidebar(){
   ${d3OrdineNav([`<button class="load-btn ${isProduzione?'active':''}" id="sb-produzione"><i class="ti ti-tools-kitchen-2"></i> Produzione</button>`,
   `<button class="load-btn ${isRicette?'active':''}" id="sb-ricette"><i class="ti ti-book-2"></i> Schede</button>`,
   `<button class="load-btn ${isLab?'active':''}" id="sb-lab"><i class="ti ti-flask"></i> LAB</button>`]).join('\n  ')}
-  <button class="d3-sb-toggle" onclick="setUiD3(${S.uiD3?'false':'true'})" title="Anteprima della nuova grafica: solo visualizzazione, stessi dati">${S.uiD3?'Anteprima Direzione 3 · torna alla grafica attuale':'Prova la Direzione 3 (anteprima)'}</button>`;
+  <button class="d3-sb-toggle" onclick="setUiD3(${S.uiD3?'false':'true'})" title="Cambia grafica: stessi dati e stesse funzioni">${S.uiD3?'Direzione 3 · passa alla grafica classica':'Passa alla Direzione 3'}</button>`;
 }
 
 function renderConfronto(recipe){
@@ -10925,16 +10925,17 @@ function handleLoadImage(file){
 
 // ══════════════════════════════════════════════════════════
 // ANTEPRIMA DIREZIONE 3 — Cucina editoriale (solo presentazione)
-// Attivabile con ?ui=d3 (o dall'interruttore nella barra laterale) e
-// disattivabile con ?ui=classic. Riusa dati, funzioni e gestori esistenti:
-// nessun nuovo calcolo, nessun nuovo salvataggio, nessuna nuova azione
-// server. Spenta, l'app e' identica alla grafica attuale.
+// Grafica PREDEFINITA. La grafica classica resta disponibile con
+// ?ui=classic (o dall'interruttore nella barra laterale), ricordata nel
+// browser finche' non si torna con ?ui=d3. Riusa dati, funzioni e gestori
+// esistenti: nessun nuovo calcolo, nessun nuovo salvataggio, nessuna nuova
+// azione server. Con la grafica classica l'app e' identica a prima.
 // ══════════════════════════════════════════════════════════
 var D3_UI_KEY='khub_ui';
 function initUiD3(){
   var v=null;
   try{var q=new URLSearchParams(location.search).get('ui');if(q==='d3'||q==='classic'){localStorage.setItem(D3_UI_KEY,q);}v=localStorage.getItem(D3_UI_KEY);}catch(e){}
-  S.uiD3=v==='d3';
+  S.uiD3=v!=='classic'; // Direzione 3 predefinita: classica solo se scelta
   if(!initUiD3.ascolto){
     initUiD3.ascolto=true;
     // Schede del LAB: l'indicatore di scorrimento segue la posizione.
@@ -11253,7 +11254,7 @@ function renderHomeD3(){
         <div class="d3-arch-testata d3-solo-desktop"><span>Scheda</span><span>Categoria</span><span>Famiglia</span><span>Ricette</span><span></span></div>
         ${gruppi.map(function(g){return`<div class="d3-arch-gruppo" id="d3-${g.id}">${d3Esc(g.titolo)}${g.conteggio!=null?`<span>${g.conteggio} sched${g.conteggio===1?'a':'e'}</span>`:''}</div>${g.righe.map(riga).join('')}`;}).join('')}
       </div>${vista==='alfabetica'?`<div class="d3-solo-mobile">${indice}</div>`:''}</div>`}
-    <div class="d3-anteprima-nota">Anteprima Direzione 3 · <button class="d3-btn-text" onclick="setUiD3(false)">Torna alla grafica attuale</button></div>
+    <div class="d3-anteprima-nota">Direzione 3 · <button class="d3-btn-text" onclick="setUiD3(false)">Passa alla grafica classica</button></div>
     <div class="d3-mbar d3-solo-mobile">
       <label class="d3-search"><span aria-hidden="true">⌕</span><input id="d3-schede-search-m" type="search" autocomplete="off" placeholder="Cerca una Scheda" value="${d3Esc(S.d3SchedeQuery||'')}" oninput="d3SetQuery(this.value)"></label>
       <button class="d3-btn d3-btn-line${filtri?' attivo':''}" onclick="S.d3VistaSheet=true;render()">Vista${filtri?' · '+filtri:''} ▾</button>
