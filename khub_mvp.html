@@ -1258,6 +1258,28 @@ body.ui-d3 .mode-switcher{background:var(--d3-card);border-color:var(--d3-bordo)
 body.ui-d3 .mode-btn{font-family:inherit;font-size:13px;font-weight:600;color:var(--d3-ink2);min-height:32px;}
 body.ui-d3 .mode-btn.lab-active{background:var(--d3-amb-lab);color:#fff;}
 body.ui-d3 .mode-btn.prod-active{background:var(--d3-amb-produzione);color:#fff;}
+/* Uniformita' cromatica degli ambienti (solo Direzione 3). Stessi colori gia'
+   assegnati: LAB #24533F, Schede #94661C, Produzione #B4501C, a colore pieno,
+   senza sfumature. Bianco sui tre colori: 8.8:1, 5.0:1, 5.1:1 (AA).
+   Superfici di lettura e compilazione neutre; colori di stato (Attiva, In LAB),
+   avvisi, errori e azioni distruttive invariati. */
+/* Home: le tre schede degli ambienti a colore pieno */
+body.ui-d3 .d3-home-card[class*="d3-amb-"]{background:var(--amb);border-color:var(--amb);color:#fff;box-shadow:none;}
+body.ui-d3 .d3-home-card[class*="d3-amb-"]:hover{background:var(--amb);border-color:var(--amb);filter:brightness(.9);}
+body.ui-d3 .d3-home-card[class*="d3-amb-"]:focus-visible{outline:3px solid var(--d3-ink);outline-offset:3px;}
+body.ui-d3 .d3-home-card[class*="d3-amb-"] :is(.d3-home-card-titolo,.d3-home-card-descr,.d3-home-card-conteggio,.d3-home-card-freccia){color:#fff;}
+body.ui-d3 .d3-home-card[class*="d3-amb-"] .d3-home-card-icona{background:#fff;color:var(--amb);}
+/* Navigazione: la voce dell'ambiente aperto e' nel suo colore pieno */
+body.ui-d3 #sb-lab.active,body.ui-d3 #bnav-lab:is(.active,.active-lab){background:var(--d3-amb-lab);color:#fff;box-shadow:none;}
+body.ui-d3 #sb-ricette.active,body.ui-d3 #bnav-ricette:is(.active,.active-lab){background:var(--d3-amb-schede);color:#fff;box-shadow:none;}
+body.ui-d3 #sb-produzione.active,body.ui-d3 #bnav-produzione:is(.active,.active-lab){background:var(--d3-amb-produzione);color:#fff;box-shadow:none;}
+body.ui-d3 :is(#sb-lab,#sb-ricette,#sb-produzione,#bnav-lab,#bnav-ricette,#bnav-produzione):is(.active,.active-lab) i{color:#fff;}
+/* Dentro l'ambiente: filetto sotto l'intestazione, titolo di pagina e
+   indicatori delle schede nel colore dell'ambiente */
+body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) .topbar{box-shadow:inset 0 -4px 0 var(--d3-primario);}
+body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) :is(.d3-h1,.prod-title,.labg-title){color:var(--d3-primario);}
+body.ui-d3 .d3-tab.attivo{border-bottom-color:var(--d3-primario);}
+body.ui-d3 .d3-bozza.attiva{box-shadow:inset 0 3px 0 var(--d3-primario);}
 /* Confronta Ricette */
 .d3-confronto-testa{display:flex;flex-direction:column;gap:6px;margin-bottom:18px;}
 .d3-confronto-sub{font-size:14px;color:var(--d3-ink2);}
