@@ -761,6 +761,35 @@ function clientMain(fetchImpl, nomi) {
     c.S.uiD3 = false; assert.ok(!/d3-amb-/.test(c.renderAppHome()), 'Home classica senza classi della Direzione 3');
   });
 
+  await test('P26. fascia dell\'ambiente nell\'intestazione (Direzione 3): colore pieno, icona SVG gia\' presente e nome; nessuna altezza in piu\'; Home e grafica classica neutre; icona sempre visibile su mobile', async () => {
+    // Elemento: creato una sola volta accanto al logo, con le tre voci e le icone di D3_ICONE_AMBIENTE.
+    const icone = new Function(html.match(/var D3_ICONE_AMBIENTE=\(function\(\)\{[\s\S]*?\n\}\)\(\);/)[0] + '\nreturn D3_ICONE_AMBIENTE;')();
+    const creati = []; let inserito = null;
+    const doc = { getElementById: id => (id === 'khub-logo' ? { insertAdjacentElement: (pos, el) => { inserito = [pos, el]; } } : (id === 'd3-amb-testa' ? inserito && inserito[1] : null)),
+      createElement: tag => { const el = { tag }; creati.push(el); return el; } };
+    const inserisci = new Function('document', 'D3_ICONE_AMBIENTE', extractFunction('function d3InserisciTestaAmbiente()') + '\nreturn d3InserisciTestaAmbiente;')(doc, icone);
+    inserisci(); inserisci();
+    assert.strictEqual(creati.length, 1, 'inserita una sola volta');
+    const [pos, el] = inserito;
+    assert.deepStrictEqual([pos, el.id, el.className], ['afterend', 'd3-amb-testa', 'd3-amb-testa'], 'accanto al logo, nell\'intestazione esistente');
+    for (const [amb, ic, nome] of [['lab', 'ti-flask', 'LAB'], ['schede', 'ti-book-2', 'Schede'], ['produzione', 'ti-tools-kitchen-2', 'Produzione']])
+      assert.ok(el.innerHTML.includes('data-amb="' + amb + '"><span class="d3-amb-testa-icona" aria-hidden="true">' + icone[ic] + '</span><span class="d3-amb-testa-nome">' + nome + '</span>'), 'voce ' + amb + ' con l\'icona SVG gia\' presente');
+    assert.ok(/initUiD3\.ascolto=true;\s*d3InserisciTestaAmbiente\(\);/.test(html), 'inserita all\'avvio, una volta');
+    // CSS: nascosta di base (anche nella grafica classica); a colore pieno solo dentro un ambiente della Direzione 3.
+    assert.ok(/\n\.d3-amb-testa\{display:none;\}/.test(html), 'nascosta di base');
+    const blocco = html.slice(html.indexOf("/* Fascia dell'ambiente"), html.indexOf("/* Dentro l'ambiente: titolo di pagina"));
+    const AMB = 'body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"])';
+    assert.ok(blocco.includes(AMB + ' .topbar{background:var(--d3-primario);border-bottom-color:var(--d3-primario);}'), 'intestazione a colore pieno dell\'ambiente');
+    assert.ok(blocco.includes(AMB + ' .d3-amb-testa{display:flex;'), 'fascia visibile solo dentro un ambiente (Home: data-d3-amb="nessuna", neutra)');
+    assert.ok(!/height|padding:|position|z-index/.test(blocco.replace(/\/\*[\s\S]*?\*\//g, '').replace(/min-height:30px|padding-left:16px|line-height:1;|width:24px;height:24px;/g, '')), 'nessuna altezza, spaziatura o livello nuovi per l\'intestazione');
+    assert.ok(!/save-indicator/.test(blocco), 'indicatore "Salvato" invariato (pillola chiara)');
+    assert.ok(blocco.includes(AMB + ' .mode-switcher{background:#fff;border-color:#fff;}'), 'selettore LAB/Produzione su fondo chiaro');
+    const mobile = html.slice(html.lastIndexOf('@media(max-width:768px){'), html.indexOf('</style>', html.lastIndexOf('@media(max-width:768px){')));
+    assert.ok(/:has\(#mode-switcher\[style\*="flex"\]\) \.d3-amb-testa-nome\{display:none;\}/.test(mobile) && !/d3-amb-testa-icona\{display:none/.test(html), 'su mobile al massimo si nasconde il nome, mai l\'icona');
+    assert.ok(!/gradient|rgba|opacity/.test(blocco), 'colore pieno, nessuna sfumatura');
+    // Le regole di P25 restano valide (stesso blocco, nuovi selettori limitati a body.ui-d3).
+  });
+
   // ── Errori di persistenza: mai un successo silenzioso, stato locale intatto ──
   const risposta = (status, corpo) => () => ({ ok: status >= 200 && status < 300, status, json: async () => (corpo === undefined ? JSON.parse('non json') : clone(corpo)) });
   const GUASTI = [

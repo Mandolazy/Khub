@@ -1146,6 +1146,7 @@ body.ui-d3{--d3-amb-lab:#24533F;--d3-amb-lab-tinta:#E3EDE7;--d3-amb-schede:#9466
 .d3-amb-lab{--amb:var(--d3-amb-lab);--amb-tinta:var(--d3-amb-lab-tinta);}
 .d3-amb-schede{--amb:var(--d3-amb-schede);--amb-tinta:var(--d3-amb-schede-tinta);}
 .d3-amb-produzione{--amb:var(--d3-amb-produzione);--amb-tinta:var(--d3-amb-produzione-tinta);}
+.d3-amb-testa{display:none;} /* fascia dell'ambiente: visibile solo nella Direzione 3, dentro un ambiente */
 .d3-home-card[class*="d3-amb-"]{grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"i t f" "i d f" "i c f";box-shadow:inset 4px 0 0 var(--amb);}
 .d3-home-card-icona{grid-area:i;align-self:start;width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:var(--amb-tinta);color:var(--amb);margin-right:2px;}
 .d3-home-card[class*="d3-amb-"] .d3-home-card-conteggio,.d3-home-card[class*="d3-amb-"] .d3-home-card-freccia{color:var(--amb);}
@@ -1274,9 +1275,21 @@ body.ui-d3 #sb-lab.active,body.ui-d3 #bnav-lab:is(.active,.active-lab){backgroun
 body.ui-d3 #sb-ricette.active,body.ui-d3 #bnav-ricette:is(.active,.active-lab){background:var(--d3-amb-schede);color:#fff;box-shadow:none;}
 body.ui-d3 #sb-produzione.active,body.ui-d3 #bnav-produzione:is(.active,.active-lab){background:var(--d3-amb-produzione);color:#fff;box-shadow:none;}
 body.ui-d3 :is(#sb-lab,#sb-ricette,#sb-produzione,#bnav-lab,#bnav-ricette,#bnav-produzione):is(.active,.active-lab) i{color:#fff;}
-/* Dentro l'ambiente: filetto sotto l'intestazione, titolo di pagina e
-   indicatori delle schede nel colore dell'ambiente */
-body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) .topbar{box-shadow:inset 0 -4px 0 var(--d3-primario);}
+/* Fascia dell'ambiente: l'intestazione esistente diventa a colore pieno,
+   con icona e nome dell'ambiente accanto al logo (nessuna altezza in piu').
+   La Home (nessun ambiente) resta neutra. L'indicatore "Salvato" e il
+   selettore LAB/Produzione restano su fondo chiaro. */
+body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) .topbar{background:var(--d3-primario);border-bottom-color:var(--d3-primario);}
+body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) .topbar :is(.logo,.logo-tag,#btn-search-toggle){color:#fff !important;}
+body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) .topbar #btn-search-toggle:focus-visible{outline:2px solid #fff;outline-offset:2px;}
+body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) .d3-amb-testa{display:flex;align-items:center;gap:10px;margin-left:6px;padding-left:16px;border-left:1.5px solid #fff;min-height:30px;color:#fff;font-family:'Instrument Sans','DM Sans',sans-serif;font-size:17px;font-weight:600;line-height:1;white-space:nowrap;}
+body.ui-d3 .d3-amb-testa-voce{display:none;}
+body.ui-d3[data-d3-amb="lab"] .d3-amb-testa-voce[data-amb="lab"],body.ui-d3[data-d3-amb="schede"] .d3-amb-testa-voce[data-amb="schede"],body.ui-d3[data-d3-amb="produzione"] .d3-amb-testa-voce[data-amb="produzione"]{display:contents;}
+body.ui-d3 .d3-amb-testa-icona{display:flex;}
+body.ui-d3 .d3-amb-testa-icona svg{width:24px;height:24px;}
+body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) .mode-switcher{background:#fff;border-color:#fff;}
+/* Dentro l'ambiente: titolo di pagina e indicatori delle schede nel colore
+   dell'ambiente */
 body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) :is(.d3-h1,.prod-title,.labg-title){color:var(--d3-primario);}
 body.ui-d3 .d3-tab.attivo{border-bottom-color:var(--d3-primario);}
 body.ui-d3 .d3-bozza.attiva{box-shadow:inset 0 3px 0 var(--d3-primario);}
@@ -1342,6 +1355,9 @@ body.ui-d3 .d3-segnaposto>div:last-of-type{font-size:14px !important;color:var(-
   body.ui-d3 .prod-header .recipe-name{font-size:26px;}
   body.ui-d3 :is(.toast,.toast-action){bottom:calc(68px + env(safe-area-inset-bottom));}
   body.ui-d3:has(.d3-actionbar) :is(.toast,.toast-action){bottom:136px;}
+  body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) .topbar .logo-tag{display:none;}
+  body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) .d3-amb-testa{margin-left:2px;padding-left:12px;font-size:15px;}
+  body.ui-d3 .topbar:has(#mode-switcher[style*="flex"]) .d3-amb-testa-nome{display:none;}
 }
 
 </style>
@@ -10954,12 +10970,24 @@ function handleLoadImage(file){
 // azione server. Con la grafica classica l'app e' identica a prima.
 // ══════════════════════════════════════════════════════════
 var D3_UI_KEY='khub_ui';
+// Fascia dell'ambiente nell'intestazione (statica, inserita una volta): icona
+// e nome dei tre ambienti; il CSS mostra quella dell'ambiente aperto
+// (body[data-d3-amb]) e solo con la Direzione 3. Icone SVG gia' presenti.
+function d3InserisciTestaAmbiente(){
+  var logo=document.getElementById('khub-logo');
+  if(!logo||document.getElementById('d3-amb-testa'))return;
+  var d=document.createElement('div');d.id='d3-amb-testa';d.className='d3-amb-testa';
+  d.innerHTML=[['lab','ti-flask','LAB'],['schede','ti-book-2','Schede'],['produzione','ti-tools-kitchen-2','Produzione']].map(function(a){
+    return'<span class="d3-amb-testa-voce" data-amb="'+a[0]+'"><span class="d3-amb-testa-icona" aria-hidden="true">'+D3_ICONE_AMBIENTE[a[1]]+'</span><span class="d3-amb-testa-nome">'+a[2]+'</span></span>';}).join('');
+  logo.insertAdjacentElement('afterend',d);
+}
 function initUiD3(){
   var v=null;
   try{var q=new URLSearchParams(location.search).get('ui');if(q==='d3'||q==='classic'){localStorage.setItem(D3_UI_KEY,q);}v=localStorage.getItem(D3_UI_KEY);}catch(e){}
   S.uiD3=v!=='classic'; // Direzione 3 predefinita: classica solo se scelta
   if(!initUiD3.ascolto){
     initUiD3.ascolto=true;
+    d3InserisciTestaAmbiente();
     // Schede del LAB: l'indicatore di scorrimento segue la posizione.
     document.addEventListener('scroll',function(e){var t=e.target;if(t&&t.classList&&(t.classList.contains('d3-secnav')||t.classList.contains('d3-bozze')))d3AggiornaScorrimento();},true);
     window.addEventListener('resize',function(){if(S.uiD3)d3AggiornaScorrimento();});
