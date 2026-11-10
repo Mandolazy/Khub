@@ -1498,6 +1498,7 @@ const S = {
   // resolveKnownProductionConversionFact) — nessuna voce 'n' viene scritta
   // qui, per non mantenere due copie della stessa conoscenza.
   productionConversionFacts: {},
+  produzioneIntervalli: {}, // P0-c: {variantId: {ingredientId: valore scelto}} per la prossima Produzione (solo in memoria)
   pendingConversionPreflight: null, // {recipeId,variantId,portions,gpp,missing,value,error,loading,finalError}
   // Sprint Produzione — Micro-Step 10: PRODUZIONE GUIDATA. Source of truth
   // = production_sessions (+ relativo snapshot), caricata separatamente da
@@ -1563,6 +1564,52 @@ const S = {
 };
 
 const UNITS = ['g','ml','kg','l','n','tbsp','tsp','cl'];
+// ══════════════════════════════════════════════════════════
+// P0-c — Tipo di quantita' degli ingredienti
+// ingredients.qty_kind (migrazione 0012): 'certa' | 'variabile' (q.b.) |
+// 'mancante' | 'intervallo' (qty_min/qty_max). Assente (null) = ingrediente
+// precedente a P0-c: comportamento identico a prima. Per variabile, mancante e
+// intervallo qty e' solo un segnaposto (0 nel database) e non e' MAI un peso.
+// L'unita' della fonte non canonica (es. "spicchio") resta tale: la
+// conversione in grammi passa dal sistema ingredient_conversions esistente.
+// ══════════════════════════════════════════════════════════
+var QTY_KINDS=['certa','variabile','mancante','intervallo'];
+function qtyKindDi(ing){var k=ing&&ing.qtyKind;return QTY_KINDS.indexOf(k)!==-1?k:null;}
+function quantitaNonNumerica(ing){var k=qtyKindDi(ing);return k==='variabile'||k==='mancante'||k==='intervallo';}
+// Testo della quantita' per lo chef, quando non e' un numero (altrimenti null).
+function etichettaQuantita(ing){
+  var k=qtyKindDi(ing);
+  if(k==='variabile')return'q.b.';
+  if(k==='mancante')return'da indicare';
+  if(k==='intervallo')return formatQtyDisplay(ing.qtyMin)+'–'+formatQtyDisplay(ing.qtyMax);
+  return null;
+}
+// Quantita' e unita' come testo (Scheda, PDF, Produzione).
+function testoQuantitaIngrediente(ing){
+  var e=etichettaQuantita(ing);
+  if(e==null)return String(ing&&ing.qty!=null?ing.qty:'')+' '+String((ing&&ing.unit)||'');
+  return qtyKindDi(ing)==='intervallo'?e+' '+String(ing.unit||''):e;
+}
+// Testo digitato dallo chef nel campo quantita' (LAB e anteprima).
+function interpretaTestoQuantita(testo){
+  var t=String(testo==null?'':testo).trim();
+  if(!t)return{kind:'vuoto'};
+  if(/^(q\.?\s?b\.?|qb|quanto basta|a piacere)$/i.test(t))return{kind:'variabile'};
+  var r=t.match(/^(\d+(?:[.,]\d+)?)\s*[-–]\s*(\d+(?:[.,]\d+)?)$/);
+  if(r){var a=parseLocaleNumber(r[1]),b=parseLocaleNumber(r[2]);return isFinite(a)&&isFinite(b)&&a>0&&b>a?{kind:'intervallo',min:a,max:b}:{kind:'non_valido'};}
+  var n=parseLocaleNumber(t);
+  return isFinite(n)&&n>=0?{kind:'numero',qty:n}:{kind:'non_valido'};
+}
+// Unita' della fonte non canonica -> forma singolare stabile (stessa chiave
+// delle conversioni per lo stesso ingrediente). Mai trasformata in "g".
+var UNITA_FONTE_SINGOLARE={spicchi:'spicchio',pizzichi:'pizzico',bustine:'bustina',foglie:'foglia',fogli:'foglio',rametti:'rametto',mazzetti:'mazzetto',
+  ciuffi:'ciuffo',fette:'fetta',scatole:'scatola',barattoli:'barattolo',confezioni:'confezione',vasetti:'vasetto',bicchieri:'bicchiere',tazze:'tazza',
+  tazzine:'tazzina',cups:'cup',lbs:'lb',noci:'noce',manciate:'manciata',gocce:'goccia',stecche:'stecca',baccelli:'baccello',decilitri:'dl',decilitro:'dl',
+  cubetti:'cubetto',panetti:'panetto',gambi:'gambo',cespi:'cespo',teste:'testa',rotoli:'rotolo',lattine:'lattina',mestoli:'mestolo',pezzetti:'pezzetto'};
+function unitaFonteCanonica(u){
+  var w=String(u==null?'':u).trim().toLowerCase().replace(/\.$/,'');
+  return w?(UNITA_FONTE_SINGOLARE[w]||w).slice(0,40):'';
+}
 
 // Conversioni a grammi/ml (unità base)
 const UNIT_TO_BASE = {g:1,ml:1,kg:1000,l:1000,cl:10,tbsp:15,tsp:5,n:1};
@@ -1649,7 +1696,7 @@ function contaVariabiliCambiate(ingredientiPrima,ingredientiDopo){
     if(!prima[k])return; // nuovo ingrediente, gestito sotto
     const a=prima[k],b=dopo[k];
     const campi=[];
-    if(cnum(a.qty)!==cnum(b.qty))campi.push('quantità');
+    if(cnum(a.qty)!==cnum(b.qty)||(a.qtyKind||'')!==(b.qtyKind||'')||(a.qtyMin??null)!==(b.qtyMin??null)||(a.qtyMax??null)!==(b.qtyMax??null))campi.push('quantità'); // P0-c: anche q.b./da indicare/intervallo
     if((a.unit||'')!==(b.unit||''))campi.push('unità');
     const yA=a.estimatedYieldPct==null?null:a.estimatedYieldPct;
     const yB=b.estimatedYieldPct==null?null:b.estimatedYieldPct;
@@ -2263,7 +2310,7 @@ function buildValidatedVariantPayload(recipeId,vv){
   const ingredients=(vv.ingredients||[]).map((ing,idx)=>({
     id:ing.id,
     variant_id:vv.id,
-    name:ing.name,qty:parseFloat(ing.qty)||0,unit:ing.unit||'g',
+    name:ing.name,qty:(ing.qtyKind==='variabile'||ing.qtyKind==='mancante'||ing.qtyKind==='intervallo')?0:(parseFloat(ing.qty)||0),unit:ing.unit||'g',...((ing.qtyKind==='certa'||ing.qtyKind==='variabile'||ing.qtyKind==='mancante'||ing.qtyKind==='intervallo')?{qty_kind:ing.qtyKind==='certa'&&!(parseFloat(ing.qty)>0)?'mancante':ing.qtyKind,qty_min:ing.qtyKind==='intervallo'?Number(ing.qtyMin):null,qty_max:ing.qtyKind==='intervallo'?Number(ing.qtyMax):null,source_text:ing.sourceText?String(ing.sourceText).slice(0,300):null}:{}), // P0-c
     is_sub_recipe:ing.isSubRecipe||false,sub_recipe_id:ing.subRecipeId||null, // mattoncino preservato
     sort_order:idx,
     estimated_yield_pct:ing.estimatedYieldPct!==undefined&&ing.estimatedYieldPct!==null?ing.estimatedYieldPct:null,
@@ -2374,12 +2421,13 @@ function firmaContenutoBozza(v){
   const ingredienti=(v.ingredients||[]).map(i=>[
     i.name||'',
     i.qty!=null?String(i.qty):'',
-    i.unit||'',
+    i.qtyKind?(i.unit||'g'):(i.unit||''), // P0-c: come salvata (unit NOT NULL DEFAULT 'g'); righe precedenti invariate
     i.isSubRecipe?'1':'0',
     i.subRecipeId||'',
     i.estimatedYieldPct!=null?String(i.estimatedYieldPct):'',
     i.measuredYieldPct!=null?String(i.measuredYieldPct):''
-  ].join(SEP_CAMPO)).join(SEP_ING); // ordine preservato, nessun sort: l'ordine è contenuto
+  ].concat(i.qtyKind?[i.qtyKind,String(i.qtyMin??''),String(i.qtyMax??''),i.sourceText||'']:[]) // P0-c: solo se presente, firma precedente invariata
+   .join(SEP_CAMPO)).join(SEP_ING); // ordine preservato, nessun sort: l'ordine è contenuto
   const blocchi=[
     v.name||'',
     String(v.portionsCount??''),
@@ -2405,6 +2453,10 @@ function firmaContenutoBozza(v){
 }
 
 async function loadFromSupabase(){
+  // P0-c: tipo di quantita' e dati originali, presenti nell'ingrediente solo se
+  // salvati (le righe precedenti restano identiche a prima).
+  const quantitaDaRiga=i=>(i.qty_kind==='certa'||i.qty_kind==='variabile'||i.qty_kind==='mancante'||i.qty_kind==='intervallo')
+    ?{qtyKind:i.qty_kind,qtyMin:i.qty_min!=null?parseFloat(i.qty_min):null,qtyMax:i.qty_max!=null?parseFloat(i.qty_max):null,sourceText:i.source_text!=null?i.source_text:null}:{};
   try{
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supabaseAction:'load'})});
     const data=await res.json().catch(()=>null);
@@ -2446,7 +2498,7 @@ async function loadFromSupabase(){
         portionUnit:v.portion_unit||'g',           // Step 1: unità porzione
         ...declaredYieldFromRow(v),                // I4: resa dichiarata, valore grezzo
         ingredients:(data.ingredients||[]).filter(i=>i.variant_id===v.id).sort((a,b)=>a.sort_order-b.sort_order).map(i=>({
-          id:i.id,name:i.name,qty:parseFloat(i.qty)||0,unit:i.unit||'g',
+          id:i.id,name:i.name,qty:(i.qty_kind==='variabile'||i.qty_kind==='mancante'||i.qty_kind==='intervallo')?null:(parseFloat(i.qty)||0),unit:i.unit||'g',...quantitaDaRiga(i),
           isSubRecipe:i.is_sub_recipe||false,subRecipeId:i.sub_recipe_id||null,
           // Bugfix rese: estimated_yield_pct/measured_yield_pct sono numeric
           // Postgres, restituite da PostgREST come stringa — normalizzate
@@ -2481,7 +2533,7 @@ async function loadFromSupabase(){
         portionUnit:v.portion_unit||'g',           // Step 1: unità porzione
         ...declaredYieldFromRow(v),                // I4: resa dichiarata, valore grezzo
         ingredients:(data.ingredients||[]).filter(i=>i.variant_id===v.id).sort((a,b)=>a.sort_order-b.sort_order).map(i=>({
-          id:i.id,name:i.name,qty:parseFloat(i.qty)||0,unit:i.unit||'g',
+          id:i.id,name:i.name,qty:(i.qty_kind==='variabile'||i.qty_kind==='mancante'||i.qty_kind==='intervallo')?null:(parseFloat(i.qty)||0),unit:i.unit||'g',...quantitaDaRiga(i),
           isSubRecipe:i.is_sub_recipe||false,subRecipeId:i.sub_recipe_id||null, // LAB FIX 1: mattoncino letto anche per le validate
           // Bugfix rese: stessa normalizzazione del mapping Bozze LAB sopra
           // (parseFloat, mai una seconda logica) — vedi commento lì.
@@ -2691,7 +2743,10 @@ async function saveToSupabase(recipe){
       (v.ingredients||[]).forEach((ing,idx)=>{
         allIngredients.push({
           id:ing.id&&ing.id.length>4?ing.id:('li'+Date.now()+Math.random().toString(36).slice(2,7)),variant_id:v.id,
-          name:ing.name,qty:parseFloat(ing.qty)||0,unit:ing.unit||'g',
+          // P0-c: tipo di quantita' e dati originali solo se noti (righe precedenti invariate);
+          // per i tipi non numerici qty = 0 e' un segnaposto del database, mai un peso.
+          name:ing.name,qty:(ing.qtyKind==='variabile'||ing.qtyKind==='mancante'||ing.qtyKind==='intervallo')?0:(parseFloat(ing.qty)||0),unit:ing.unit||'g',
+          ...((ing.qtyKind==='certa'||ing.qtyKind==='variabile'||ing.qtyKind==='mancante'||ing.qtyKind==='intervallo')?{qty_kind:ing.qtyKind==='certa'&&!(parseFloat(ing.qty)>0)?'mancante':ing.qtyKind,qty_min:ing.qtyKind==='intervallo'?Number(ing.qtyMin):null,qty_max:ing.qtyKind==='intervallo'?Number(ing.qtyMax):null,source_text:ing.sourceText?String(ing.sourceText).slice(0,300):null}:{}),
           is_sub_recipe:ing.isSubRecipe||false,sub_recipe_id:ing.subRecipeId||null,
           sort_order:idx,
           estimated_yield_pct:ing.estimatedYieldPct!==undefined&&ing.estimatedYieldPct!==null?ing.estimatedYieldPct:null,
@@ -3001,7 +3056,7 @@ function importIngredienteDaRiga(riga,pulisci){
   var intervallo=t.match(new RegExp('^'+IMPORT_NUMERO+'\\s*[-–]\\s*'+IMPORT_NUMERO+'\\s*(.*)$'));
   if(intervallo){
     var restoI=intervallo[3].replace(/^([A-Za-zÀ-ÿ]+\.?)\s+/,function(m0,w){var k=w.toLowerCase().replace(/\.$/,'');if(IMPORT_UNITA_ALIAS[k]||IMPORT_UNITA_NON_RAPPRESENTABILI.indexOf(k)!==-1){out.unitaOriginale=w;return '';}return m0;});
-    out.name=importNomeIngrediente(restoI)||originale;return out; // intervallo: nessun numero scelto
+    out.name=importNomeIngrediente(restoI)||originale;out.qtyMin=importNumero(intervallo[1]);out.qtyMax=importNumero(intervallo[2]);return out; // intervallo: nessun numero scelto
   }
   var testa=t.match(new RegExp('^'+IMPORT_NUMERO+'\\s*(.*)$'));
   if(testa){
@@ -3026,7 +3081,7 @@ function importIngredienteDaRiga(riga,pulisci){
   // "q.b." dopo i tentativi con quantita' (cosi' "Caffe' 300 g (… a piacere)" resta 300 g).
   if(IMPORT_QB.test(t)){
     if(/\d/.test(t))return out; // "Burro 100 g + q.b.": riga mista, resta intera da confermare
-    out.name=importNomeIngrediente(t.replace(IMPORT_QB,'$1'))||originale;out.statoImport='mancante';return out;
+    out.name=importNomeIngrediente(t.replace(IMPORT_QB,'$1'))||originale;out.statoImport='mancante';out.variabile=true;return out;
   }
   if(!/\d/.test(t)){out.statoImport='mancante';out.name=importNomeIngrediente(t)||originale;}
   return out;
@@ -3185,6 +3240,21 @@ function importAnalizzaPagina(html,urlPagina,pulisci){
   return{jsonld:{blocchi:j.blocchi,nonValidi:j.nonValidi,ricette:j.ricette.length,scelta:scelta.motivo},
     ricetta:scelta.ricetta?importRicettaDaJsonLd(scelta.ricetta,testoPerResa,pulisci):null,selezione:sel};
 }
+// P0-c: riga della fonte -> quantita' conservata (mai 0 o "g" inventati).
+//   estratto              -> certa, unita' KHUB
+//   numero + unita' fonte -> certa, unita' della fonte ("spicchio"): conversione da confermare
+//   intervallo            -> intervallo (min, max, unita'), nessun valore scelto
+//   q.b./a piacere        -> variabile
+//   altro                 -> mancante (lo chef la indica)
+function importQuantitaDaRiga(i){
+  if(i.statoImport==='estratto')return{qty:i.qty,unit:i.unit,qtyKind:'certa',qtyMin:null,qtyMax:null};
+  if(i.qtyMin>0&&i.qtyMax>i.qtyMin){
+    var w=String(i.unitaOriginale||'').toLowerCase().replace(/\.$/,'');
+    return{qty:null,unit:w?(IMPORT_UNITA_ALIAS[w]||unitaFonteCanonica(w)):'n',qtyKind:'intervallo',qtyMin:i.qtyMin,qtyMax:i.qtyMax};
+  }
+  if(i.qty>0&&i.unitaOriginale)return{qty:i.qty,unit:unitaFonteCanonica(i.unitaOriginale),qtyKind:'certa',qtyMin:null,qtyMax:null};
+  return{qty:null,unit:null,qtyKind:i.variabile?'variabile':'mancante',qtyMin:null,qtyMax:null};
+}
 // Anteprima dalla ricetta strutturata (stesso formato dell'anteprima AI).
 function importAnteprimaStrutturata(ric,urlPagina){
   var passi=ric.passi.map(function(p,i){var s=ric.sezioni.filter(function(z){return z.da===i;})[0];return s?s.nome+' — '+p:p;});
@@ -3192,7 +3262,7 @@ function importAnteprimaStrutturata(ric,urlPagina){
   var fonteResa=ric.resa.raw?{text:ric.resa.raw.source,verifiable:true,none:false}:{text:null,verifiable:false,none:true};
   return{name:ric.nome,category:'',portionsCount:importTargetValue('portions',null),gramsPerPortion:importTargetValue('gpp',null),
     declaredYield:importDeclaredYield(ric.resa.raw,fonteResa),
-    ingredients:ric.ingredienti.map(function(i){return{id:uid(),name:i.name,qty:i.qty,unit:i.unit,isSubRecipe:false,subRecipeId:null,originale:i.originale,statoImport:i.statoImport,unitaOriginale:i.unitaOriginale};}),
+    ingredients:ric.ingredienti.map(function(i){var q=importQuantitaDaRiga(i);return{id:uid(),name:i.name,qty:q.qty,unit:q.unit,qtyKind:q.qtyKind,qtyMin:q.qtyMin,qtyMax:q.qtyMax,sourceText:i.originale,isSubRecipe:false,subRecipeId:null,originale:i.originale,statoImport:i.statoImport,unitaOriginale:i.unitaOriginale};}),
     steps:passi,subRecipes:[],
     importFonte:{tipo:'strutturata',url:String(urlPagina||''),descrizione:ric.descrizione,tempi:ric.tempi,sezioni:ric.sezioni.map(function(z){return{nome:z.nome,da:z.da+1,a:z.a+1};}),notaResa:ric.resa.nota}};
 }
@@ -3224,6 +3294,33 @@ async function extractRecipe(){
     return max&&t.length>max?t.slice(0,max):t;
   };
   const sicuroSeTesto=(s,max)=>typeof s==='string'?testoSicuro(s,max):s;
+  // P0-c — quantita' restituite dall'AI (interna: le tabelle ricalcano quelle di
+  // P1-a; extractRecipe resta autosufficiente). Numero positivo con unita' KHUB:
+  // come prima, senza tipo. Unita' equivalente (gr, cucchiaio...): unita' KHUB.
+  // Unita' non rappresentabile: resta quella della fonte (conversione da
+  // confermare). "2-3": intervallo. Nessun numero: q.b. -> variabile, altrimenti
+  // mancante. Mai 0 o "g" inventati.
+  const ALIAS_Q={g:'g',gr:'g',grammo:'g',grammi:'g',kg:'kg',chilo:'kg',chili:'kg',ml:'ml',millilitri:'ml',l:'l',lt:'l',litro:'l',litri:'l',cl:'cl',
+    cucchiaio:'tbsp',cucchiai:'tbsp',tbsp:'tbsp',cucchiaino:'tsp',cucchiaini:'tsp',tsp:'tsp',pezzo:'n',pezzi:'n',n:'n'};
+  const SINGOLARE_Q={spicchi:'spicchio',pizzichi:'pizzico',bustine:'bustina',foglie:'foglia',fogli:'foglio',rametti:'rametto',mazzetti:'mazzetto',
+    fette:'fetta',vasetti:'vasetto',bicchieri:'bicchiere',tazze:'tazza',cups:'cup',baccelli:'baccello',decilitri:'dl',stecche:'stecca',cubetti:'cubetto'};
+  const QB_Q=/(^|[\s(,;:])(q\.?\s?b\.?|qb|quanto basta|a piacere|per decorare|per guarnire)(?=$|[\s),.;:])/i;
+  const unitaFonteQ=w=>(SINGOLARE_Q[w]||w).slice(0,40);
+  const quantitaDaAI=i=>{
+    const qTesto=String(i&&i.qty!=null?i.qty:'').trim(),uTesto=String(i&&i.unit!=null?i.unit:'').trim();
+    const w=uTesto.toLowerCase().replace(/\.$/,'');
+    const unitaKhub=UNITS.indexOf(uTesto)!==-1?uTesto:(ALIAS_Q[w]||null);
+    const r=qTesto.match(/^(\d+(?:[.,]\d+)?)\s*[-–]\s*(\d+(?:[.,]\d+)?)$/);
+    if(r){const a=parseLocaleNumber(r[1]),b=parseLocaleNumber(r[2]);if(a>0&&b>a)return{qty:null,unit:unitaKhub||(w?unitaFonteQ(w):'n'),qtyKind:'intervallo',qtyMin:a,qtyMax:b};}
+    const n=typeof i.qty==='number'?i.qty:parseLocaleNumber(qTesto);
+    if(n>0){
+      if(unitaKhub)return unitaKhub===uTesto?{qty:n,unit:unitaKhub}:{qty:n,unit:unitaKhub,qtyKind:'certa'};
+      if(w&&!QB_Q.test(' '+w+' '))return{qty:n,unit:unitaFonteQ(w),qtyKind:'certa'};
+      if(!w)return{qty:n,unit:'n',qtyKind:'certa'}; // numero senza unita': conteggio, come "6 uova"
+    }
+    if(QB_Q.test(' '+qTesto+' '+uTesto+' '))return{qty:null,unit:null,qtyKind:'variabile'};
+    return{qty:null,unit:unitaKhub,qtyKind:'mancante'};
+  };
   // Pagina web: documento inerte (DOMParser non esegue script ne' gestori come
   // onerror); stesso testo di prima (documentElement, stessi elementi rimossi).
   const testoPagina=html=>{
@@ -3374,14 +3471,14 @@ async function extractRecipe(){
     parsed.subRecipes=(Array.isArray(parsed.subRecipes)?parsed.subRecipes:[]).map(sr=>(sr&&typeof sr==='object')?{...sr,name:sicuroSeTesto(sr.name,300),ingredients:ingredientiSicuri(sr.ingredients),steps:passiSicuri(sr.steps),declaredYield:resaSicura(sr.declaredYield)}:sr);
     parsed.ingredients=(parsed.ingredients||[]).map((i,idx)=>({
       ...i,id:uid(),isSubRecipe:false,subRecipeId:null,
-      qty:parseFloat(i.qty)||0,unit:UNITS.includes(i.unit)?i.unit:'g'
+      ...quantitaDaAI(i)
     }));
     parsed.steps=parsed.steps||[];
     parsed.portionsCount=importTargetValue('portions',parsed.portionsCount);
     parsed.gramsPerPortion=importTargetValue('gpp',parsed.gramsPerPortion);
     parsed.declaredYield=importDeclaredYield(parsed.declaredYield,fonteResa);
     parsed.subRecipes=(parsed.subRecipes||[]).map(sr=>({
-      ...sr,declaredYield:importDeclaredYield(sr.declaredYield,fonteResa),portionsCount:importTargetValue('portions',sr.portionsCount),gramsPerPortion:importTargetValue('gpp',sr.gramsPerPortion),ingredients:(sr.ingredients||[]).map(i=>({...i,id:uid(),qty:parseFloat(i.qty)||0,unit:UNITS.includes(i.unit)?i.unit:'g'}))
+      ...sr,declaredYield:importDeclaredYield(sr.declaredYield,fonteResa),portionsCount:importTargetValue('portions',sr.portionsCount),gramsPerPortion:importTargetValue('gpp',sr.gramsPerPortion),ingredients:(sr.ingredients||[]).map(i=>({...i,id:uid(),...quantitaDaAI(i)}))
     }));
     if(importFontePagina)parsed.importFonte=importFontePagina;
     S.loadPreview=parsed;
@@ -3852,6 +3949,23 @@ function addIngredient(recipeId){
 function onIngQty(recipeId,ingId,val){
   upLab(recipeId,v=>({...v,ingredients:v.ingredients.map(i=>i.id===ingId?{...i,qty:parseFloat(val)||0}:i)}));
 }
+// P0-c: campo quantita' del LAB. Numero su un ingrediente precedente (senza
+// tipo): identico a onIngQty. "q.b." -> quantita' variabile; "20-30" ->
+// intervallo; numero -> quantita' certa; vuoto o 0 su un ingrediente con tipo
+// -> quantita' da indicare (mai 0 g). Testo non valido: nessuna modifica.
+function onIngQtyTesto(recipeId,ingId,val){
+  var recipe=R(recipeId);var v=recipe&&curLab(recipe);
+  var ing=v&&v.ingredients.find(function(i){return i.id===ingId;});
+  if(!ing)return;
+  var q=interpretaTestoQuantita(val);
+  if(!qtyKindDi(ing)&&(q.kind==='numero'||q.kind==='vuoto')){onIngQty(recipeId,ingId,val);return;}
+  if(q.kind==='non_valido'){toast('Quantità non valida: scrivi un numero, «q.b.» oppure un intervallo (es. 20-30).','ti-alert-circle');return;}
+  var patch=q.kind==='numero'&&q.qty>0?{qty:q.qty,qtyKind:'certa',qtyMin:null,qtyMax:null}
+    :q.kind==='variabile'?{qty:null,qtyKind:'variabile',qtyMin:null,qtyMax:null}
+    :q.kind==='intervallo'?{qty:null,qtyKind:'intervallo',qtyMin:q.min,qtyMax:q.max}
+    :{qty:null,qtyKind:'mancante',qtyMin:null,qtyMax:null};
+  upLab(recipeId,function(lv){return Object.assign({},lv,{ingredients:lv.ingredients.map(function(i){return i.id===ingId?Object.assign({},i,patch):i;})});});
+}
 // LAB FIX 2B — I2: Obiettivo di Produzione della bozza LAB.
 // Porzioni e G/porzione (portions_count, grams_per_portion) sono SOLO
 // l'obiettivo di Produzione, distinto dalla resa dichiarata della Ricetta.
@@ -4257,7 +4371,9 @@ function renderActiveYieldSection(recipe,v){
       var per=deriveYieldPerUnit(w,st.value);
       if(per&&per.status==='complete'&&per.kind==='count')pesi+=' · per '+escAttr(st.value.unit)+': '+labGrams(per.rawPerUnit)+' crudi, '+labGrams(per.finishedPerUnit)+' finiti'+stima;
     }
+    if(w.excluded&&w.excluded.length)pesi+=' · esclusi (quantità variabile): '+w.excluded.map(function(m){return escAttr(m.name);}).join(', ');
   }else if(w.status==='incomplete')pesi='Pesi incompleti: mancano conversioni in grammi.';
+  else if(w.status==='unresolved')pesi='Pesi non calcolabili: quantità da indicare o intervalli.';
   var inputStyle='padding:6px 9px;border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:13px;color:var(--dark);background:var(--white);outline:none';
   var corpo;
   if(!e){
@@ -4606,6 +4722,17 @@ function computeSessionScaling(input){
     if(itemKey==null||itemKey===''){
       throw new Error('computeSessionScaling: itemKey/id mancante per ingrediente "'+label+'"');
     }
+    // P0-c: una quantita' da indicare o un intervallo senza valore scelto non
+    // possono entrare in una Produzione; q.b. entra senza quantita' (0 g di peso,
+    // escluso dal totale, mostrato come "q.b.").
+    if(ing.qtyKind==='mancante')throw new Error('Indica la quantità di "'+label+'" nella Ricetta prima di mandarla in produzione.');
+    if(ing.qtyKind==='intervallo')throw new Error('Scegli la quantità di "'+label+'" (intervallo '+ing.intervallo.min+'–'+ing.intervallo.max+' '+(ing.unit||'')+') per questa produzione.');
+    if(ing.qtyKind==='variabile'){
+      return{itemKey:itemKey,sourceIngredientId:ing.id!=null?ing.id:(ing.sourceIngredientId!=null?ing.sourceIngredientId:null),name:ing.name!=null?ing.name:'',
+        unit:typeof ing.unit==='string'&&ing.unit?ing.unit:'g',baseQty:null,estimatedYieldPct:null,isSubRecipe:ing.isSubRecipe===true,subRecipeId:ing.subRecipeId!=null?ing.subRecipeId:null,
+        conversionFactorToBase:null,conversionOrigin:null,conversionSourceType:null,conversionFactId:null,rawGrams:0,normalizedContribution:0,
+        qtyKind:'variabile',sourceText:ing.sourceText!=null?ing.sourceText:null};
+    }
     var qty=ing.qty;
     if(typeof qty!=='number'||!isFinite(qty)){
       throw new Error('computeSessionScaling: qty non numerica per ingrediente "'+label+'"');
@@ -4667,6 +4794,8 @@ function computeSessionScaling(input){
       conversionFactId:conv.conversionFactId,
       rawGrams:rawGrams,
       normalizedContribution:normalizedContribution,
+      ...(ing.intervallo?{intervallo:{min:ing.intervallo.min,max:ing.intervallo.max}}:{}),
+      ...(ing.sourceText?{sourceText:ing.sourceText}:{}),
     };
   });
 
@@ -4685,7 +4814,7 @@ function computeSessionScaling(input){
       name:x.name,
       unit:x.unit,
       baseQty:x.baseQty,
-      operativeQty:x.baseQty*scaleFactor, // stessa unita' operativa originale dell'ingrediente
+      operativeQty:x.qtyKind==='variabile'?null:x.baseQty*scaleFactor, // stessa unita' operativa originale dell'ingrediente (q.b.: nessuna quantita')
       estimatedYieldPct:x.estimatedYieldPct,
       isSubRecipe:x.isSubRecipe,
       subRecipeId:x.subRecipeId,
@@ -4696,6 +4825,9 @@ function computeSessionScaling(input){
       // Dati diagnostici (solo lettura, NON copiati nello snapshot):
       rawGrams:x.rawGrams,                       // peso a crudo della formulazione, in g
       finishedGrams:x.normalizedContribution,    // contributo al peso finito teorico, in g
+      ...(x.qtyKind?{qtyKind:x.qtyKind}:{}),     // P0-c: solo se presente (q.b.)
+      ...(x.intervallo?{intervallo:x.intervallo}:{}),
+      ...(x.sourceText?{sourceText:x.sourceText}:{}),
     };
   });
 
@@ -4763,6 +4895,9 @@ function buildSessionSnapshotV1(meta,computed){
         conversionOrigin:ing.conversionOrigin,
         conversionSourceType:ing.conversionSourceType,
         conversionFactId:ing.conversionFactId,
+        ...(ing.qtyKind?{qtyKind:ing.qtyKind}:{}),        // P0-c: q.b. nella Sessione
+        ...(ing.intervallo?{intervallo:ing.intervallo}:{}), // P0-c: intervallo della Ricetta e valore scelto (baseQty)
+        ...(ing.sourceText?{sourceText:ing.sourceText}:{}),
       };
     }),
     steps:computed.steps.map(function(st){
@@ -4930,6 +5065,14 @@ function openMandaInProduzione(recipeId,variantId,target){
     portions:t.portions!=null?String(t.portions):'',gpp:t.gpp!=null?String(t.gpp):'',error:null,loading:false};
   render();
 }
+// P0-c: valore scelto per un ingrediente a intervallo, per la prossima produzione
+// della Ricetta Attiva. Solo in memoria: la Ricetta resta invariata.
+function sceltaIntervalloProduzione(variantId,ingId,val){
+  if(!S.produzioneIntervalli[variantId])S.produzioneIntervalli[variantId]={};
+  S.produzioneIntervalli[variantId][ingId]=String(val==null?'':val).trim();
+  if(S.pendingMandaInProduzione)S.pendingMandaInProduzione.error=null;
+  render();
+}
 function closeMandaInProduzione(){
   S.pendingMandaInProduzione=null;
   render();
@@ -5031,6 +5174,20 @@ function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsP
         isSubRecipe:ing.isSubRecipe===true,
         subRecipeId:ing.subRecipeId!=null?ing.subRecipeId:null,
       };
+      // P0-c: q.b. -> nessuna quantita' (esclusa dai pesi); mancante -> da
+      // risolvere prima della Produzione; intervallo -> il valore scelto dallo
+      // chef per questa Produzione (S.produzioneIntervalli), altrimenti da scegliere.
+      // Ingredienti senza tipo: invariati.
+      if(ing.qtyKind==='variabile'||ing.qtyKind==='mancante'){mapped.qtyKind=ing.qtyKind;mapped.qty=0;}
+      else if(ing.qtyKind==='intervallo'){
+        var scelte=(S.produzioneIntervalli&&S.produzioneIntervalli[vv.id])||{};
+        var scelto=parseLocaleNumber(String(scelte[ing.id]!=null?scelte[ing.id]:''));
+        mapped.intervallo={min:ing.qtyMin,max:ing.qtyMax};
+        if(isFinite(scelto)&&scelto>=ing.qtyMin&&scelto<=ing.qtyMax)mapped.qty=scelto;
+        else{mapped.qtyKind='intervallo';mapped.qty=0;}
+      }
+      if(ing.sourceText)mapped.sourceText=ing.sourceText;
+      if(ing.qtyKind==='variabile'||ing.qtyKind==='mancante')return mapped;
       var fact=resolveKnownProductionConversionFact(normalizeIngredientName(ing.name),ing.unit);
       if(fact)mapped.conversionFact=fact;
       return mapped;
@@ -5158,16 +5315,23 @@ function classifyYieldUnit(unit){
 // questi ultimi marcati 'reference_data').
 // Esito: {status:'empty'} | {status:'invalid',invalid,missing}
 //   | {status:'incomplete',missing:[{id,name,unit,askUnit}]}
-//   | {status:'complete',raw,finished,byId,referenceDataUsed}
+//   | {status:'complete',raw,finished,byId,referenceDataUsed,excluded}
+// P0-c: 'variabile' (q.b.) e' ESCLUSO dal totale e restituito in excluded (mai
+// 0 g); 'mancante' e 'intervallo' rendono il calcolo {status:'unresolved',
+// unresolved:[{id,name,kind}],missing,excluded}. Ingredienti senza tipo:
+// stesse regole di prima.
 function computeFormulationWeights(ingredients,resolveFact){
   var list=Array.isArray(ingredients)?ingredients:[];
   if(!list.length)return{status:'empty'};
   var resolver=typeof resolveFact==='function'?resolveFact:resolveKnownProductionConversionFact;
-  var missing=[],invalid=[],referenceDataUsed=[],byId={},raw=0,finished=0;
+  var missing=[],invalid=[],referenceDataUsed=[],byId={},raw=0,finished=0,excluded=[],unresolved=[];
   list.forEach(function(ing,idx){
     if(!ing||typeof ing!=='object'){invalid.push({index:idx,name:'#'+idx,reason:'invalid_ingredient'});return;}
     var key=ing.id!=null?ing.id:idx;
     var name=ing.name!=null?ing.name:'';
+    var kind=ing.qtyKind; // P0-c
+    if(kind==='variabile'){excluded.push({id:key,name:name});return;}
+    if(kind==='mancante'||kind==='intervallo'){unresolved.push({id:key,name:name,kind:kind});return;}
     var qty=cnum(ing.qty);
     if(qty<0){invalid.push({id:key,name:name,reason:'negative_qty'});return;}
     if(typeof ing.unit!=='string'||!ing.unit){invalid.push({id:key,name:name,reason:'missing_unit'});return;}
@@ -5189,8 +5353,11 @@ function computeFormulationWeights(ingredients,resolveFact){
     finished+=finishedGrams;
   });
   if(invalid.length)return{status:'invalid',invalid:invalid,missing:missing};
+  if(unresolved.length)return{status:'unresolved',unresolved:unresolved,missing:missing,excluded:excluded};
   if(missing.length)return{status:'incomplete',missing:missing};
-  return{status:'complete',raw:raw,finished:finished,byId:byId,referenceDataUsed:referenceDataUsed};
+  var esito={status:'complete',raw:raw,finished:finished,byId:byId,referenceDataUsed:referenceDataUsed};
+  if(excluded.length)esito.excluded=excluded; // presente solo con ingredienti q.b.: esito precedente identico
+  return esito;
 }
 
 // Valori per unita' di resa, derivati e mai salvati. declared = valore di
@@ -5294,6 +5461,16 @@ async function confirmMandaInProduzione(){
   p.loading=true;p.error=null;render();
 
   var preparedInput=buildPreparedInputDaRicettaAttiva(recipe,vv,portions,gpp);
+  // P0-c: prima delle conversioni, le quantita' che la Produzione non puo'
+  // inventare: da indicare (bloccano) e intervalli senza valore scelto.
+  var daIndicare=preparedInput.ingredients.filter(function(i){return i.qtyKind==='mancante';});
+  var daScegliere=preparedInput.ingredients.filter(function(i){return i.qtyKind==='intervallo';});
+  if(daIndicare.length||daScegliere.length){
+    p.loading=false;
+    p.error=daIndicare.length?'Manca la quantità di '+daIndicare.map(function(i){return'«'+i.name+'»';}).join(', ')+': indicala nella Ricetta prima di mandarla in produzione.'
+      :'Scegli la quantità di '+daScegliere.map(function(i){return'«'+i.name+'»';}).join(', ')+' (dentro l\'intervallo indicato) per questa produzione.';
+    render();return;
+  }
 
   // Micro-Step 9b — FASE 2/3: preflight PRIMA di qualunque persistenza. Se
   // manca una conversione necessaria, si passa al flusso di risoluzione
@@ -5530,10 +5707,23 @@ function renderMandaInProduzioneModal(){
             onchange="onMandaInProduzioneField('gpp',this.value)">
         </div>
       </div>
+      ${(function(){
+        // P0-c: ingredienti a intervallo della Ricetta Attiva: il valore si sceglie per questa produzione.
+        var rec=R(p.recipeId);var vvI=rec&&rec.validatedVariants.find(function(x){return x.id===p.variantId;});
+        var intervalli=vvI?vvI.ingredients.filter(function(i){return i.qtyKind==='intervallo';}):[];
+        if(!intervalli.length)return'';
+        var scelte=(S.produzioneIntervalli&&S.produzioneIntervalli[p.variantId])||{};
+        return'<div class="manda-intervalli" style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px"><div style="font-size:12px;font-weight:600;color:var(--mid)">Quantità da scegliere per questa produzione</div>'
+          +intervalli.map(function(i){
+            return'<label style="display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13px;color:var(--dark)"><span>'+escAttr(i.name)+' <span style="color:var(--mid)">('+formatQtyDisplay(i.qtyMin)+'–'+formatQtyDisplay(i.qtyMax)+' '+escAttr(i.unit)+')</span></span>'
+              +'<input type="text" inputmode="decimal" class="manda-intervallo" data-ing="'+escAttr(i.id)+'" value="'+escAttr(scelte[i.id]!=null?scelte[i.id]:'')+'" placeholder="'+formatQtyDisplay(i.qtyMin)+'–'+formatQtyDisplay(i.qtyMax)+'"'
+              +' onchange="sceltaIntervalloProduzione(\''+escAttr(p.variantId)+'\',\''+escAttr(i.id)+'\',this.value)" style="width:90px;padding:8px 10px;border:1.5px solid var(--border);border-radius:var(--r-md);font-family:inherit;font-size:14px"></label>';
+          }).join('')+'</div>';
+      })()}
       <div style="background:var(--cream);border-radius:var(--r-md);padding:12px 14px;margin-bottom:18px;font-size:14px;color:var(--dark)">
         Totale finito: <strong>${haveBoth?totale+' g':'—'}</strong>
       </div>
-      ${p.error?`<div style="font-size:13px;color:#c0392b;margin-bottom:14px">${p.error}</div>`:''}
+      ${p.error?`<div style="font-size:13px;color:#c0392b;margin-bottom:14px">${escAttr(p.error)}</div>`:''}
       <div style="display:flex;gap:8px">
         <button onclick="confirmMandaInProduzione()" ${p.loading?'disabled':''}
           style="flex:1;padding:10px;background:var(--sage,#3d7a5c);color:white;border:none;border-radius:var(--r-md);font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;opacity:${p.loading?'0.7':'1'}">
@@ -6953,7 +7143,7 @@ function renderSessioneOperativa(){
               style="background:none;border:none;padding:2px;cursor:${usabile?'pointer':'default'};font-size:20px;line-height:1;color:${spuntato?'var(--sage,#3d7a5c)':'var(--mid)'};opacity:${usabile||spuntato?'1':'0.45'}"><i class="ti ${inCorso?'ti-loader-2':(spuntato?'ti-square-check':'ti-square')}"></i></button>
             <span>${ing.name||''}</span>
           </span>
-          <span style="font-family:'IBM Plex Mono',monospace">${qty!=null?qty:'–'} ${ing.unit||''}</span>
+          <span style="font-family:'IBM Plex Mono',monospace">${ing.qtyKind==='variabile'?'q.b.':(qty!=null?qty:'–')+' '+(ing.unit||'')}</span>
         </div>`;
       }).join('')}
     </div>
@@ -8194,6 +8384,8 @@ function renderLabWeightsPanel(recipe,v,w){
   var stato='';
   if(w.status==='empty')stato='Aggiungi ingredienti per calcolare i pesi.';
   else if(w.status==='incomplete')stato='Pesi incompleti: manca la conversione in grammi per '+w.missing.map(function(m){return escAttr(m.name)+' ('+escAttr(m.unit)+')';}).join(', ')+'.';
+  else if(w.status==='unresolved')stato='Pesi non calcolabili: '+w.unresolved.map(function(m){return escAttr(m.name)+' ('+(m.kind==='intervallo'?'intervallo da scegliere':'quantità da indicare')+')';}).join(', ')+'.';
+  if(w.excluded&&w.excluded.length)stato+=(stato?' ':'')+'Esclusi dai pesi (quantità variabile): '+w.excluded.map(function(m){return escAttr(m.name);}).join(', ')+'.';
   else if(w.status==='invalid')stato='Pesi non calcolabili: '+w.invalid.map(function(x){return escAttr(x.name||'ingrediente')+' ('+escAttr(LAB_WEIGHT_INVALID_REASONS[x.reason]||'conversione non valida')+')';}).join(', ')+'.';
 
   var unitaLabel='unità di resa',crudoUnit='—',finitoUnit='—',notaUnit='';
@@ -8800,15 +8992,19 @@ function exportPDF(recipeId,variantId){
   const stima=pesiOk&&pesi.referenceDataUsed.length>0;
   const stimaIds=stima?pesi.referenceDataUsed.map(x=>String(x.id)):[];
   const pctCell=i=>pesiOk&&pesi.byId[i.id]?pesi.byId[i.id].pct.toFixed(1)+'%'+(stimaIds.indexOf(String(i.id))!==-1?' *':''):'—';
-  const rows=vv.ingredients.map(i=>`<tr><td>${escAttr(i.name)}</td><td style="text-align:right;font-family:monospace">${escAttr(i.qty)} ${escAttr(i.unit)}</td><td class="pdf-pct" style="text-align:right;color:#888;font-family:monospace">${pctCell(i)}</td></tr>`).join('');
+  // P0-c: q.b., quantita' da indicare e intervalli scritti come tali, mai "0 g".
+  const qtyPdf=i=>i.qtyKind==='variabile'?'q.b.':i.qtyKind==='mancante'?'da indicare':i.qtyKind==='intervallo'?formatQtyDisplay(i.qtyMin)+'–'+formatQtyDisplay(i.qtyMax)+' '+(i.unit||''):i.qty+' '+i.unit;
+  const esclusiPdf=vv.ingredients.filter(i=>i.qtyKind==='variabile').map(i=>i.name);
+  const rows=vv.ingredients.map(i=>`<tr><td>${escAttr(i.name)}</td><td style="text-align:right;font-family:monospace">${escAttr(qtyPdf(i))}</td><td class="pdf-pct" style="text-align:right;color:#888;font-family:monospace">${pctCell(i)}</td></tr>`).join('');
   const pesiRiga=pesiOk
     ?`<div class="pdf-weights" style="margin-top:12px">Peso a crudo: ${formatQuickCalcQty(pesi.raw,'g')} g · Peso finito teorico: ${formatQuickCalcQty(pesi.finished,'g')} g${stima?' (stima)':''}</div>`
       +(stima?`<div class="pdf-estimate" style="margin-top:4px;font-size:12px;color:#888">(stima) Pesi e percentuali calcolati con pesi di riferimento non confermati per ${pesi.referenceDataUsed.map(x=>'* '+escAttr(x.name)+' ('+escAttr(x.unit)+')').join(', ')}: tutti i valori dipendono da questa stima.</div>`:'')
     :pesi.status==='missing_conversions'
       ?`<div class="pdf-weights" style="margin-top:12px">Pesi e percentuali non calcolabili: mancano le conversioni in grammi di ${pesi.missing.map(m=>escAttr(m.ingredientName)+' ('+escAttr(m.currentUnit)+')').join(', ')}.</div>`
       :`<div class="pdf-weights" style="margin-top:12px">Pesi e percentuali non disponibili.</div>`;
+  const pesiEsclusi=pesiOk&&esclusiPdf.length?`<div class="pdf-excluded" style="margin-top:4px;font-size:12px;color:#888">Esclusi dai pesi (quantità variabile): ${esclusiPdf.map(n=>escAttr(n)).join(', ')}.</div>`:'';
   const steps=(vv.steps||[]).length?'<h3 style="margin:24px 0 10px">Procedimento</h3><ol>'+vv.steps.map(s=>`<li style="margin-bottom:6px;line-height:1.6">${escAttr(s)}</li>`).join('')+'</ol>':'';
-  const h=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escAttr(recipe.name)} — ${escAttr(vv.name)}</title><style>*{box-sizing:border-box}body{font-family:Georgia,serif;max-width:700px;margin:40px auto;padding:0 20px;color:#222;font-size:14px;line-height:1.6}h1{font-size:24px;margin-bottom:4px;letter-spacing:-0.3px}table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}th{text-align:left;border-bottom:2px solid #333;padding:8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em}td{padding:6px 6px;border-bottom:1px solid #ddd}tr:last-child td{border-bottom:none}.meta{color:#888;font-size:12px;margin:6px 0 24px}.badge{background:#C85A1E;color:white;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;margin-left:8px;vertical-align:middle}.steps-list{margin-top:8px;padding-left:20px}.steps-list li{margin-bottom:8px;line-height:1.6}@media print{body{margin:16px;-webkit-print-color-adjust:exact}@page{margin:1.5cm}.badge{-webkit-print-color-adjust:exact}}</style></head><body><h1>${escAttr(recipe.name)}<span class="badge">${escAttr(vv.name)}</span></h1><div class="meta">${vv.validatedAt?'Validata il '+vv.validatedAt:'Bozza in LAB — non ancora validata'}${targetPrintParts(vv.portionsCount,vv.gramsPerPortion)}</div><table><thead><tr><th>Ingrediente</th><th style="text-align:right">Quantità</th><th style="text-align:right">% crudo${stima?' (stima)':''}</th></tr></thead><tbody>${rows}</tbody></table>${pesiRiga}${steps}<div style="margin-top:40px;font-size:11px;color:#ccc;border-top:1px solid #eee;padding-top:12px">Generato da Khub</div></body></html>`;
+  const h=`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escAttr(recipe.name)} — ${escAttr(vv.name)}</title><style>*{box-sizing:border-box}body{font-family:Georgia,serif;max-width:700px;margin:40px auto;padding:0 20px;color:#222;font-size:14px;line-height:1.6}h1{font-size:24px;margin-bottom:4px;letter-spacing:-0.3px}table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}th{text-align:left;border-bottom:2px solid #333;padding:8px 6px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em}td{padding:6px 6px;border-bottom:1px solid #ddd}tr:last-child td{border-bottom:none}.meta{color:#888;font-size:12px;margin:6px 0 24px}.badge{background:#C85A1E;color:white;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;margin-left:8px;vertical-align:middle}.steps-list{margin-top:8px;padding-left:20px}.steps-list li{margin-bottom:8px;line-height:1.6}@media print{body{margin:16px;-webkit-print-color-adjust:exact}@page{margin:1.5cm}.badge{-webkit-print-color-adjust:exact}}</style></head><body><h1>${escAttr(recipe.name)}<span class="badge">${escAttr(vv.name)}</span></h1><div class="meta">${vv.validatedAt?'Validata il '+vv.validatedAt:'Bozza in LAB — non ancora validata'}${targetPrintParts(vv.portionsCount,vv.gramsPerPortion)}</div><table><thead><tr><th>Ingrediente</th><th style="text-align:right">Quantità</th><th style="text-align:right">% crudo${stima?' (stima)':''}</th></tr></thead><tbody>${rows}</tbody></table>${pesiRiga}${pesiEsclusi}${steps}<div style="margin-top:40px;font-size:11px;color:#ccc;border-top:1px solid #eee;padding-top:12px">Generato da Khub</div></body></html>`;
   const w=window.open('','_blank');
   if(!w){toast('Popup bloccato — consenti i popup per questo sito','ti-alert-circle');return;}
   w.document.write(h);
@@ -8920,7 +9116,7 @@ function renderConfronto(recipe){
           const isDiff=altro&&(!altroIng||Math.abs(cnum(altroIng.qty)-cnum(ing.qty))>0.01);
           return `<div class="confronto-ing-row${isDiff?' diff':''}">
             <div class="confronto-ing-name">${ing.name}</div>
-            <div class="confronto-ing-qty">${ing.qty} ${ing.unit}</div>
+            <div class="confronto-ing-qty">${ing.qtyKind==='variabile'?'q.b.':ing.qtyKind==='mancante'?'da indicare':ing.qtyKind==='intervallo'?formatQtyDisplay(ing.qtyMin)+'–'+formatQtyDisplay(ing.qtyMax)+' '+escAttr(ing.unit):escAttr(ing.qty)+' '+escAttr(ing.unit)}</div>
             <div class="confronto-ing-pct">${pct(ing,v.ingredients)}</div>
           </div>`;
         }).join('')
@@ -8997,13 +9193,13 @@ function renderContenutoVariante(v){
         ${v.ingredients.map(ing=>{
           if(!ing.isSubRecipe){
             return `<div style="font-size:13px;color:var(--dpop-inchiostro-testo);display:flex;justify-content:space-between;max-width:420px">
-              <span>${escAttr(ing.name)}</span><span style="font-family:'IBM Plex Mono',monospace;color:var(--dpop-grigio-dato)">${escAttr(ing.qty)} ${escAttr(ing.unit)}${ing.estimatedYieldPct!=null?' · resa '+ing.estimatedYieldPct+'%':''}</span>
+              <span>${escAttr(ing.name)}</span><span style="font-family:'IBM Plex Mono',monospace;color:var(--dpop-grigio-dato)">${escAttr(testoQuantitaIngrediente(ing))}${ing.estimatedYieldPct!=null?' · resa '+ing.estimatedYieldPct+'%':''}</span>
             </div>`;
           }
           const brickInfo=findVariantById(ing.subRecipeId);
           return `<div style="border-left:3px solid var(--dpop-ocra-bruciata);padding:4px 0 4px 10px">
             <div style="font-size:13px;color:var(--dpop-inchiostro-testo);display:flex;justify-content:space-between;max-width:400px">
-              <span><i class="ti ti-brick"></i> ${escAttr(ing.name)}</span><span style="font-family:'IBM Plex Mono',monospace;color:var(--dpop-grigio-dato)">${escAttr(ing.qty)} ${escAttr(ing.unit)}</span>
+              <span><i class="ti ti-brick"></i> ${escAttr(ing.name)}</span><span style="font-family:'IBM Plex Mono',monospace;color:var(--dpop-grigio-dato)">${escAttr(testoQuantitaIngrediente(ing))}</span>
             </div>
             ${brickInfo?`
               <div style="margin-top:3px;display:flex;flex-direction:column;gap:2px">
@@ -9376,10 +9572,26 @@ function renderPreview(){
   const notaPesiPrev=!p.ingredients.length?''
     :pesiPrevOk?(stimaPrev.length?'Percentuali stimate: pesi di riferimento non confermati per '+stimaPrev.map(x=>'* '+escAttr(x.name)+' ('+escAttr(x.unit)+')').join(', ')+'.':'')
     :pesiPrev.status==='incomplete'?'Percentuali non calcolabili: mancano le conversioni in grammi di '+pesiPrev.missing.map(m=>escAttr(m.name)+' ('+escAttr(m.unit)+')').join(', ')+'.'
+    :pesiPrev.status==='unresolved'?'Percentuali non calcolabili: quantità da indicare o intervalli per '+pesiPrev.unresolved.map(m=>escAttr(m.name)).join(', ')+'.'
     :'Percentuali non disponibili.';
+  // P0-c: gli ingredienti q.b. sono esclusi dai pesi (mai contati come 0 g).
+  const notaEsclusiPrev=pesiPrev.excluded&&pesiPrev.excluded.length?'Esclusi dai pesi (quantità variabile): '+pesiPrev.excluded.map(m=>escAttr(m.name)).join(', ')+'.':'';
   // P1-a: provenienza dell'anteprima (solo importazione da link) e ingredienti da confermare.
   const fonte=p.importFonte||null;
-  const daConfermare=p.ingredients.filter(i=>i.statoImport&&i.statoImport!=='estratto').length;
+  // P0-c: ingredienti che richiedono attenzione (tipo di quantita' o conversione).
+  const tipoQ=i=>(i&&['certa','variabile','mancante','intervallo'].indexOf(i.qtyKind)!==-1)?i.qtyKind:null;
+  const testoCampoQ=i=>tipoQ(i)==='mancante'?'':tipoQ(i)==='variabile'?'q.b.':tipoQ(i)==='intervallo'?formatQtyDisplay(i.qtyMin)+'-'+formatQtyDisplay(i.qtyMax):(i.qty==null?'':i.qty);
+  const notaQ=i=>{
+    const k=tipoQ(i);
+    const stato=k==='variabile'?'quantità variabile (q.b.): non conteggiata nei pesi'
+      :k==='mancante'?'quantità da indicare'
+      :k==='intervallo'?'intervallo: il valore si sceglie in Produzione'
+      :k==='certa'&&!UNITS.includes(i.unit)?'unità della fonte: la conversione in grammi verrà chiesta quando serve':'';
+    if(!stato)return'';
+    const fonte=i.sourceText||i.originale;
+    return`<div class="preview-ing-originale" style="font-size:11px;color:var(--mid);margin:-2px 0 6px">${fonte?'Nella fonte: «'+escAttr(fonte)+'» — ':''}<strong>${stato}</strong></div>`;
+  };
+  const daConfermare=p.ingredients.filter(i=>['variabile','mancante','intervallo'].indexOf(tipoQ(i))!==-1||(tipoQ(i)==='certa'&&!UNITS.includes(i.unit))).length;
   const tempiTesto=fonte&&fonte.tempi?[['Preparazione',fonte.tempi.preparazione],['Cottura',fonte.tempi.cottura],['Totale',fonte.tempi.totale]].filter(x=>x[1]).map(x=>x[0]+': '+importDurataTesto(x[1])).join(' · '):'';
   const bandaFonte=!fonte?'':`<div class="preview-fonte" role="note" style="font-size:12px;color:var(--dark);background:var(--cream);border:1px solid var(--border);border-radius:var(--r-md);padding:10px 12px;margin-bottom:14px;line-height:1.5">
       ${fonte.tipo==='strutturata'
@@ -9388,7 +9600,7 @@ function renderPreview(){
       ${tempiTesto?`<div class="preview-fonte-tempi">Tempi dalla fonte (non salvati nella Ricetta): ${escAttr(tempiTesto)}</div>`:''}
       ${fonte.notaResa?`<div class="preview-fonte-resa">${escAttr(fonte.notaResa)}</div>`:''}
       ${fonte.sezioni&&fonte.sezioni.length?`<div class="preview-fonte-sezioni">Possibili preparazioni intermedie (da confermare; restano passaggi della Ricetta): ${fonte.sezioni.map(z=>'«'+escAttr(z.nome)+'» passaggi '+z.da+(z.a!==z.da?'–'+z.a:'')).join(', ')}</div>`:''}
-      ${daConfermare?`<div class="preview-fonte-confermare"><strong>${daConfermare} ingredient${daConfermare===1?'e':'i'} da confermare:</strong> quantità o unità non rappresentabili. Inseriscile qui o nel LAB; se restano vuote, oggi KHUB le salva come 0 g.</div>`:''}
+      ${daConfermare?`<div class="preview-fonte-confermare"><strong>${daConfermare} ingredient${daConfermare===1?'e':'i'} da confermare.</strong> Le quantità «q.b.» restano tali e non entrano nei pesi; le quantità da indicare vanno inserite prima di rendere attiva la Ricetta; gli intervalli si conservano e il valore si sceglie in Produzione; unità come «spicchio» restano tali e la conversione in grammi viene chiesta quando serve. Nessuna diventa 0 g.</div>`:''}
     </div>`;
   const destinazioneEsistente=S.loadDestinazione==='esistente';
   const schedaScelta=destinazioneEsistente?R(S.loadDestinazioneSchedaId):null;
@@ -9422,13 +9634,14 @@ function renderPreview(){
     ${p.ingredients.map((ing,idx)=>`
     <div class="preview-ing-row">
       <span class="preview-ing-name">${escAttr(ing.name)}</span>
-      <input class="preview-ing-qty" type="number" value="${escAttr(ing.qty)}" data-prev-ing="${idx}" data-field="qty">
+      <input class="preview-ing-qty" type="text" inputmode="decimal" autocomplete="off" value="${escAttr(testoCampoQ(ing))}" placeholder="${tipoQ(ing)==='mancante'?'da indicare':''}" title="Numero, «q.b.» oppure da-a (es. 20-30)" data-prev-ing="${idx}" data-field="qty">
       <select class="preview-ing-unit" data-prev-ing="${idx}" data-field="unit">
-        ${UNITS.includes(ing.unit)?'':'<option value="" selected>—</option>'}${UNITS.map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}
+        ${!ing.unit?'<option value="" selected>—</option>':UNITS.includes(ing.unit)?'':`<option value="${escAttr(ing.unit)}" selected>${escAttr(ing.unit)}</option>`}${UNITS.map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}
       </select>
       <span class="preview-ing-pct" style="font-size:11px;color:var(--light);min-width:35px;text-align:right" title="Quota del peso a crudo">${pctPrev(ing,idx)}</span>
-    </div>${ing.originale&&ing.statoImport&&ing.statoImport!=='estratto'?`<div class="preview-ing-originale" style="font-size:11px;color:var(--mid);margin:-2px 0 6px">Nella fonte: «${escAttr(ing.originale)}» — <strong>${ing.statoImport==='mancante'?'quantità non indicata':'da confermare'}</strong></div>`:''}`).join('')}
+    </div>${notaQ(ing)}`).join('')}
     ${notaPesiPrev?`<div class="preview-weights-note" style="font-size:11px;color:var(--mid);margin-top:6px">${notaPesiPrev}</div>`:''}
+    ${notaEsclusiPrev?`<div class="preview-weights-excluded" style="font-size:11px;color:var(--mid);margin-top:4px">${notaEsclusiPrev}</div>`:''}
     ${p.steps&&p.steps.length?`
     <div class="card-label" style="margin-top:18px"><i class="ti ti-list-numbers"></i> Procedimento</div>
     <div class="preview-steps">
@@ -9613,12 +9826,17 @@ function renderLabRecipe(recipe){
       <tbody>
         ${v.ingredients.map(ing=>{
           const isBrick=ing.isSubRecipe===true;
+          // P0-c: tipo di quantita' (q.b., da indicare, intervallo) e unita' della fonte.
+          const kq=['certa','variabile','mancante','intervallo'].indexOf(ing.qtyKind)!==-1?ing.qtyKind:null;
+          const testoQ=kq==='mancante'?'':kq==='variabile'?'q.b.':kq==='intervallo'?formatQtyDisplay(ing.qtyMin)+'-'+formatQtyDisplay(ing.qtyMax):(ing.qty==null?'':ing.qty);
+          const notaQ=kq==='variabile'?'quantità variabile: esclusa dai pesi':kq==='mancante'?'quantità da indicare':kq==='intervallo'?'intervallo: il valore si sceglie in Produzione'
+            :(!UNITS.includes(ing.unit)?'conversione in grammi da confermare':'');
           const brickInfo=isBrick?findVariantById(ing.subRecipeId):null;
           const rigaPrincipale=`
         <tr${isBrick?' style="background:var(--sage-light)"':''}>
-          <td>${isBrick?'<i class="ti ti-brick" style="color:var(--sage-dark);margin-right:5px" title="Mattoncino: questo ingrediente è un\'altra Scheda"></i>':''}<input class="ing-qty-input" style="width:100%;min-width:100px" value="${escAttr(ing.name)}" onchange="onIngName('${recipe.id}','${ing.id}',this.value)"></td>
-          <td><input class="ing-qty-input" type="number" value="${ing.qty}" onchange="onIngQty('${recipe.id}','${ing.id}',this.value)"></td>
-          <td><select class="ing-unit-select" onchange="onIngUnit('${recipe.id}','${ing.id}',this.value)">${UNITS.map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}</select></td>
+          <td>${isBrick?'<i class="ti ti-brick" style="color:var(--sage-dark);margin-right:5px" title="Mattoncino: questo ingrediente è un\'altra Scheda"></i>':''}<input class="ing-qty-input" style="width:100%;min-width:100px" value="${escAttr(ing.name)}" onchange="onIngName('${recipe.id}','${ing.id}',this.value)">${notaQ?`<div class="ing-qty-nota" style="font-size:11px;color:var(--mid);margin-top:2px"${ing.sourceText?` title="Nella fonte: ${escAttr(ing.sourceText)}"`:''}>${notaQ}</div>`:''}</td>
+          <td>${kq?`<input class="ing-qty-input" type="text" inputmode="decimal" autocomplete="off" value="${escAttr(testoQ)}" placeholder="${kq==='mancante'?'da indicare':''}" title="Numero, «q.b.» oppure da-a (es. 20-30)" onchange="onIngQtyTesto('${recipe.id}','${ing.id}',this.value)">`:`<input class="ing-qty-input" type="number" value="${ing.qty}" onchange="onIngQty('${recipe.id}','${ing.id}',this.value)">`}</td>
+          <td><select class="ing-unit-select" onchange="onIngUnit('${recipe.id}','${ing.id}',this.value)">${UNITS.includes(ing.unit)?'':`<option value="${escAttr(ing.unit)}" selected>${escAttr(ing.unit)}</option>`}${UNITS.map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}</select></td>
           <td class="ing-pct">${pesiLab.status==='complete'&&pesiLab.raw>0&&pesiLab.byId[ing.id]?(pesiLab.byId[ing.id].rawGrams/pesiLab.raw*100).toFixed(1)+'%':'—'}</td>
           <td style="text-align:right"><input type="number" min="0" max="500" placeholder="—"
             value="${ing.estimatedYieldPct!=null?ing.estimatedYieldPct:''}"
@@ -9657,7 +9875,7 @@ function renderLabRecipe(recipe){
           return rigaPrincipale+rigaDettaglio;
         }).join('')}
       </tbody>
-    </table>
+    </table>${(()=>{const n=v.ingredients.filter(i=>i.qtyKind==='mancante').length;return n?`<div class="lab-quantita-mancanti" role="note" style="font-size:12px;color:var(--dark);background:var(--cream);border:1px solid var(--border);border-radius:var(--r-md);padding:8px 12px;margin:8px 0">${n===1?'Un ingrediente non ha la quantità':n+' ingredienti non hanno la quantità'}: puoi validare la Ricetta, ma per renderla attiva in Produzione va indicata (un numero, oppure «q.b.» se il dosaggio è libero). Conviene farlo prima di validarla: una Ricetta validata si corregge solo tornando nel LAB.</div>`:'';})()}
     <div class="add-ing-row">
       ${S.addIngMode==='mattoncino'?`
         ${S.addIngSelectedMattoncino?`
@@ -10014,7 +10232,7 @@ function renderQuickCalcPanel(recipe,vv){
     <table class="ing-table qc-table">
       <thead><tr><th>Ingrediente</th><th>Quantità a crudo · temporanee, non salvate</th><th>Unità</th></tr></thead>
       <tbody>${r.ingredients.map(function(i){
-        return`<tr data-qc-item="${escAttr(i.itemKey)}"><td class="ing-name">${escAttr(i.name)}${i.estimatedYieldPct!=null?` <span style="font-size:11px;color:var(--mid)">resa ${escAttr(i.estimatedYieldPct)}%</span>`:''}</td><td class="qc-qty">${formatQuickCalcQty(i.operativeQty,i.unit)}</td><td>${escAttr(i.unit)}</td></tr>`;
+        return`<tr data-qc-item="${escAttr(i.itemKey)}"><td class="ing-name">${escAttr(i.name)}${i.estimatedYieldPct!=null?` <span style="font-size:11px;color:var(--mid)">resa ${escAttr(i.estimatedYieldPct)}%</span>`:''}</td><td class="qc-qty">${i.qtyKind==='variabile'?'q.b.':formatQuickCalcQty(i.operativeQty,i.unit)}</td><td>${i.qtyKind==='variabile'?'':escAttr(i.unit)}</td></tr>`;
       }).join('')}</tbody>
     </table>`;
   }
@@ -10138,7 +10356,7 @@ function renderProdRecipe(recipe){
         ${vv.ingredients.map(ing=>`
         <tr>
           <td class="ing-name">${ing.name}</td>
-          <td class="ing-qty-ro">${cnum(ing.qty)}</td>
+          <td class="ing-qty-ro">${ing.qtyKind==='variabile'?'q.b.':ing.qtyKind==='mancante'?'da indicare':ing.qtyKind==='intervallo'?formatQtyDisplay(ing.qtyMin)+'–'+formatQtyDisplay(ing.qtyMax):cnum(ing.qty)}</td>
           <td>${ing.unit||''}</td>
           <td class="ing-pct">${pesi.status==='complete'&&pesi.byId[ing.id]?pesi.byId[ing.id].pct.toFixed(1)+'%':'—'}</td>
         </tr>`).join('')}
@@ -11187,12 +11405,30 @@ function bindEvents(){
     if(S.loadPreview){S.loadPreview.declaredYieldValue=resaMain.value;reseSr.forEach((r,i)=>{S.loadPreview.subRecipes[i].declaredYieldValue=r.value;});}
     if(vp&&S.loadPreview)S.loadPreview.portionsCount=vp.value;
     if(vg&&S.loadPreview)S.loadPreview.gramsPerPortion=vg.value;
-    // Aggiorna ingredienti preview
+    // Aggiorna ingredienti preview. P0-c: il campo quantita' accetta un numero,
+    // "q.b." o un intervallo (20-30); vuoto = quantita' da indicare. Mai uno 0
+    // o un'unita' "g" inventati: senza unita' il salvataggio si ferma.
+    const righePrev={};
     document.querySelectorAll('[data-prev-ing]').forEach(el=>{
       const idx=parseInt(el.dataset.prevIng);
-      const field=el.dataset.field;
-      if(S.loadPreview&&S.loadPreview.ingredients[idx])S.loadPreview.ingredients[idx][field]=el.value;
+      (righePrev[idx]=righePrev[idx]||{})[el.dataset.field]=el.value;
     });
+    for(const idx of Object.keys(righePrev)){
+      const ing=S.loadPreview&&S.loadPreview.ingredients[idx];
+      if(!ing)continue;
+      const r=righePrev[idx];
+      const unita=r.unit!==undefined?r.unit:(ing.unit||'');
+      const q=interpretaTestoQuantita(r.qty!==undefined?r.qty:ing.qty);
+      const nome='«'+(ing.name||('ingrediente '+(Number(idx)+1)))+'»';
+      if(q.kind==='non_valido'){toast(nome+': quantità non valida. Scrivi un numero, «q.b.» oppure un intervallo (es. 20-30).','ti-alert-circle');return;}
+      if((q.kind==='numero'&&q.qty>0)||q.kind==='intervallo'){
+        if(!unita){toast(nome+': scegli l\'unità di misura.','ti-alert-circle');return;}
+        ing.unit=unita;
+        if(q.kind==='numero'){ing.qty=q.qty;if(ing.qtyKind){ing.qtyKind='certa';ing.qtyMin=null;ing.qtyMax=null;}}
+        else{ing.qty=null;ing.qtyKind='intervallo';ing.qtyMin=q.min;ing.qtyMax=q.max;}
+      }else if(q.kind==='variabile'){ing.qty=null;ing.unit=unita||null;ing.qtyKind='variabile';ing.qtyMin=null;ing.qtyMax=null;}
+      else{ing.qty=null;ing.unit=unita||null;ing.qtyKind='mancante';ing.qtyMin=null;ing.qtyMax=null;}
+    }
     savePreview();
   });
 
@@ -11780,7 +12016,7 @@ function renderLabFormulazioneD3(recipe,v,w){
   var calo=w.status==='complete'&&w.raw>0?Math.round((w.finished-w.raw)/w.raw*100):null;
   var avviso=pending?`<div class="lab-yield-error d3-errore">${d3Esc(pending.error)} Non ancora salvata. <button class="d3-btn-text" onclick="discardLabDeclaredYieldInput('${recipe.id}')">Ripristina</button></div>`
     :state.status==='invalid'?`<div class="lab-yield-error d3-errore">La resa salvata non è valida: ${d3Esc(declaredYieldErrorMessage(state.error))}</div>`:'';
-  var nota=w.status==='incomplete'?'pesi incompleti: mancano conversioni':w.status==='invalid'?'pesi non calcolabili':w.status==='empty'?'nessun ingrediente':(stima?'calcolato dagli ingredienti · stima':'calcolato dagli ingredienti');
+  var nota=w.status==='incomplete'?'pesi incompleti: mancano conversioni':w.status==='unresolved'?'pesi non calcolabili: quantità da indicare o intervalli':w.status==='invalid'?'pesi non calcolabili':w.status==='empty'?'nessun ingrediente':(stima?'calcolato dagli ingredienti · stima':'calcolato dagli ingredienti')+(w.excluded&&w.excluded.length?' · esclusi q.b.: '+w.excluded.map(function(m){return d3Esc(m.name);}).join(', '):'');
   return`<div class="d3-pesi" id="lab-formulation">
     <div class="d3-peso lab-w-raw"><div class="d3-peso-label">Peso totale a crudo</div><div class="d3-peso-val">${crudo}</div><div class="d3-peso-nota">${nota}</div></div>
     <div class="d3-peso lab-w-finished"><div class="d3-peso-label">Peso finito teorico</div><div class="d3-peso-val">${finito}</div><div class="d3-peso-nota">${w.status==='complete'?'calcolato con le rese degli ingredienti'+(calo!=null&&calo!==0?' · '+(calo>0?'+':'−')+Math.abs(calo)+'%':'')+(stima?' · stima':''):nota}</div></div>

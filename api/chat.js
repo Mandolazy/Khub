@@ -670,7 +670,8 @@ export default async function handler(req, res) {
       return Array.isArray(st) ? st.map(x => String((x && x.text) || x || '').trim() + '\u0000' + durataPasso(x && x.expectedDurationSeconds)) : [];
     };
     const stessoValore = (a, b) => (a == null || a === '') && (b == null || b === '') ? true : (a == null || b == null) ? false : (typeof a === 'number' || typeof b === 'number' || !isNaN(Number(a))) ? Number(a) === Number(b) : String(a) === String(b);
-    const CAMPI_FORMULAZIONE = ['name', 'qty', 'unit', 'is_sub_recipe', 'sub_recipe_id', 'estimated_yield_pct', 'measured_yield_pct'];
+    const CAMPI_FORMULAZIONE = ['name', 'qty', 'unit', 'is_sub_recipe', 'sub_recipe_id', 'estimated_yield_pct', 'measured_yield_pct',
+      'qty_kind', 'qty_min', 'qty_max']; // P0-c: anche il tipo di quantita' non cambia sul posto in una Ricetta validata
 
     // Transizione fra lo stato salvato (prima) e quello richiesto (dopo) di una
     // Ricetta: null se ammessa, altrimenti { code, msg }. usi() legge, solo se
@@ -756,10 +757,26 @@ export default async function handler(req, res) {
         const mattoncino = (await mr.json()).some(u => u.variant_id !== id);
         return { sessioni, mattoncino };
       };
+      // P0-c: una Ricetta diventa Attiva solo senza quantita' da indicare. Si leggono
+      // le righe salvate (mai solo quelle inviate dal client), sostituite da quelle
+      // della richiesta e senza quelle eliminate. Righe senza qty_kind (precedenti a
+      // P0-c): nessun controllo nuovo, nessun blocco retroattivo.
+      const quantitaDaIndicare = async id => {
+        const salvate = await sbSelectAll('ingredients?select=*&variant_id=eq.' + encodeURIComponent(id) + '&order=sort_order.asc,id.asc');
+        const richiesti = (data.ingredients || []).filter(i => i && i.variant_id === id);
+        const tolti = new Set(eliminati.filter(d => d.variant_id === id).flatMap(d => [].concat(d.ids || d.id || [])));
+        const perId = new Map(salvate.filter(i => !tolti.has(i.id)).map(i => [i.id, i]));
+        richiesti.forEach(i => perId.set(i.id, Object.assign({}, perId.get(i.id) || {}, i)));
+        return [...perId.values()].filter(i => i.qty_kind === 'mancante').map(i => i.name || i.id);
+      };
       for (const v of varianti) {
         const prima = primaDi.get(v.id) || null;
         const t = await transizioneVarianteProblema(prima, v, usi);
         if (t) return t;
+        if (v.active === true && !(prima && prima.active === true)) {
+          const mancanti = await quantitaDaIndicare(v.id);
+          if (mancanti.length) return { code: 'quantita_mancante', msg: 'una Ricetta con quantita\' da indicare non diventa Attiva: indica la quantita\' di ' + mancanti.slice(0, 5).join(', ') + ' (' + v.id + ')' };
+        }
         if (prima && prima.status !== 'lab' && v.status !== 'lab') {
           const f = formulazioneProblema(v.id, prima, richiestiPer(v.id), ingSalvati.filter(i => i.variant_id === v.id), eliminati.filter(d => d.variant_id === v.id));
           if (f) return f;
@@ -856,6 +873,9 @@ export default async function handler(req, res) {
         const v = (await vr.json())[0];
         if (!v || v.status !== 'validated' || v.active !== true) return 'solo una Ricetta Attiva va in Produzione';
         if (row.recipe_id != null && row.recipe_id !== v.recipe_id) return 'Ricetta e Scheda non corrispondono';
+        // P0-c: nessuna quantita' da indicare o intervallo senza valore scelto nello snapshot.
+        const ingSnap = row.snapshot && Array.isArray(row.snapshot.ingredients) ? row.snapshot.ingredients : [];
+        if (ingSnap.some(i => i && (i.qtyKind === 'mancante' || i.qtyKind === 'intervallo'))) return 'quantita\' non risolte nello snapshot: indica o scegli le quantita\' prima della Produzione';
         return null;
       }
       const rows = Array.isArray(data) ? data : [data];
@@ -1277,6 +1297,25 @@ export default async function handler(req, res) {
         const r = await sbPost(table, data);
         if (r.error) throw new Error(label + ': ' + r.error);
       };
+
+      // P0-c: tipo di quantita' coerente prima di scrivere (gli stessi vincoli
+      // della migrazione 0012, cosi' l'errore e' chiaro e nulla viene scritto).
+      const problemaQuantita = (Array.isArray(ingredients) ? ingredients : []).map(i => {
+        if (!i || typeof i !== 'object') return null;
+        const k = i.qty_kind;
+        if (k === undefined || k === null) return ('qty_min' in i && i.qty_min != null) || ('qty_max' in i && i.qty_max != null) ? 'intervallo senza tipo' : null;
+        if (!['certa', 'variabile', 'mancante', 'intervallo'].includes(k)) return 'tipo di quantita\' non ammesso';
+        const q = Number(i.qty), mn = i.qty_min == null ? null : Number(i.qty_min), mx = i.qty_max == null ? null : Number(i.qty_max);
+        if (k === 'certa' && !(q > 0)) return 'quantita\' certa non positiva';
+        if (k !== 'certa' && q !== 0) return 'quantita\' non numerica con un valore';
+        if (k === 'intervallo' && !(mn > 0 && mx > mn)) return 'intervallo non valido';
+        if (k !== 'intervallo' && (mn != null || mx != null)) return 'minimo o massimo senza intervallo';
+        if (i.source_text != null && (typeof i.source_text !== 'string' || i.source_text.length > 300)) return 'testo della fonte non valido';
+        return null;
+      }).find(Boolean);
+      if (problemaQuantita) {
+        return res.status(200).json({ ok: false, code: 'quantita_non_valida', errors: ['ingredienti: ' + problemaQuantita + ': nessun dato salvato'] });
+      }
 
       // Stati delle Ricette: controllati prima di scrivere qualunque cosa.
       let problemaStati;
