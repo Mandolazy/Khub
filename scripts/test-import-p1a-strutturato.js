@@ -254,7 +254,7 @@ const SP_HTML = `<!doctype html><html><head><title>Ganache al caramello salato -
     const { p } = await importaLink(SP_HTML, 'https://www.soniaperonaci.it/ganache-al-caramello-salato/');
     assert.strictEqual(chiamate.ai.length - n0, 0);
     assert.deepStrictEqual(p.ingredients.map(i => [i.name, i.qty, i.unit, i.statoImport]), [['panna fresca liquida', 200, 'g', 'estratto'], ['zucchero semolato', 150, 'g', 'estratto'], ['burro', 30, 'g', 'estratto'],
-      ['fior di sale', 2, 'g', 'estratto'], ['cioccolato bianco', 150, 'g', 'estratto'], ['vaniglia', 1, null, 'da_confermare'], ['sciroppo di glucosio', 1, 'tbsp', 'estratto']]);
+      ['fior di sale', 2, 'g', 'estratto'], ['cioccolato bianco', 150, 'g', 'estratto'], ['vaniglia', 1, 'baccello', 'da_confermare'] /* P0-c: unita' della fonte conservata */, ['sciroppo di glucosio', 1, 'tbsp', 'estratto']]);
     assert.strictEqual(p.ingredients[5].unitaOriginale, 'baccello'); assert.strictEqual(p.steps.length, 7);
     assert.deepStrictEqual([p.declaredYield.qty, p.declaredYield.unit], ['', ''], 'resa non dichiarata: vuota');
     const bozze = await ev(id => (R(id).labVersions || []).map(v => v.id), scheda.id);

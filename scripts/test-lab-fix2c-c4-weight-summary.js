@@ -312,8 +312,8 @@ const sansEstimate = r => { const c = { ...r }; delete c.referenceDataUsed; retu
     assert.ok(!/computeSessionScaling|portionsCount|gramsPerPortion/.test(f));
     const sha = s => require('crypto').createHash('sha256').update(s).digest('hex').slice(0, 16);
     const expect = {
-      'function computeSessionScaling(input)': 'ddfc1febb5010cdc', 'function computeFormulationWeights(ingredients,resolveFact)': "765b3d8a8edde206",
-      'function openMandaInProduzione(recipeId,variantId,target)': "079b4b667450fa0f", 'async function confirmMandaInProduzione()': "4d8f576301f9d437",
+      'function computeSessionScaling(input)': 'ff44a92ee6881ba1', 'function computeFormulationWeights(ingredients,resolveFact)': "f481a42d06c68c3a",
+      'function openMandaInProduzione(recipeId,variantId,target)': "2baefc3293ba4b72", 'async function confirmMandaInProduzione()': "36ec9ce863243968",
       'function computeQuickCalc(recipe,vv,portionsText,gppText)': "1d5d1bb76a0d72ce", 'function sendQuickCalcToProduction()': "7568a463d6f6d2f4",
     };
     for (const [m, h] of Object.entries(expect)) assert.strictEqual(sha(extractFunction(m)), h, 'cambiato: ' + m);

@@ -405,11 +405,11 @@ const tick = () => new Promise(r => setTimeout(r, 30));
     const chat = fs.readFileSync(path.join(ROOT, 'api/chat.js'), 'utf8');
     assert.ok((chat.match(/categoria: ' \+ \(recipe\.category \|\| 'n\/d'\)/g) || []).length === 2, 'M1/M2 lato server: categoria mancante -> n/d (invariato)');
     const PROTETTE = {
-      'async function loadFromSupabase()': '0f20790b79f681e3', 'async function saveToSupabase(recipe)': '55d82322a3c2285f',
+      'async function loadFromSupabase()': 'd7b44d135ae075e5', 'async function saveToSupabase(recipe)': 'f9dc1d860de4899d',
       // Finalizzazione D3: solo il ramo S.uiD3 di "Elimina" (classico identico a main, test-preview-direzione-3 P10).
-      'function renderProdRecipe(recipe)': '3c3eaeaff0e02ea8', 'function costruisciPayloadM2(recipeId, message, classification)': '9850def5ee757a1c',
-      'async function runM1(recipeId)': 'c65f22895bf0d242', 'async function createProductionSession(preparedInput)': '185ca85dcee49397',
-      'function computeSessionScaling(input)': 'ddfc1febb5010cdc', 'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)': '9df6758db87b12b1',
+      'function renderProdRecipe(recipe)': '65593bb8883e3f3a', 'function costruisciPayloadM2(recipeId, message, classification)': 'bfe146dcab9a721d',
+      'async function runM1(recipeId)': '5eb87f13cfe9d839', 'async function createProductionSession(preparedInput)': '185ca85dcee49397',
+      'function computeSessionScaling(input)': 'ff44a92ee6881ba1', 'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)': '142443edbb06025b',
     };
     for (const [m, h] of Object.entries(PROTETTE)) assert.strictEqual(sha(extractFunction(m)), h, m);
   });

@@ -110,7 +110,8 @@ Funzioni non protette da impronta ma presenti nell'elenco di controllo delle mod
 
 ## 8. Limiti noti
 
-- **MichelinAI M1/M2** (`runM1`, `costruisciPayloadM2`, con impronta e non modificate): ricevono ancora `0`/`g` per q.b. e quantità da indicare. Da trattare in una fase dedicata.
+- **MichelinAI M1/M2**: risolto in P0-c.1 (`docs/import-engine/P0-c1.md` §2).
+- **Salvataggio con righe miste** (PostgREST `PGRST102`): risolto in P0-c.1 (§1).
 - **Importazione AI**: le righe non hanno `source_text` (l'AI non restituisce la riga originale).
 - **Ingredienti precedenti nel LAB**: mantengono il campo numerico; non si può scrivere «q.b.» su una riga senza tipo (scelta voluta per non cambiare il markup protetto).
 - **Ingredienti `variabile`/`mancante` senza unità**: salvati con `unit = 'g'` per il vincolo `NOT NULL DEFAULT 'g'` (come già avveniva); la firma della bozza usa lo stesso valore, quindi resta stabile dopo la rilettura.

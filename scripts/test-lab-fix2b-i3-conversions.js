@@ -399,9 +399,9 @@ function makeClient(fetchImpl) {
     const sha = s => crypto.createHash('sha256').update(s).digest('hex').slice(0, 16);
     const expect = {
       'function sessionScalingUnitFamily(unit)': '2df3b3a7184b7e88', 'function sessionScalingGenericFamilyTable(family)': '61079e89f7ddc6d6',
-      'function resolveSessionScalingConversionToGrams(unit,conversionFact)': '91673d43a7c3bd35', 'function computeSessionScaling(input)': 'ddfc1febb5010cdc',
+      'function resolveSessionScalingConversionToGrams(unit,conversionFact)': '91673d43a7c3bd35', 'function computeSessionScaling(input)': 'ff44a92ee6881ba1',
       'function chooseConversionAskUnit(unit)': 'ed754d663dbc6ebf', 'function resolveKnownProductionConversionFact(normalizedName,unit)': '5b0be8c06a5e4919',
-      'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)': '9df6758db87b12b1',
+      'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)': '142443edbb06025b',
       'function findMissingProductionConversions(preparedInput)': 'ad0ecd9f8e506dce', 'async function confirmConversionPreflightStep(rawValue)': '680244a1d503acb7',
       // LAB FIX 2C (C4): computeRecipeWeightSummary usa di proposito computeFormulationWeights
       // (pesi senza obiettivo salvato); la parita' con la versione precedente e' verificata
@@ -413,7 +413,7 @@ function makeClient(fetchImpl) {
       // confirmConversionPreflightStep salva il marcatore di gruppo; impronte aggiornate solo per queste due funzioni.
       // Errori di persistenza visibili (Direzione 3, finalizzazione): load e save trattano come
       // fallimento HTTP non 2xx, {ok:false} e risposte non valide; impronte aggiornate solo per queste due.
-      'async function loadFromSupabase()': '6c09c0dca1b39b51', 'async function saveToSupabase(recipe)': '092375a4ed25929a',
+      'async function loadFromSupabase()': '0458559ecf64e09b', 'async function saveToSupabase(recipe)': 'd641560e09d1bd34',
     };
     // LAB FIX 2B I4 aggiunge a load/save SOLO righe della resa dichiarata:
     // tolte quelle righe, le due funzioni sono identiche a main.

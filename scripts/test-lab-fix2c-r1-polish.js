@@ -177,14 +177,14 @@ const PROTETTE = {
   "function parseQuickCalcNumber(text)": "e54a2e7162d131c3",
   "function openQuickCalc(recipeId,variantId)": "a20126ad522b5879",
   "function sendQuickCalcToProduction()": "7568a463d6f6d2f4",
-  "function openMandaInProduzione(recipeId,variantId,target)": "079b4b667450fa0f",
-  "async function confirmMandaInProduzione()": "4d8f576301f9d437",
-  "function computeSessionScaling(input)": "ddfc1febb5010cdc",
-  "function buildSessionSnapshotV1(meta,computed)": "1fd7615c172e0ce2",
+  "function openMandaInProduzione(recipeId,variantId,target)": "2baefc3293ba4b72",
+  "async function confirmMandaInProduzione()": "36ec9ce863243968",
+  "function computeSessionScaling(input)": "ff44a92ee6881ba1",
+  "function buildSessionSnapshotV1(meta,computed)": "7ea3e2c1642ba7a6",
   "async function createProductionSession(preparedInput)": "185ca85dcee49397",
-  "function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)": "9df6758db87b12b1",
+  "function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)": "142443edbb06025b",
   "function computeRecipeWeightSummary(recipe,vv)": "beac67cc93eee93b",
-  "function computeFormulationWeights(ingredients,resolveFact)": "765b3d8a8edde206",
+  "function computeFormulationWeights(ingredients,resolveFact)": "f481a42d06c68c3a",
 };
 
 // Formulazione sintetica per la stampa (unita' g, ml, kg, n, tbsp) e conoscenze di conversione.

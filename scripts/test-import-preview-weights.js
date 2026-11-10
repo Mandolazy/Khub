@@ -305,10 +305,13 @@ const sha = s => require('crypto').createHash('sha256').update(s).digest('hex').
   });
 
   await test('P4. dati non validi o peso nullo: nessuna percentuale inventata', async () => {
-    for (const ings of [[I('Farina', -5, 'g'), I('Sale', 5, 'g')], [I('Farina', 0, 'g'), I('Sale', 0, 'g')]]) {
+    // P0-c: una quantita' dell'AI assente, 0 o negativa diventa "quantita' da indicare" (mai 0 g):
+    // nessuna percentuale e una nota che nomina gli ingredienti da completare.
+    for (const [ings, nota] of [[[I('Farina', -5, 'g'), I('Sale', 5, 'g')], 'Percentuali non calcolabili: quantità da indicare o intervalli per Farina.'],
+      [[I('Farina', 0, 'g'), I('Sale', 0, 'g')], 'Percentuali non calcolabili: quantità da indicare o intervalli per Farina, Sale.']]) {
       const r = await anteprima(ings);
       assert.ok(r.cells.every(x => x === '—'), JSON.stringify(ings));
-      assert.strictEqual(r.note, 'Percentuali non disponibili.');
+      assert.strictEqual(r.note, nota);
     }
     const vuota = await anteprima([]);
     assert.deepStrictEqual([vuota.cells, vuota.note], [[], null], 'nessun ingrediente: nessuna nota');
@@ -334,7 +337,7 @@ const sha = s => require('crypto').createHash('sha256').update(s).digest('hex').
       'function computeFormulationWeights(ingredients,resolveFact)'].map(extractFunction).concat(html.match(/var SESSION_SCALING_[A-Z_]+=\{[^}]*\};/g)).join('\n') + ';return computeFormulationWeights;')(clone(KNOW));
     const w = cfw(ings.map((x, i) => ({ ...x, id: 'k' + i })));
     assert.deepStrictEqual(r.cells, ings.map((x, i) => String(Math.round(w.byId['k' + i].rawGrams / w.raw * 1000) / 10) + '%'));
-    assert.strictEqual(sha(extractFunction('function computeFormulationWeights(ingredients,resolveFact)')), '765b3d8a8edde206', 'computeFormulationWeights invariata');
+    assert.strictEqual(sha(extractFunction('function computeFormulationWeights(ingredients,resolveFact)')), 'f481a42d06c68c3a', 'computeFormulationWeights: impronta P0-c (pesi con esclusi q.b. e quantita\' non risolte; equivalenza sulle Ricette precedenti in test-p0c-equivalenza)');
     const prev = extractFunction('function renderPreview()');
     assert.ok(prev.includes('computeFormulationWeights(p.ingredients)') && !/reduce\(/.test(prev.slice(0, prev.indexOf('const destinazioneEsistente'))), 'nessuna somma di quantita\'');
   });

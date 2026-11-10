@@ -455,8 +455,8 @@ const text = h => h.replace(/<[^>]+>/g, ' ').replace(/&#39;/g, "'").replace(/\s+
     assert.strictEqual((madre.match(/renderActiveYieldSection/g) || []).length, 1, 'solo nella sezione Attive');
     const sha = s => crypto.createHash('sha256').update(s).digest('hex').slice(0, 16);
     const expect = {
-      'function computeSessionScaling(input)': 'ddfc1febb5010cdc', 'function resolveKnownProductionConversionFact(normalizedName,unit)': '5b0be8c06a5e4919',
-      'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)': '9df6758db87b12b1',
+      'function computeSessionScaling(input)': 'ff44a92ee6881ba1', 'function resolveKnownProductionConversionFact(normalizedName,unit)': '5b0be8c06a5e4919',
+      'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)': '142443edbb06025b',
       // LAB FIX 2C (C4): computeRecipeWeightSummary usa di proposito computeFormulationWeights
       // (pesi senza obiettivo salvato); la parita' con la versione precedente e' verificata
       // in test-lab-fix2c-c4-weight-summary.js. Impronta aggiornata solo per questa funzione.

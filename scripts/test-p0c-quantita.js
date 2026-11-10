@@ -94,7 +94,7 @@ const PAGINA = '<html><head>' + ld({ '@type': 'Recipe', name: 'Pane P0-c', recip
     assert.deepStrictEqual(lab, [['500', 'g'], ['2', 'spicchio'], ['1', 'baccello'], ['q.b.', 'g'], ['', 'g'], ['20-30', 'g']]);
     const testo = await page.textContent('.ing-table');
     assert.ok(/conversione in grammi da confermare/.test(testo) && /esclusa dai pesi/.test(testo) && /quantità da indicare/.test(testo) && /intervallo/.test(testo));
-    assert.ok(/non hanno la quantità|non ha la quantità/.test(await page.textContent('body')), 'avviso nel LAB');
+    assert.ok(/non hanno la quantità|non ha la quantità/.test(await ev(() => document.body.innerText)), 'avviso nel LAB');
   });
 
   console.log('P0-c — calcoli');
@@ -139,6 +139,17 @@ const PAGINA = '<html><head>' + ld({ '@type': 'Recipe', name: 'Pane P0-c', recip
     assert.deepStrictEqual((await stato()).slice(0, 5), [['farina', 500, 'certa', null, null], ['aglio', 2, 'certa', null, null], ['vaniglia', 1, 'certa', null, null], ['Sale', null, 'variabile', null, null], ['Burro', 100, 'certa', null, null]]);
     await page.waitForTimeout(2500); // autosave: attesa di 1,5 s dopo l'ultima modifica
     assert.deepStrictEqual((await righeDb(idBozza)).map(vista)[4], ['Burro', 100, 'g', 'certa', null, null], 'salvato');
+  });
+
+  await test('C3. P0-c.1: ingrediente aggiunto nel LAB in una Scheda importata -> salvato (come PostgREST: richieste con chiavi uniformi); tipi delle altre righe intatti', async () => {
+    await ev(id => { S.view = 'recipe'; S.mode = 'lab'; S.selectedId = id; S.addIngMode = 'ingrediente'; render(); }, idScheda);
+    await page.waitForSelector('#new-ing-name');
+    await ev(id => { document.getElementById('new-ing-name').value = 'Lievito'; document.getElementById('new-ing-qty').value = '10'; document.getElementById('new-ing-unit').value = 'g'; addIngredient(id); }, idScheda);
+    await page.waitForTimeout(2500);
+    const r = (await righeDb(idBozza)).map(vista);
+    assert.deepStrictEqual(r[r.length - 1], ['Lievito', 10, 'g', null, null, null]);
+    assert.deepStrictEqual(r.slice(3, 6).map(x => x[3]), ['variabile', 'certa', 'intervallo'], 'tipi intatti');
+    assert.ok(!/Salvataggio non riuscito/.test(await ev(() => document.body.innerText)), 'nessun errore di salvataggio visibile');
   });
 
   console.log('P0-c — validazione, attivazione e controlli del server');
@@ -202,7 +213,7 @@ const PAGINA = '<html><head>' + ld({ '@type': 'Recipe', name: 'Pane P0-c', recip
     const vid = 'vQ';
     await ev(v => openMandaInProduzione('rP0c', v, { portions: 10, gpp: 100 }), vid);
     const etichetta = await page.textContent('.manda-intervalli');
-    assert.ok(/acqua/.test(etichetta) && /20–30 g/.test(etichetta), etichetta);
+    assert.ok(/acqua/.test(etichetta) && /20–30 g/.test(etichetta) && /formulazione base/.test(etichetta), etichetta);
     await ev(() => confirmMandaInProduzione()); await page.waitForTimeout(200);
     assert.ok(/Scegli la quantità di «acqua»/.test(await ev(() => S.pendingMandaInProduzione.error)));
     await ev(v => sceltaIntervalloProduzione(v, v + '_acqua', '40'), vid);
@@ -220,8 +231,9 @@ const PAGINA = '<html><head>' + ld({ '@type': 'Recipe', name: 'Pane P0-c', recip
     assert.deepStrictEqual(ingS.find(x => x[0] === 'sale'), ['sale', 'variabile', null, null, null], 'q.b. senza quantita\'');
     assert.deepStrictEqual(ingS.find(x => x[0] === 'acqua').slice(0, 3).concat([ingS.find(x => x[0] === 'acqua')[4]]), ['acqua', null, 25, { min: 20, max: 30 }], 'valore scelto e intervallo');
     assert.strictEqual(sess.snapshot.ingredients.find(i => i.name === 'aglio').conversionSourceType, 'chef_confirmed');
-    await ev(id => goToNewProductionSession(id), sess.id); await page.waitForTimeout(400);
-    assert.ok(/sale[\s\S]*q\.b\./.test(await page.textContent('body')), 'Sessione: q.b.');
+    await ev(id => apriSessioneOperativa(id, 'attive'), sess.id); await page.waitForTimeout(500);
+    const testoSess = await ev(() => document.body.innerText);
+    assert.ok(/sale[\s\S]{0,80}q\.b\./i.test(testoSess), 'Sessione: sale q.b.');
     assert.deepStrictEqual(errori, []);
   });
 

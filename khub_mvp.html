@@ -5061,12 +5061,14 @@ function findRecipeVariant(recipeId,variantId){
 function openMandaInProduzione(recipeId,variantId,target){
   if(!canSendToProduction(findRecipeVariant(recipeId,variantId))){toast('Solo una Ricetta attiva può essere mandata in produzione.','ti-alert-circle');return;}
   var t=target||{};
+  if(S.produzioneIntervalli)delete S.produzioneIntervalli[variantId]; // P0-c.1: ogni invio parte senza valori scelti in precedenza (lo storico e' nello snapshot della Sessione)
   S.pendingMandaInProduzione={recipeId:recipeId,variantId:variantId,
     portions:t.portions!=null?String(t.portions):'',gpp:t.gpp!=null?String(t.gpp):'',error:null,loading:false};
   render();
 }
-// P0-c: valore scelto per un ingrediente a intervallo, per la prossima produzione
-// della Ricetta Attiva. Solo in memoria: la Ricetta resta invariata.
+// P0-c: valore scelto per un ingrediente a intervallo (nella formulazione base),
+// per l'invio in Produzione in corso. Solo in memoria fino alla creazione della
+// Sessione, che lo conserva nello snapshot; la Ricetta resta invariata.
 function sceltaIntervalloProduzione(variantId,ingId,val){
   if(!S.produzioneIntervalli[variantId])S.produzioneIntervalli[variantId]={};
   S.produzioneIntervalli[variantId][ingId]=String(val==null?'':val).trim();
@@ -5713,7 +5715,7 @@ function renderMandaInProduzioneModal(){
         var intervalli=vvI?vvI.ingredients.filter(function(i){return i.qtyKind==='intervallo';}):[];
         if(!intervalli.length)return'';
         var scelte=(S.produzioneIntervalli&&S.produzioneIntervalli[p.variantId])||{};
-        return'<div class="manda-intervalli" style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px"><div style="font-size:12px;font-weight:600;color:var(--mid)">Quantità da scegliere per questa produzione</div>'
+        return'<div class="manda-intervalli" style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px"><div style="font-size:12px;font-weight:600;color:var(--mid)">Quantità da scegliere per questa produzione</div><div style="font-size:12px;color:var(--mid);margin-top:-6px">Il valore è riferito alla formulazione base della Ricetta e viene poi scalato sulle porzioni indicate.</div>'
           +intervalli.map(function(i){
             return'<label style="display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:13px;color:var(--dark)"><span>'+escAttr(i.name)+' <span style="color:var(--mid)">('+formatQtyDisplay(i.qtyMin)+'–'+formatQtyDisplay(i.qtyMax)+' '+escAttr(i.unit)+')</span></span>'
               +'<input type="text" inputmode="decimal" class="manda-intervallo" data-ing="'+escAttr(i.id)+'" value="'+escAttr(scelte[i.id]!=null?scelte[i.id]:'')+'" placeholder="'+formatQtyDisplay(i.qtyMin)+'–'+formatQtyDisplay(i.qtyMax)+'"'
@@ -7540,7 +7542,8 @@ function costruisciPayloadM2(recipeId, message, classification){
     recipe:{id:recipe.id,name:recipe.name,category:recipe.category},
     variant:{
       id:v.id,
-      ingredients:(v.ingredients||[]).map(i=>({name:i.name,qty:i.qty,unit:i.unit})),
+      // P0-c.1: stessa rappresentazione di runM1 (q.b., da indicare, intervallo, conversione mancante).
+      ingredients:(v.ingredients||[]).map(i=>(i.qtyKind==='certa'||i.qtyKind==='variabile'||i.qtyKind==='mancante'||i.qtyKind==='intervallo')?Object.assign({name:i.name,qty:i.qtyKind==='certa'?i.qty:null,unit:i.unit||'g',qtyKind:i.qtyKind},i.qtyKind==='intervallo'?{qtyMin:i.qtyMin,qtyMax:i.qtyMax}:{}):({name:i.name,qty:i.qty,unit:i.unit})).map((x,n)=>{const o=(v.ingredients||[])[n];return x.qtyKind==='certa'&&o&&typeof computeFormulationWeights==='function'&&computeFormulationWeights([o]).status==='incomplete'?Object.assign({},x,{conversioneGrammi:'da_confermare'}):x;}),
       steps:[...(v.steps||[])],
       portionsCount:targetForAi(v.portionsCount), // FIX 2C (C6): non impostato = null
       gramsPerPortion:targetForAi(v.gramsPerPortion),
@@ -8149,8 +8152,11 @@ async function runM1(recipeId){
   const variantId=v.id; // catturato ORA: è la bozza a cui il risultato resterà legato
   const chiaveM1=recipeId+'|'+variantId;
 
+  // P0-c.1: ingredienti con la stessa forma (unica) di KhubReconciliation.buildSnapshot:
+  // righe senza tipo {name,qty,unit} come prima (impronte precedenti invariate);
+  // righe con tipo anche qtyKind e l'intervallo, qty null se non e' certa.
   const snapshot={
-    ingredients:(v.ingredients||[]).map(i=>({name:i.name,qty:i.qty,unit:i.unit})),
+    ingredients:KhubReconciliation.buildSnapshot(v).ingredients,
     steps:v.steps||[],
     portionsCount:v.portionsCount,gramsPerPortion:v.gramsPerPortion,
     note:v.note||'',
@@ -8163,7 +8169,8 @@ async function runM1(recipeId){
       mode:'m1',
       recipe:{id:recipe.id,name:recipe.name,category:recipe.category},
       // FIX 2C (C6): null solo nel payload per l'AI; lo snapshot (baseline L2) resta invariato.
-      variant:{id:v.id,ingredients:snapshot.ingredients,steps:snapshot.steps,portionsCount:targetForAi(snapshot.portionsCount),gramsPerPortion:targetForAi(snapshot.gramsPerPortion),note:snapshot.note},
+      // P0-c.1: per l'AI (non per la baseline) anche la conversione in grammi mancante.
+      variant:{id:v.id,ingredients:snapshot.ingredients.map((x,n)=>{const o=(v.ingredients||[])[n];return x.qtyKind==='certa'&&o&&typeof computeFormulationWeights==='function'&&computeFormulationWeights([o]).status==='incomplete'?Object.assign({},x,{conversioneGrammi:'da_confermare'}):x;}),steps:snapshot.steps,portionsCount:targetForAi(snapshot.portionsCount),gramsPerPortion:targetForAi(snapshot.gramsPerPortion),note:snapshot.note},
       intention:{initial:v.intentionInitial||null,current:v.intentionCurrent||null},
       criteria:{initial:v.criteriaInitial||null,current:v.criteriaCurrent||null},
       l3:(recipe.l3Items||[]).slice(0,20).map(x=>({distilledContent:x.distilledContent,contextConditions:x.contextConditions,knownLimits:x.knownLimits})),

@@ -105,6 +105,10 @@ function creaFintoSupabase(datiIniziali) {
       if (method === 'POST') {
         const data = JSON.parse(opts.body || 'null');
         const elenco = Array.isArray(data) ? data : [data];
+        // Come PostgREST: in un inserimento multiplo tutti gli oggetti devono
+        // avere le stesse chiavi, altrimenti l'intera richiesta e' rifiutata.
+        const chiaviDi = o => Object.keys(o && typeof o === 'object' ? o : {}).sort().join(',');
+        if (elenco.length > 1 && elenco.some(o => chiaviDi(o) !== chiaviDi(elenco[0]))) return risposta(400, { code: 'PGRST102', details: null, hint: null, message: 'All object keys must match' });
         const chiave = CHIAVI[table] || ['id'];
         const ignora = /ignore-duplicates/.test(prefer);
         const unisci = /merge-duplicates/.test(prefer);

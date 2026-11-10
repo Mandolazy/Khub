@@ -402,17 +402,17 @@ const box = (h, cls) => { const m = h.match(new RegExp('class="' + cls + '"[^>]*
 
   await test('D9. codice: motore di Produzione, salvataggio, firme, MichelinAI e gestori esistenti invariati', async () => {
     const PROTETTE = {
-      'function computeSessionScaling(input)': 'ddfc1febb5010cdc', 'async function createProductionSession(preparedInput)': '185ca85dcee49397',
-      'function buildValidatedVariantPayload(recipeId,vv)': '4186aeae0c1330e6', 'async function saveToSupabase(recipe)': '55d82322a3c2285f',
-      'async function loadFromSupabase()': '0f20790b79f681e3', 'function firmaContenutoBozza(v)': '9426d786f4588837',
-      'function computeFormulationWeights(ingredients,resolveFact)': '765b3d8a8edde206', 'function costruisciPayloadM2(recipeId, message, classification)': '9850def5ee757a1c',
-      'async function runM1(recipeId)': 'c65f22895bf0d242', 'function onIngQty(recipeId,ingId,val)': 'f70be59577371d4a',
+      'function computeSessionScaling(input)': 'ff44a92ee6881ba1', 'async function createProductionSession(preparedInput)': '185ca85dcee49397',
+      'function buildValidatedVariantPayload(recipeId,vv)': 'f4fc64648a86a261', 'async function saveToSupabase(recipe)': 'f9dc1d860de4899d',
+      'async function loadFromSupabase()': 'd7b44d135ae075e5', 'function firmaContenutoBozza(v)': '846ec26eda61f09a',
+      'function computeFormulationWeights(ingredients,resolveFact)': 'f481a42d06c68c3a', 'function costruisciPayloadM2(recipeId, message, classification)': 'bfe146dcab9a721d',
+      'async function runM1(recipeId)': '5eb87f13cfe9d839', 'function onIngQty(recipeId,ingId,val)': 'f70be59577371d4a',
       'function onLabDeclaredYield(recipeId,field,value)': '7bbbd369b9438f26', 'function toggleActiveV2(recipeId,variantId,currentActive)': 'ca8f22881e9ba641',
       'async function confirmValidate()': '84c902e4f4cba6ae', 'function validateLabProductionTarget(field,value)': 'fefbd04eed656496',
       'function computeRecipeWeightSummary(recipe,vv)': 'beac67cc93eee93b', 'function onIngUnit(recipeId,ingId,val)': '9839d1f8237ed53e',
       // Finalizzazione D3: solo il ramo S.uiD3 di "Elimina" (classico identico a main, test-preview-direzione-3 P10).
-      'function renderProdRecipe(recipe)': '3c3eaeaff0e02ea8', 'function computeLabUnitConversion(ing,toUnit,anchor,resolveFact)': 'dbf8adeb56a128a8',
-      'function convertIngredientQty(qty,fromUnit,toUnit,ingredientName,resolveFact)': 'a112b9ab70b1c60c', 'function resolveConfirmedLabConversionFact(normalizedName,unit)': 'abae9dfb0a09fae3', 'async function confirmLabConversion(rawValue)': '5eaca20d0914bdc8', 'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)': '9df6758db87b12b1',
+      'function renderProdRecipe(recipe)': '65593bb8883e3f3a', 'function computeLabUnitConversion(ing,toUnit,anchor,resolveFact)': 'dbf8adeb56a128a8',
+      'function convertIngredientQty(qty,fromUnit,toUnit,ingredientName,resolveFact)': 'a112b9ab70b1c60c', 'function resolveConfirmedLabConversionFact(normalizedName,unit)': 'abae9dfb0a09fae3', 'async function confirmLabConversion(rawValue)': '5eaca20d0914bdc8', 'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)': '142443edbb06025b',
     };
     for (const [m, h] of Object.entries(PROTETTE)) assert.strictEqual(sha(extractFunction(m)), h, m);
     const nuovo = ['function roundQtyDecimals(x,d)', 'function computeLabRounding(ingredients,decimals,toGrams)', 'function applyLabRound(recipeId)', 'function undoLabRound(recipeId)'].map(extractFunction).join('\n');

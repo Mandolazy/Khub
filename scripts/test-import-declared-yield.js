@@ -189,22 +189,22 @@ const SAVE_HANDLER = extractSaveHandler();
 
 // Impronte prese da 58fca45 (FIX 2C + R1 in Production): queste funzioni non devono cambiare.
 const PROTETTE = {
-  "function firmaContenutoBozza(v)": "9426d786f4588837",
-  "async function saveToSupabase(recipe)": "55d82322a3c2285f",
+  "function firmaContenutoBozza(v)": "846ec26eda61f09a",
+  "async function saveToSupabase(recipe)": "f9dc1d860de4899d",
   // Conversioni per nomi equivalenti (approvato): caricamento con selectConversionFacts; impronta aggiornata solo qui.
-  "async function loadFromSupabase()": "0f20790b79f681e3",
-  "function buildValidatedVariantPayload(recipeId,vv)": "4186aeae0c1330e6",
+  "async function loadFromSupabase()": "d7b44d135ae075e5",
+  "function buildValidatedVariantPayload(recipeId,vv)": "f4fc64648a86a261",
   "function declaredYieldFromRow(row)": "1a670be06f8aeba4",
   "function copyDeclaredYield(src)": "f990f25c54e140b4",
   "function declaredYieldPayload(v)": "70168f58328a1aaa",
   "function normalizeDeclaredYield(qty,unit)": "3804999344276047",
   "function onLabDeclaredYield(recipeId,field,value)": "7bbbd369b9438f26",
   "async function confirmActiveYieldEdit()": "92f6565ceacf884a",
-  "function computeSessionScaling(input)": "ddfc1febb5010cdc",
+  "function computeSessionScaling(input)": "ff44a92ee6881ba1",
   "async function createProductionSession(preparedInput)": "185ca85dcee49397",
-  "function buildSessionSnapshotV1(meta,computed)": "1fd7615c172e0ce2",
-  "function costruisciPayloadM2(recipeId, message, classification)": "9850def5ee757a1c",
-  "async function runM1(recipeId)": "c65f22895bf0d242",
+  "function buildSessionSnapshotV1(meta,computed)": "7ea3e2c1642ba7a6",
+  "function costruisciPayloadM2(recipeId, message, classification)": "bfe146dcab9a721d",
+  "async function runM1(recipeId)": "5eb87f13cfe9d839",
   "function importTargetValue(field,value)": "4043252f5e784f70",
   "function validateLabProductionTarget(field,value)": "fefbd04eed656496",
 };

@@ -199,12 +199,12 @@ const SRC = [
 
 // Impronte prese da main 539487b: queste funzioni non devono cambiare.
 const PROTETTE = {
-  "function computeSessionScaling(input)": "ddfc1febb5010cdc",
+  "function computeSessionScaling(input)": "ff44a92ee6881ba1",
   "async function createProductionSession(preparedInput)": "185ca85dcee49397",
-  "function buildValidatedVariantPayload(recipeId,vv)": "4186aeae0c1330e6",
-  "async function saveToSupabase(recipe)": "55d82322a3c2285f",
-  "async function loadFromSupabase()": "0f20790b79f681e3",
-  "function firmaContenutoBozza(v)": "9426d786f4588837",
+  "function buildValidatedVariantPayload(recipeId,vv)": "f4fc64648a86a261",
+  "async function saveToSupabase(recipe)": "f9dc1d860de4899d",
+  "async function loadFromSupabase()": "d7b44d135ae075e5",
+  "function firmaContenutoBozza(v)": "846ec26eda61f09a",
   "function toggleActiveV2(recipeId,variantId,currentActive)": "ca8f22881e9ba641",
   "async function confirmActiveYieldEdit()": "92f6565ceacf884a",
   "function creaBozzaDaSorgente(recipeId,attiva)": "24ff4e49d1353fae",

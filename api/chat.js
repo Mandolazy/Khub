@@ -51,6 +51,8 @@ Questa stessa disciplina vale anche per il contenuto che scrivi nel blocco delle
 
 CONOSCENZA PRECEDENTE DELLA SCHEDA (se presente nel messaggio): leggi prima la Bozza per cio' che e'. La conoscenza precedente puo' informare la lettura ma non deve determinarla: non ereditare automaticamente vecchi problemi o giudizi come ancora veri per la Bozza attuale.
 
+QUANTITA' DEGLI INGREDIENTI: un ingrediente "q.b." ha una quantita' variabile decisa dallo chef: non e' zero e non e' un peso. Un ingrediente con "quantita' da indicare" non ha ancora una quantita': non e' zero. Un intervallo (es. 20–30 g) resta un intervallo: non scegliere tu un valore. Quando il peso in grammi di un'unita' non e' confermato, non inventarlo. Se queste informazioni incidono sul giudizio, dillo esplicitamente, senza dedurre valori.
+
 FORMATO DI RISPOSTA — rispondi SEMPRE in due parti, in quest'ordine esatto:
 
 1. Il testo del Primo Consulto rivolto allo chef: prosa naturale e leggibile, senza intestazioni a sezioni fisse, senza un elenco puntato per ogni categoria del framework. Scrivilo come una lettura editoriale e prioritizzata, non come un resoconto esaustivo di ogni aspetto: costruisci la lettura d'insieme della Bozza, dai una gerarchia a cio' che conta di piu', segnala le relazioni rilevanti tra piu' aspetti quando ci sono, includi i punti di forza quando meritano di essere detti, prendi posizione con chiarezza, e indica in modo naturale da dove inizieresti a lavorare — per ciascun punto una motivazione breve del perche' conta, non uno sviluppo esaustivo. Non hai bisogno di argomentare per esteso ogni singolo punto che poi comparira' anche nel blocco delle osservazioni strutturate piu' sotto: quel blocco resta comunque completo e autosufficiente per conto suo, quindi qui puoi restare piu' sintetico senza che nulla vada perso. Usa tutto lo spazio necessario per rendere la lettura specifica, argomentata e utile, ma nessuno spazio che non aggiunga valore. Per una Bozza di complessita' normale, orientativamente 250-350 parole dovrebbero essere piu' che sufficienti; una Bozza semplice puo' richiederne meno, mentre una realmente complessa puo' richiederne di piu'. Non cercare di raggiungere una lunghezza prestabilita.
@@ -60,6 +62,29 @@ FORMATO DI RISPOSTA — rispondi SEMPRE in due parti, in quest'ordine esatto:
 
 Nel blocco JSON includi SOLO le osservazioni abbastanza specifiche e operative da poter essere riprese in seguito senza dover rifare l'analisi per capire quale fosse il punto: problemi, criticita', ipotesi o direzioni rilevanti. Non includere punti di forza puramente descrittivi. "content" deve essere autosufficiente (non un riferimento tipo "vedi sopra"). Se non c'e' nulla di realmente operativo da segnalare, restituisci un array vuoto: e' una risposta legittima. Non decidere tu stato operativo, stato decisionale, provenienza, baseline o id: non fanno parte del tuo output.`;
 
+// P0-c.1: una riga di ingrediente per M1/M2. Righe senza tipo di quantita'
+// (Ricette precedenti): testo identico a prima. Righe con tipo: q.b., quantita'
+// da indicare, intervallo completo, unita' originale ed eventuale conversione in
+// grammi non confermata; mai uno 0 al posto di un'informazione assente.
+function rigaIngredienteAI(i) {
+  const nome = String((i && i.name) || '');
+  const k = i && i.qtyKind;
+  const unita = i && i.unit ? ' ' + String(i.unit) : '';
+  const num = x => (typeof x === 'number' || (typeof x === 'string' && x.trim() !== '')) && isFinite(Number(x)) ? String(Number(x)) : null;
+  if (k === 'variabile') return '- ' + nome + ': q.b. (quantita\' variabile, non un peso)';
+  if (k === 'mancante') return '- ' + nome + ': quantita\' da indicare';
+  if (k === 'intervallo') {
+    const a = num(i.qtyMin), b = num(i.qtyMax);
+    return a && b ? '- ' + nome + ': ' + a + '–' + b + unita + ' (intervallo, nessun valore scelto)' : '- ' + nome + ': quantita\' da indicare';
+  }
+  if (k === 'certa') {
+    const q = num(i.qty);
+    if (q === null) return '- ' + nome + ': quantita\' da indicare';
+    return '- ' + q + unita + ' ' + nome + (i.conversioneGrammi === 'da_confermare' ? ' (unita\' originale; peso in grammi non confermato)' : '');
+  }
+  return '- ' + (i.qty != null ? i.qty : '') + (i.unit || '') + ' ' + (i.name || '');
+}
+
 function buildM1UserMessage(body) {
   const recipe = body.recipe || {};
   const variant = body.variant || {};
@@ -68,7 +93,7 @@ function buildM1UserMessage(body) {
   const l3 = Array.isArray(body.l3) ? body.l3 : [];
 
   const ingredientsText = (variant.ingredients || [])
-    .map(function (i) { return '- ' + (i.qty != null ? i.qty : '') + (i.unit || '') + ' ' + (i.name || ''); })
+    .map(rigaIngredienteAI)
     .join('\n') || '(nessun ingrediente inserito)';
 
   const stepsText = (variant.steps || []).length
@@ -150,6 +175,8 @@ GATE EPISTEMICI (non aggirabili):
 - Non puoi mai dichiarare autonomamente un candidato L3 gia' "consolidato": puoi solo proporre un candidato, mai affermare che sia gia' conoscenza acquisita della Scheda. Un candidato L3 richiede evidenza L2 sufficiente E una decisione confirmed dello chef alla base — mai un tuo giudizio da solo.
 - Non puoi mai adottare autonomamente un cambio di intention o criteria: puoi solo proporlo esplicitamente come proposta, mai presentarlo come gia' deciso o gia' in vigore.
 
+QUANTITA' DEGLI INGREDIENTI: un ingrediente "q.b." ha una quantita' variabile decisa dallo chef: non e' zero e non e' un peso. Un ingrediente con "quantita' da indicare" non ha ancora una quantita': non e' zero. Un intervallo (es. 20–30 g) resta un intervallo: non scegliere tu un valore. Quando il peso in grammi di un'unita' non e' confermato, non inventarlo. Se queste informazioni incidono sul giudizio, dillo esplicitamente, senza dedurre valori.
+
 FORMATO DI RISPOSTA — rispondi SEMPRE in due parti, in quest'ordine esatto:
 
 1. La risposta rivolta allo chef: prosa naturale e diretta, che risponde alla richiesta di questo turno.
@@ -176,7 +203,7 @@ function buildM2UserMessage(body) {
   const message = body.message || '';
 
   const ingredientsText = (variant.ingredients || [])
-    .map(function (i) { return '- ' + (i.qty != null ? i.qty : '') + (i.unit || '') + ' ' + (i.name || ''); })
+    .map(rigaIngredienteAI)
     .join('\n') || '(nessun ingrediente inserito)';
 
   const stepsText = (variant.steps || []).length
@@ -1341,8 +1368,24 @@ export default async function handler(req, res) {
         }
 
         // 3. Ingredienti: upsert di tutti quelli presenti nel payload.
+        // P0-c.1: PostgREST rifiuta un upsert multiplo i cui oggetti non hanno
+        // tutti le stesse chiavi (PGRST102 "All object keys must match"): con
+        // righe precedenti (senza qty_kind/qty_min/qty_max/source_text) e righe
+        // P0-c nella stessa Scheda il salvataggio fallirebbe per intero. Le righe
+        // sono quindi inviate in gruppi con lo stesso insieme di chiavi. Nessuna
+        // chiave viene aggiunta come NULL: con merge-duplicates PostgREST aggiorna
+        // solo le colonne presenti, quindi i metadati P0-c gia' salvati di una riga
+        // inviata senza quei campi restano intatti. Righe con le stesse chiavi
+        // (tutte le Schede precedenti): una sola richiesta, identica a prima.
         if (ingredients && ingredients.length) {
-          await mustSave('ingredients', ingredients, 'ingredients upsert');
+          const gruppi = new Map();
+          for (const riga of ingredients) {
+            const firma = riga && typeof riga === 'object' ? Object.keys(riga).sort().join('\u0001') : '';
+            if (!gruppi.has(firma)) gruppi.set(firma, []);
+            gruppi.get(firma).push(riga);
+          }
+          if (gruppi.size <= 1) await mustSave('ingredients', ingredients, 'ingredients upsert');
+          else for (const gruppo of gruppi.values()) await mustSave('ingredients', gruppo, 'ingredients upsert');
         }
 
         // 3b. Cancellazioni SOLO esplicite: il client elenca in

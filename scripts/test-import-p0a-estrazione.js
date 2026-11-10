@@ -57,6 +57,10 @@ const RICETTA = { name: 'Crema pasticcera', category: 'Dolci', portionsCount: nu
   ingredients: [{ name: 'Latte intero', qty: 500, unit: 'g' }, { name: 'Tuorli', qty: 6, unit: 'n' }, { name: "Zucchero l'ultimo", qty: '150', unit: 'g' }, { name: 'Sale', qty: null, unit: 'q.b.' }],
   steps: ['Scaldare il latte a 80 °C.', 'Cuocere fino a <85 °C mescolando.'],
   subRecipes: [{ name: 'Caramello', declaredYield: null, ingredients: [{ name: 'Zucchero', qty: 100, unit: 'g' }], steps: ['Caramellare.'] }] };
+// P0-c (approvato): "Sale" con unita' "q.b." non diventa piu' 0 g ma una quantita'
+// variabile (qty null, nessuna unita' inventata). Tutto il resto dell'anteprima e la
+// richiesta all'AI restano identici a 0de0e8f.
+const conP0c = p => { const x = JSON.parse(JSON.stringify(p)); x.ingredients = x.ingredients.map(i => i.name === 'Sale' ? Object.assign(i, { qty: null, unit: null, qtyKind: 'variabile' }) : i); return x; };
 const TESTO = 'Crema pasticcera. Per 6 persone. Latte 500 g, 6 tuorli, zucchero 150 g.';
 
 (async () => {
@@ -66,7 +70,7 @@ const TESTO = 'Crema pasticcera. Per 6 persone. Latte 500 g, 6 tuorli, zucchero 
     if (!htmlBase) return 'skip';
     const run = async src => { const c = client(src, { ai: okAI(RICETTA), fetchUrl: () => ({ status: 200, json: {} }) }); c.S.loadTab = 'testo'; c.S.loadText = TESTO; await c.extractRecipe(); return c; };
     const a = await run(htmlBase), b = await run(html);
-    assert.deepStrictEqual(b.S.loadPreview, a.S.loadPreview); assert.strictEqual(b.S.view, 'preview');
+    assert.deepStrictEqual(b.S.loadPreview, conP0c(a.S.loadPreview)); assert.strictEqual(b.S.view, 'preview');
     assert.deepStrictEqual(b.log.ai, a.log.ai, 'richiesta AI identica (modello, token, prompt, testo)');
     assert.strictEqual(b.S.loadError, null);
   });
@@ -75,7 +79,7 @@ const TESTO = 'Crema pasticcera. Per 6 persone. Latte 500 g, 6 tuorli, zucchero 
     if (!htmlBase) return 'skip';
     const run = async src => { const c = client(src, { ai: okAI(RICETTA), fetchUrl: () => ({ status: 200, json: {} }) }); c.S.loadTab = 'foto'; c.S.loadImageB64 = { mediaType: 'image/jpeg', data: '/9j/4AAQ' }; await c.extractRecipe(); return c; };
     const a = await run(htmlBase), b = await run(html);
-    assert.deepStrictEqual(b.log.ai, a.log.ai); assert.deepStrictEqual(b.S.loadPreview, a.S.loadPreview);
+    assert.deepStrictEqual(b.log.ai, a.log.ai); assert.deepStrictEqual(b.S.loadPreview, conP0c(a.S.loadPreview));
     assert.strictEqual(b.log.ai[0].messages[0].content[0].type, 'image'); assert.strictEqual(b.S.loadPreview.declaredYield.toVerify, true);
   });
 

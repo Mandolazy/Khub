@@ -200,12 +200,12 @@ const SRC = [
 
 // Impronte prese da main 539487b: queste funzioni non devono cambiare.
 const PROTETTE = {
-  "function computeSessionScaling(input)": "ddfc1febb5010cdc",
+  "function computeSessionScaling(input)": "ff44a92ee6881ba1",
   "async function createProductionSession(preparedInput)": "185ca85dcee49397",
-  "function buildValidatedVariantPayload(recipeId,vv)": "4186aeae0c1330e6",
-  "async function saveToSupabase(recipe)": "55d82322a3c2285f",
-  "async function loadFromSupabase()": "0f20790b79f681e3",
-  "function firmaContenutoBozza(v)": "9426d786f4588837",
+  "function buildValidatedVariantPayload(recipeId,vv)": "f4fc64648a86a261",
+  "async function saveToSupabase(recipe)": "f9dc1d860de4899d",
+  "async function loadFromSupabase()": "d7b44d135ae075e5",
+  "function firmaContenutoBozza(v)": "846ec26eda61f09a",
   "function toggleActiveV2(recipeId,variantId,currentActive)": "ca8f22881e9ba641",
   "async function confirmActiveYieldEdit()": "92f6565ceacf884a",
   "function creaBozzaDaSorgente(recipeId,attiva)": "24ff4e49d1353fae",
@@ -371,12 +371,20 @@ function clientMain(fetchImpl, nomi) {
       'loadFromSupabase', 'saveToSupabase',
       // P0-a: sicurezza dell'importazione (lettura inerte delle pagine, nessuna ricetta dal solo URL o dal video,
       // errori distinti, escape dei testi); test test-import-p0a-*.
-      'extractRecipe', 'renderLoad', 'renderPreview', 'renderToastAction'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
+      'extractRecipe', 'renderLoad', 'renderPreview', 'renderToastAction',
+      // P0-c / P0-c.1: integrita' delle quantita' (q.b., quantita' da indicare, intervallo, unita' della fonte) lungo
+      // pesi, firma, salvataggio, Produzione e MichelinAI; equivalenza sulle Ricette precedenti verificata da
+      // test-p0c-equivalenza e test-p0c1-assistenti; motivi in docs/import-engine/P0-c.md §6 e P0-c1.md.
+      'buildPreparedInputDaRicettaAttiva', 'buildSessionSnapshotV1', 'buildValidatedVariantPayload', 'computeFormulationWeights', 'computeSessionScaling',
+      'confirmMandaInProduzione', 'contaVariabiliCambiate', 'costruisciPayloadM2', 'firmaContenutoBozza', 'openMandaInProduzione', 'renderActiveYieldSection',
+      'renderLabWeightsPanel', 'renderMandaInProduzioneModal', 'renderQuickCalcPanel', 'renderSessioneOperativa', 'runM1'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
     assert.deepStrictEqual(rimosse, [], 'nessuna funzione rimossa');
-    for (const n of ['computeFormulationWeights', 'deriveYieldPerUnit', 'computeLabRounding', 'applyLabRound', 'undoLabRound', 'computeSessionScaling', 'createProductionSession', 'buildValidatedVariantPayload', 'onValidate', 'confirmValidate', 'rendiAttivaPronta', 'riapriProntaInLab', 'onLabDeclaredYield', 'onIngQty', 'onStepText'])
+    // P0-c: computeFormulationWeights, computeSessionScaling e buildValidatedVariantPayload cambiano (elenco sopra).
+    for (const n of ['deriveYieldPerUnit', 'computeLabRounding', 'applyLabRound', 'undoLabRound', 'createProductionSession', 'onValidate', 'confirmValidate', 'rendiAttivaPronta', 'riapriProntaInLab', 'onLabDeclaredYield', 'onIngQty', 'onStepText'])
       assert.ok(n in b && a[n] === b[n], 'invariata: ' + n);
     // Il segnaposto "MichelinAI" e' solo una card di testo (presentazione), non il motore.
-    const michelin = Object.keys(a).filter(n => /michelin|m1|m2|primoConsulto/i.test(n) && n !== 'renderMichelinAIGlobalePlaceholder');
+    // P0-c.1: runM1 e costruisciPayloadM2 cambiano solo nella rappresentazione delle quantita' (test-p0c1-assistenti).
+    const michelin = Object.keys(a).filter(n => /michelin|m1|m2|primoConsulto/i.test(n) && !['renderMichelinAIGlobalePlaceholder', 'runM1', 'costruisciPayloadM2'].includes(n));
     assert.ok(michelin.length > 5);
     michelin.forEach(n => assert.strictEqual(b[n], a[n], 'MichelinAI invariato: ' + n));
     for (const [m, h] of Object.entries(PROTETTE)) assert.strictEqual(sha(extractFunction(m)), h, 'cambiato: ' + m);

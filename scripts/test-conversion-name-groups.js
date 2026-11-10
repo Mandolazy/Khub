@@ -185,14 +185,14 @@ const PROTETTE = {
   "function normalizeIngredientName(name)": "e5a8589eb276024e",
   "function resolveKnownProductionConversionFact(normalizedName,unit)": "5b0be8c06a5e4919",
   "function isBetterConversionFact(candidate,current)": "b4fc3d53124be838",
-  "function computeFormulationWeights(ingredients,resolveFact)": "765b3d8a8edde206",
-  "function computeSessionScaling(input)": "ddfc1febb5010cdc",
-  "function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)": "9df6758db87b12b1",
+  "function computeFormulationWeights(ingredients,resolveFact)": "f481a42d06c68c3a",
+  "function computeSessionScaling(input)": "ff44a92ee6881ba1",
+  "function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)": "142443edbb06025b",
   "function findMissingProductionConversions(preparedInput)": "ad0ecd9f8e506dce",
   "async function saveIngredientConversion(ingredientName,fromUnit,toUnit,factor,sourceType,sourceDetail)": "e3916db5353173da",
   "async function createProductionSession(preparedInput)": "185ca85dcee49397",
-  "function buildSessionSnapshotV1(meta,computed)": "1fd7615c172e0ce2",
-  "async function saveToSupabase(recipe)": "55d82322a3c2285f",
+  "function buildSessionSnapshotV1(meta,computed)": "7ea3e2c1642ba7a6",
+  "async function saveToSupabase(recipe)": "f9dc1d860de4899d",
 };
 
 // Funzioni reali: harness di I3 (caricamento, LAB, conversioni) + Produzione (Manda in Produzione, preflight, Sessione).
