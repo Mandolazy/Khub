@@ -2946,6 +2946,258 @@ async function deleteVariant(recipeId,variantId){
 }
 
 // ══════════════════════════════════════════════════════════
+// P1-a — ESTRAZIONE STRUTTURATA DA PAGINA WEB (importazione da link)
+// Funzioni pure: leggono un documento inerte (DOMParser) e restituiscono dati;
+// nessuno stato dell'app, nessuna chiamata di rete, nessun HTML nel DOM.
+// pulisci(testo,max) e' la neutralizzazione dei testi di extractRecipe (P0-a).
+// Ordine: 1) JSON-LD schema.org/Recipe; 2) testo selezionato della pagina;
+// 3) AI solo se i dati strutturati non bastano.
+// ══════════════════════════════════════════════════════════
+// Unita' della fonte equivalenti a quelle di KHUB (stessa unita', nome diverso):
+// nessuna conversione di quantita'.
+var IMPORT_UNITA_ALIAS={g:'g',gr:'g',grammo:'g',grammi:'g',kg:'kg',chilo:'kg',chili:'kg',chilogrammo:'kg',chilogrammi:'kg',
+  ml:'ml',millilitro:'ml',millilitri:'ml',l:'l',lt:'l',litro:'l',litri:'l',cl:'cl',centilitro:'cl',centilitri:'cl',
+  cucchiaio:'tbsp',cucchiai:'tbsp',tbsp:'tbsp',tablespoon:'tbsp',tablespoons:'tbsp',cucchiaino:'tsp',cucchiaini:'tsp',tsp:'tsp',teaspoon:'tsp',teaspoons:'tsp',
+  pezzo:'n',pezzi:'n'};
+// Unita' della fonte che KHUB oggi non rappresenta: mai convertite (ne' in g ne' in n).
+var IMPORT_UNITA_NON_RAPPRESENTABILI=['spicchio','spicchi','pizzico','pizzichi','bustina','bustine','foglia','foglie','foglio','fogli','rametto','rametti',
+  'mazzetto','mazzetti','ciuffo','ciuffi','fetta','fette','scatola','scatole','barattolo','barattoli','confezione','confezioni','vasetto','vasetti',
+  'bicchiere','bicchieri','bicchierino','tazza','tazze','tazzina','tazzine','cup','cups','oz','lb','lbs','noce','noci','manciata','manciate','goccio',
+  'goccia','gocce','filo','stecca','stecche','baccello','baccelli','dl','decilitro','decilitri','cubetto','cubetti','panetto','panetti','gambo','gambi',
+  'cespo','cespi','testa','teste','pugno','spolverata','rotolo','rotoli','lattina','lattine','mestolo','mestoli','tocco','pezzetto','pezzetti'];
+var IMPORT_QB=/(^|[\s(,;:])(q\.?\s?b\.?|qb|quanto basta|a piacere|per guarnire|per decorare|per spolverizzare)(?=$|[\s),.;:])/i;
+var IMPORT_FRAZIONI={'½':0.5,'¼':0.25,'¾':0.75,'⅓':1/3,'⅔':2/3,'⅛':0.125};
+var IMPORT_NUMERO='(\\d+(?:[.,]\\d+)?(?:\\s*/\\s*\\d+)?\\s*[½¼¾⅓⅔⅛]?|[½¼¾⅓⅔⅛])';
+
+function importNumero(s){
+  var t=String(s||'').replace(/\s+/g,'');
+  var u=t.match(/[½¼¾⅓⅔⅛]$/);var extra=u?IMPORT_FRAZIONI[u[0]]:0;if(u)t=t.slice(0,-1);
+  if(!t)return extra||null;
+  var f=t.match(/^(\d+)\/(\d+)$/);
+  var n=f?(Number(f[2])?Number(f[1])/Number(f[2]):NaN):Number(t.replace(',','.'));
+  if(!isFinite(n))return null;
+  n+=extra;return n>0?Math.round(n*1000)/1000:null;
+}
+function importNomeIngrediente(t){
+  return String(t||'').replace(/^(?:(?:raso|rasi|rasa|colmo|colmi|colma|abbondante|abbondanti|scarso|scarsi|scarsa|circa|ca\.)\s+)+/i,'')
+    .replace(/^(?:di|d['’])\s*/i,'').replace(/^[\s:,\-–]+|[\s:,\-–]+$/g,'').trim();
+}
+// Una riga d'ingrediente della fonte -> {name, qty, unit, originale, statoImport, unitaOriginale}.
+// statoImport: 'estratto' (quantita' e unita' rappresentabili), 'da_confermare'
+// (unita' non rappresentabile, intervallo o riga non interpretata), 'mancante'
+// (quantita' non indicata, es. "q.b."). Mai 0 per una quantita' assente, mai "g"
+// per un'unita' sconosciuta: qty/unit restano null e il testo originale resta.
+function importIngredienteDaRiga(riga,pulisci){
+  var originale=pulisci(riga,300).replace(/\s+/g,' ').trim();
+  if(!originale)return null;
+  var out={name:originale,qty:null,unit:null,originale:originale,statoImport:'da_confermare',unitaOriginale:null};
+  var conUnita=function(qty,parola,resto){
+    var w=String(parola||'').toLowerCase().replace(/\.$/,'');
+    if(w&&IMPORT_UNITA_ALIAS[w]){out.qty=qty;out.unit=IMPORT_UNITA_ALIAS[w];out.name=importNomeIngrediente(resto)||originale;out.statoImport='estratto';if(IMPORT_UNITA_ALIAS[w]!==w)out.unitaOriginale=parola;return true;}
+    if(w&&IMPORT_UNITA_NON_RAPPRESENTABILI.indexOf(w)!==-1){out.qty=qty;out.unit=null;out.unitaOriginale=parola;out.name=importNomeIngrediente(resto)||originale;out.statoImport='da_confermare';return true;}
+    return false;
+  };
+  var t=originale;
+  var intervallo=t.match(new RegExp('^'+IMPORT_NUMERO+'\\s*[-–]\\s*'+IMPORT_NUMERO+'\\s*(.*)$'));
+  if(intervallo){
+    var restoI=intervallo[3].replace(/^([A-Za-zÀ-ÿ]+\.?)\s+/,function(m0,w){var k=w.toLowerCase().replace(/\.$/,'');if(IMPORT_UNITA_ALIAS[k]||IMPORT_UNITA_NON_RAPPRESENTABILI.indexOf(k)!==-1){out.unitaOriginale=w;return '';}return m0;});
+    out.name=importNomeIngrediente(restoI)||originale;return out; // intervallo: nessun numero scelto
+  }
+  var testa=t.match(new RegExp('^'+IMPORT_NUMERO+'\\s*(.*)$'));
+  if(testa){
+    var q=importNumero(testa[1]),resto=testa[2];
+    if(q){
+      var pw=resto.match(/^([A-Za-zÀ-ÿ]+\.?)(?:\s+|$)(.*)$/);
+      if(pw&&conUnita(q,pw[1],pw[2]))return out;
+      out.qty=q;out.unit='n';out.name=importNomeIngrediente(resto)||originale;out.statoImport='estratto';return out; // conteggio: "6 uova"
+    }
+  }
+  // Nome prima, quantita' dopo ("Mascarpone 750 g"), con eventuale nota finale tra
+  // parentesi ("Caffe' 300 g (zuccherato)"): la nota resta nel nome.
+  var coda=t.match(new RegExp('^(.+?)[\\s:,]+'+IMPORT_NUMERO+'\\s*([A-Za-zÀ-ÿ]+\\.?)?\\s*(\\([^()]*\\))?\\s*$'));
+  if(coda&&!/^0\d/.test(coda[2].trim())){
+    var q2=importNumero(coda[2]);
+    var nomeCoda=coda[1]+(coda[4]?' '+coda[4]:'');
+    if(q2){
+      if(coda[3]){if(conUnita(q2,coda[3],nomeCoda))return out;}
+      else{out.qty=q2;out.unit='n';out.name=importNomeIngrediente(nomeCoda)||originale;out.statoImport='estratto';return out;}
+    }
+  }
+  // "q.b." dopo i tentativi con quantita' (cosi' "Caffe' 300 g (… a piacere)" resta 300 g).
+  if(IMPORT_QB.test(t)){
+    if(/\d/.test(t))return out; // "Burro 100 g + q.b.": riga mista, resta intera da confermare
+    out.name=importNomeIngrediente(t.replace(IMPORT_QB,'$1'))||originale;out.statoImport='mancante';return out;
+  }
+  if(!/\d/.test(t)){out.statoImport='mancante';out.name=importNomeIngrediente(t)||originale;}
+  return out;
+}
+// Durata ISO 8601 (PT1H30M, P0DT0H40M) -> minuti; altrimenti il testo della fonte.
+function importDurata(v,pulisci){
+  if(v==null||v==='')return null;
+  var s=pulisci(String(v),60);
+  var m=s.match(/^P(?:(\d+(?:\.\d+)?)D)?(?:T(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?)?$/i);
+  if(m&&(m[1]||m[2]||m[3]||m[4])){var min=Math.round((Number(m[1]||0)*1440)+(Number(m[2]||0)*60)+Number(m[3]||0)+(Number(m[4]||0)/60));return{minuti:min,originale:s};}
+  return s?{minuti:null,originale:s}:null;
+}
+function importDurataTesto(d){
+  if(!d)return'';
+  if(d.minuti==null)return d.originale;
+  var h=Math.floor(d.minuti/60),mm=d.minuti%60;
+  return h?(h+' h'+(mm?' '+mm+' min':'')):(mm+' min');
+}
+// Procedimento: stringhe, array, HowToStep, HowToSection (anche annidati).
+// Le sezioni restano informazioni da confermare, mai sottoricette automatiche.
+function importPassiRicetta(istr,pulisci){
+  var passi=[],sezioni=[];
+  var aggiungi=function(t){String(t).split(/\r?\n+|<\/p>|<br\s*\/?>|<\/li>/i).forEach(function(x){var p=pulisci(x,5000);if(p&&passi.length<200)passi.push(p);});};
+  (function visita(x,prof){
+    if(x==null||prof>8)return;
+    if(typeof x==='string'||typeof x==='number'){aggiungi(x);return;}
+    if(Array.isArray(x)){x.forEach(function(y){visita(y,prof+1);});return;}
+    if(typeof x!=='object')return;
+    var tipi=[].concat(x['@type']||[]).map(function(t){return String(t).toLowerCase();});
+    var figli=x.itemListElement||x.steps;
+    if(tipi.indexOf('howtosection')!==-1||(figli&&!x.text)){
+      var nome=pulisci(x.name||'',200),da=passi.length;
+      visita(figli,prof+1);
+      if(nome&&passi.length>da)sezioni.push({nome:nome,da:da,a:passi.length-1});
+      return;
+    }
+    var testo=x.text!=null?x.text:(x.name!=null?x.name:x.description);
+    if(testo!=null)aggiungi(testo);
+  })(istr,0);
+  return{passi:passi,sezioni:sezioni};
+}
+function importUrlNormalizzato(u,base){
+  try{var x=new URL(String(u),base||undefined);return(x.origin+x.pathname).replace(/\/+$/,'').toLowerCase();}catch(e){return'';}
+}
+// Tutti i nodi schema.org/Recipe dei blocchi JSON-LD (oggetto, array, @graph,
+// mainEntity e strutture annidate). JSON non valido: contato e ignorato.
+function importJsonLdRicette(doc){
+  var ricette=[],blocchi=0,nonValidi=0,visti=0;
+  var eRicetta=function(n){return[].concat(n['@type']||[]).some(function(t){return/(^|[\/:#])recipe$/i.test(String(t));});};
+  var visita=function(n,prof){
+    if(n==null||typeof n!=='object'||prof>12||visti>20000)return;
+    visti++;
+    if(Array.isArray(n)){n.forEach(function(y){visita(y,prof+1);});return;}
+    if(eRicetta(n)&&ricette.indexOf(n)===-1)ricette.push(n);
+    Object.keys(n).forEach(function(k){var v=n[k];if(v&&typeof v==='object')visita(v,prof+1);});
+  };
+  doc.querySelectorAll('script').forEach(function(s){
+    if(!/^\s*application\/ld\+json\s*(;.*)?$/i.test(s.getAttribute('type')||''))return;
+    blocchi++;
+    try{visita(JSON.parse(s.textContent||''),0);}catch(e){nonValidi++;}
+  });
+  return{ricette:ricette,blocchi:blocchi,nonValidi:nonValidi};
+}
+// Ricetta pertinente fra piu' Recipe, senza scelte arbitrarie: unica; oppure
+// l'unica il cui indirizzo coincide con la pagina; oppure l'unica con
+// ingredienti e procedimento. Altrimenti nessuna (ambigua).
+function importSceltaRicetta(ricette,urlPagina){
+  if(!ricette.length)return{ricetta:null,motivo:'assente'};
+  if(ricette.length===1)return{ricetta:ricette[0],motivo:'unica'};
+  var pagina=importUrlNormalizzato(urlPagina);
+  var indirizzi=function(r){var m=r.mainEntityOfPage;return[r.url,r['@id'],m&&typeof m==='object'?(m['@id']||m.url):m].filter(Boolean).map(function(u){return importUrlNormalizzato(u,urlPagina);});};
+  var perUrl=pagina?ricette.filter(function(r){return indirizzi(r).indexOf(pagina)!==-1;}):[];
+  if(perUrl.length===1)return{ricetta:perUrl[0],motivo:'indirizzo'};
+  var complete=ricette.filter(function(r){return[].concat(r.recipeIngredient||r.ingredients||[]).length&&r.recipeInstructions;});
+  if(complete.length===1)return{ricetta:complete[0],motivo:'completa'};
+  return{ricetta:null,motivo:'ambigua'};
+}
+// Resa da recipeYield: mai inventata. Un numero senza unita' (es. "10") viene
+// usato solo se la pagina lo accompagna esplicitamente con un'unita' ("10 persone").
+function importResaDaJsonLd(y,testoPagina,pulisci){
+  var valori=[].concat(y==null?[]:y).map(function(v){return pulisci(String(v),120);}).filter(Boolean);
+  if(!valori.length)return{raw:null,nota:''};
+  var conUnita=valori.filter(function(v){return/[A-Za-zÀ-ÿ]/.test(v);})[0];
+  var v=conUnita||valori[0];
+  var r=v.match(/(\d+(?:[.,]\d+)?)\s*[-–]\s*(\d+(?:[.,]\d+)?)\s*([A-Za-zÀ-ÿ]+)?/);
+  if(r){var w=r[3]||(v.match(/^\s*([A-Za-zÀ-ÿ]+)/)||[])[1]||'';return{raw:{qty:null,unit:w,range:{min:r[1],max:r[2]},source:v},nota:''};}
+  var n=v.match(/(\d+(?:[.,]\d+)?)/);
+  if(!n)return{raw:null,nota:'Resa nella fonte: «'+v+'»'};
+  var dopo=(v.slice(v.indexOf(n[1])+n[1].length).match(/^\s*([A-Za-zÀ-ÿ]+)/)||[])[1];
+  var prima=(v.slice(0,v.indexOf(n[1])).match(/([A-Za-zÀ-ÿ]+)\s*$/)||[])[1];
+  var unita=dopo||(prima&&IMPORT_YIELD_PORTION_ALIASES.indexOf(prima.toLowerCase())!==-1?prima:'');
+  if(unita)return{raw:{qty:n[1],unit:unita,range:null,source:v},nota:''};
+  // Solo numero: si cerca nella pagina "N persone/porzioni/..." (citazione verificabile).
+  var frase=String(testoPagina||'').match(new RegExp('(?:^|[^\\d])('+n[1].replace('.','\\.')+'\\s+(persone|porzioni|coperti|pezzi|persona|porzione))(?=$|[^A-Za-zÀ-ÿ])','i'));
+  if(frase)return{raw:{qty:n[1],unit:frase[2],range:null,source:frase[1]},nota:''};
+  return{raw:null,nota:'Resa nella fonte: «'+v+'» senza unità: indicala tu se serve.'};
+}
+// Ricetta JSON-LD normalizzata (nessun campo inventato; completa = nome,
+// almeno un ingrediente e almeno un passaggio).
+function importRicettaDaJsonLd(r,testoPagina,pulisci){
+  var righe=[].concat(r.recipeIngredient||r.ingredients||[]);
+  if(righe.length===1&&typeof righe[0]==='string'&&/\n/.test(righe[0]))righe=righe[0].split(/\n+/);
+  var ingredienti=righe.slice(0,200).map(function(x){return importIngredienteDaRiga(typeof x==='object'&&x?(x.text||x.name||''):x,pulisci);}).filter(Boolean);
+  var proc=importPassiRicetta(r.recipeInstructions,pulisci);
+  var nome=pulisci(r.name||r.headline||'',300);
+  var resa=importResaDaJsonLd(r.recipeYield!=null?r.recipeYield:r.yield,testoPagina,pulisci);
+  var tempi={preparazione:importDurata(r.prepTime,pulisci),cottura:importDurata(r.cookTime,pulisci),totale:importDurata(r.totalTime,pulisci)};
+  var mancanze=[];if(!nome)mancanze.push('nome');if(!ingredienti.length)mancanze.push('ingredienti');if(!proc.passi.length)mancanze.push('procedimento');
+  return{nome:nome,descrizione:pulisci(r.description||'',600),ingredienti:ingredienti,passi:proc.passi,sezioni:proc.sezioni,resa:resa,tempi:tempi,
+    completa:!mancanze.length,mancanze:mancanze};
+}
+var IMPORT_RIGA_INGREDIENTE=new RegExp('(^|\\s)'+IMPORT_NUMERO+'\\s*(g|gr|kg|ml|l|lt|cl|dl|cucchia[a-z]*|tbsp|tsp|cups?|oz|spicch[a-z]*|bustin[a-z]*|pizzic[a-z]*|fett[a-z]*|fogli[a-z]*|uov[ao]|tuorl[a-z]*|album[a-z]*|vasett[a-z]*|bicchier[a-z]*)(?=$|[\\s.,;:)])','i');
+var IMPORT_PAROLE_RICETTA=['ingredienti','ingredients','preparazione','procedimento','dosi per','cottura','forno','impastare','mescolare','cuocere','frullare','montare','bollire','soffriggere','tritare','teglia','padella','pentola'];
+function importRigaIngrediente(l){return l.length<=140&&(IMPORT_RIGA_INGREDIENTE.test(l)||IMPORT_QB.test(l));}
+// Testo della pagina per l'AI: righe vere (a capo dopo ogni blocco), contenitori
+// laterali tenuti se gastronomici, selezione a partire dalla ricetta invece che
+// dall'inizio della pagina, al massimo 6.000 caratteri.
+function importTestoSelezionato(html,pulisci){
+  var d=new DOMParser().parseFromString(String(html),'text/html');
+  d.querySelectorAll('script,style,template,noscript,svg,iframe,object,embed').forEach(function(el){el.remove();});
+  var gastro=function(el){var t=el.textContent||'';var n=0;t.split(/\n|(?=\s\d)/).forEach(function(l){if(importRigaIngrediente(l.trim()))n++;});return n>=2||/ingredienti|ingredients/i.test(t);};
+  d.querySelectorAll('nav,header,footer,aside').forEach(function(el){if(el.isConnected&&!gastro(el))el.remove();});
+  d.querySelectorAll('br').forEach(function(el){el.replaceWith('\n');});
+  d.querySelectorAll('p,li,h1,h2,h3,h4,h5,h6,td,th,dt,dd,div,section,article,tr,figcaption,blockquote,pre,label,span').forEach(function(el){
+    if(el.tagName==='SPAN'&&!/ingredient|qty|quant|amount|unit|step|istruz/i.test(el.className||''))return;
+    el.append('\n');
+  });
+  var righe=((d.body&&d.body.textContent)||'').split('\n').map(function(s){return s.replace(/\s+/g,' ').trim();}).filter(Boolean);
+  var titoloEl=d.querySelector('h1');var meta=d.querySelector('meta[property="og:title"]');
+  var titolo=pulisci((titoloEl&&titoloEl.textContent)||(meta&&meta.getAttribute('content'))||(d.title||''),300);
+  var nIng=righe.filter(importRigaIngrediente).length;
+  var tutto=righe.join('\n').toLowerCase();
+  var parole=IMPORT_PAROLE_RICETTA.filter(function(w){return tutto.indexOf(w)!==-1;}).length+(/\d\s*°\s*c\b/i.test(tutto)?1:0);
+  var gastronomica=nIng>=2||(nIng>=1&&parole>=2)||parole>=3;
+  var ancora=-1;
+  for(var i=0;i<righe.length&&ancora<0;i++){var k=0;for(var j=i;j<Math.min(righe.length,i+7);j++)if(importRigaIngrediente(righe[j]))k++;if(k>=2&&importRigaIngrediente(righe[i]))ancora=i;}
+  if(ancora<0)for(var h=0;h<righe.length;h++){if(righe[h].length<80&&/ingredienti|ingredients/i.test(righe[h])){ancora=h;break;}}
+  var inizio=0,prima=[];
+  if(ancora>=0){
+    // Indietro solo sulle righe brevi (titoli, "Dosi per"): mai l'introduzione.
+    inizio=ancora;while(inizio>0&&ancora-inizio<3&&righe[inizio-1].length<200)inizio--;
+    for(var b=0;b<inizio;b++)if(righe[b].length<160&&/dosi|persone|porzioni|serves|preparazione:|cottura:|tempo|difficolt/i.test(righe[b]))prima.push(righe[b]);
+  }
+  var scelte=(titolo&&righe.slice(inizio,inizio+3).join(' ').indexOf(titolo)===-1?[titolo]:[]).concat(prima.slice(0,6),righe.slice(inizio));
+  var testo='';
+  for(var x=0;x<scelte.length;x++){var c=pulisci(scelte[x],2000);if(!c)continue;if(testo.length+c.length+1>6000){testo+=(testo?'\n':'')+c.slice(0,Math.max(0,6000-testo.length-1));break;}testo+=(testo?'\n':'')+c;}
+  return{testo:testo.slice(0,6000),righe:righe.length,righeIngredienti:nIng,paroleRicetta:parole,gastronomica:gastronomica,ancora:ancora,titolo:titolo};
+}
+// Analisi completa di una pagina letta da fetchUrl (nessuna AI).
+function importAnalizzaPagina(html,urlPagina,pulisci){
+  var d=new DOMParser().parseFromString(String(html),'text/html');
+  var j=importJsonLdRicette(d);
+  var scelta=importSceltaRicetta(j.ricette,urlPagina);
+  var sel=importTestoSelezionato(html,pulisci);
+  var testoPerResa=sel.testo+'\n'+((d.body&&d.body.textContent)||'').replace(/\s+/g,' ').slice(0,200000);
+  return{jsonld:{blocchi:j.blocchi,nonValidi:j.nonValidi,ricette:j.ricette.length,scelta:scelta.motivo},
+    ricetta:scelta.ricetta?importRicettaDaJsonLd(scelta.ricetta,testoPerResa,pulisci):null,selezione:sel};
+}
+// Anteprima dalla ricetta strutturata (stesso formato dell'anteprima AI).
+function importAnteprimaStrutturata(ric,urlPagina){
+  var passi=ric.passi.map(function(p,i){var s=ric.sezioni.filter(function(z){return z.da===i;})[0];return s?s.nome+' — '+p:p;});
+  // La citazione della resa e' gia' presa alla lettera dalla pagina (JSON-LD o testo).
+  var fonteResa=ric.resa.raw?{text:ric.resa.raw.source,verifiable:true,none:false}:{text:null,verifiable:false,none:true};
+  return{name:ric.nome,category:'',portionsCount:importTargetValue('portions',null),gramsPerPortion:importTargetValue('gpp',null),
+    declaredYield:importDeclaredYield(ric.resa.raw,fonteResa),
+    ingredients:ric.ingredienti.map(function(i){return{id:uid(),name:i.name,qty:i.qty,unit:i.unit,isSubRecipe:false,subRecipeId:null,originale:i.originale,statoImport:i.statoImport,unitaOriginale:i.unitaOriginale};}),
+    steps:passi,subRecipes:[],
+    importFonte:{tipo:'strutturata',url:String(urlPagina||''),descrizione:ric.descrizione,tempi:ric.tempi,sezioni:ric.sezioni.map(function(z){return{nome:z.nome,da:z.da+1,a:z.a+1};}),notaResa:ric.resa.nota}};
+}
+
+// ══════════════════════════════════════════════════════════
 // IMPORT AI
 // ══════════════════════════════════════════════════════════
 async function extractRecipe(){
@@ -3035,6 +3287,7 @@ async function extractRecipe(){
     // Resa dichiarata: testo della fonte su cui verificare la citazione
     // (testo, pagina del link); la foto non e' verificabile ("da verificare").
     let fonteResa={text:null,verifiable:false,none:false};
+    let importFontePagina=null; // P1-a: provenienza mostrata in anteprima (link)
     const PROMPT=`Estrai la ricetta e rispondi SOLO con JSON valido. La fonte può essere in qualsiasi lingua (francese, inglese, spagnolo, ecc.): TRADUCI SEMPRE in italiano il nome della ricetta, i nomi degli ingredienti e i passi del procedimento, anche se il testo originale è in un'altra lingua. Converti unità di misura locali (es. cuillère à soupe, cup, oz) nel loro equivalente in g/ml quando possibile. Elenca TUTTI gli ingredienti uno per uno con quantità numeriche esatte. Formato: {"name":"nome","category":"categoria suggerita, breve, in italiano (preferisci una di quelle gia' usate: ${categorieUsate().join(', ')||'nessuna'}); stringa vuota se non e' chiara","portionsCount":null,"gramsPerPortion":null,"declaredYield":{"qty":null,"unit":null,"range":null,"source":null},"ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo 1"],"subRecipes":[{"name":"Nome Prep","declaredYield":{"qty":null,"unit":null,"range":null,"source":null},"ingredients":[{"name":"nome","qty":100,"unit":"g"}],"steps":["passo"]}]}. Unità: g,ml,kg,l,n,tbsp,tsp,cl. Gli ingredienti nella ricetta principale devono avere quantità reali anche se appartengono a sub-preparazioni. portionsCount (numero intero di porzioni) e gramsPerPortion (grammi per porzione) vanno indicati SOLO se la fonte li riporta esplicitamente; se la fonte non li fornisce usa null. Non stimarli, non calcolarli dagli ingredienti e non trasformare una resa (per esempio "30 bignè", "1 torta" o "per 6 persone") in porzioni o grammi per porzione. declaredYield è la resa dichiarata nella fonte (quanto produce la ricetta): compilala SOLO se la fonte la indica esplicitamente (per esempio "per 6 persone", "dosi per 4", "produce 30 bignè", "per 2 teglie", "makes", "serves", "yield"), altrimenti usa null. qty è il numero; unit è l'unità tradotta in italiano (persone e coperti diventano "porzioni"); source è la frase della fonte copiata esattamente, nella lingua originale e senza tradurla. Se la fonte indica un intervallo (per esempio "4-6 persone" o "20-24 bignè") usa qty null e range {"min":4,"max":6}: non scegliere un numero. Non calcolare mai la resa dagli ingredienti e non stimarla. Ogni elemento di subRecipes ha la propria declaredYield, solo se la fonte la indica per quella preparazione.`;
 
     if(type==='foto'&&S.loadImageB64){
@@ -3060,10 +3313,28 @@ async function extractRecipe(){
       }catch(e){esito=null;}
       if(!esito||esito.ok!==true||typeof esito.html!=='string'){fallisci(messaggioFonte(esito)+' Puoi aprire la pagina, copiare il testo della ricetta e incollarlo nella scheda Testo.',true);return;}
       const pageText=testoPagina(esito.html);
+      // P1-a: prima i dati strutturati della pagina (schema.org/Recipe). Se sono
+      // completi (nome, ingredienti, procedimento) l'anteprima nasce da loro, senza
+      // AI: testi, quantita' e unita' come nella fonte.
+      const urlPagina=typeof esito.finalUrl==='string'&&esito.finalUrl?esito.finalUrl:S.loadUrl;
+      const analisi=importAnalizzaPagina(esito.html,urlPagina,testoSicuro);
+      if(analisi.ricetta&&analisi.ricetta.completa){
+        S.loadPreview=importAnteprimaStrutturata(analisi.ricetta,urlPagina);
+        S.loadPreview.importFonte.jsonld=analisi.jsonld;
+        S.view='preview';S.isLoading=false;render();return;
+      }
       if(pageText.length<PAGINA_MIN_CARATTERI){fallisci('La pagina non contiene abbastanza testo leggibile: potrebbe essere caricata con JavaScript o protetta. Copia il testo della ricetta e incollalo nella scheda Testo.',true);return;}
       if(pageText.length<2000&&SEGNI_BLOCCO.test(pageText)){fallisci('Il sito mostra una verifica anti-bot invece della ricetta. Copia il testo della ricetta dalla pagina e incollalo nella scheda Testo.',true);return;}
-      fonteResa={text:pageText,verifiable:true,none:false};
-      messages=[{role:'user',content:`Estrai la ricetta dal testo (fonte: ${S.loadUrl}). ${PROMPT}\n\nTESTO:\n${pageText}`}];
+      if(!analisi.ricetta&&!analisi.selezione.gastronomica){fallisci('La pagina e\' stata letta, ma non sembra contenere una ricetta (nessun ingrediente o procedimento riconoscibile). Se la ricetta c\'e\', copiane il testo e incollalo nella scheda Testo.',true);return;}
+      // Testo per l'AI: solo la parte gastronomica selezionata (max 6.000 caratteri)
+      // e, se presenti, i dati strutturati parziali con le righe originali.
+      const testoScelto=analisi.selezione.testo||pageText;
+      const ricP=analisi.ricetta;
+      const parziale=ricP?('\n\nDATI STRUTTURATI DELLA PAGINA (schema.org/Recipe, incompleti: manca '+ricP.mancanze.join(', ')+'). Sono copiati dalla fonte: mantieni esattamente quantita\' e unita\' indicate.\n'
+        +[ricP.nome?'Nome: '+ricP.nome:'',ricP.ingredienti.length?'Ingredienti:\n'+ricP.ingredienti.map(i=>'- '+i.originale).join('\n'):'',ricP.passi.length?'Procedimento:\n'+ricP.passi.map((s,i)=>(i+1)+'. '+s).join('\n'):''].filter(Boolean).join('\n')):'';
+      fonteResa={text:testoScelto+parziale,verifiable:true,none:false};
+      importFontePagina={tipo:'testo_pagina',url:urlPagina,caratteri:testoScelto.length,daRicetta:analisi.selezione.ancora>=0,parziale:!!ricP,jsonld:analisi.jsonld};
+      messages=[{role:'user',content:`Estrai la ricetta dal testo (fonte: ${S.loadUrl}). ${PROMPT}${parziale}\n\nTESTO:\n${testoScelto}`}];
     }else{
       S.isLoading=false;render();
       toast('Inserisci contenuto da importare','ti-alert-circle');return;
@@ -3112,6 +3383,7 @@ async function extractRecipe(){
     parsed.subRecipes=(parsed.subRecipes||[]).map(sr=>({
       ...sr,declaredYield:importDeclaredYield(sr.declaredYield,fonteResa),portionsCount:importTargetValue('portions',sr.portionsCount),gramsPerPortion:importTargetValue('gpp',sr.gramsPerPortion),ingredients:(sr.ingredients||[]).map(i=>({...i,id:uid(),qty:parseFloat(i.qty)||0,unit:UNITS.includes(i.unit)?i.unit:'g'}))
     }));
+    if(importFontePagina)parsed.importFonte=importFontePagina;
     S.loadPreview=parsed;
     S.view='preview';
   }catch(e){console.error(e);S.loadError={msg:'Errore imprevisto durante l\'estrazione: riprova.',offriTesto:false};}
@@ -9105,6 +9377,19 @@ function renderPreview(){
     :pesiPrevOk?(stimaPrev.length?'Percentuali stimate: pesi di riferimento non confermati per '+stimaPrev.map(x=>'* '+escAttr(x.name)+' ('+escAttr(x.unit)+')').join(', ')+'.':'')
     :pesiPrev.status==='incomplete'?'Percentuali non calcolabili: mancano le conversioni in grammi di '+pesiPrev.missing.map(m=>escAttr(m.name)+' ('+escAttr(m.unit)+')').join(', ')+'.'
     :'Percentuali non disponibili.';
+  // P1-a: provenienza dell'anteprima (solo importazione da link) e ingredienti da confermare.
+  const fonte=p.importFonte||null;
+  const daConfermare=p.ingredients.filter(i=>i.statoImport&&i.statoImport!=='estratto').length;
+  const tempiTesto=fonte&&fonte.tempi?[['Preparazione',fonte.tempi.preparazione],['Cottura',fonte.tempi.cottura],['Totale',fonte.tempi.totale]].filter(x=>x[1]).map(x=>x[0]+': '+importDurataTesto(x[1])).join(' · '):'';
+  const bandaFonte=!fonte?'':`<div class="preview-fonte" role="note" style="font-size:12px;color:var(--dark);background:var(--cream);border:1px solid var(--border);border-radius:var(--r-md);padding:10px 12px;margin-bottom:14px;line-height:1.5">
+      ${fonte.tipo==='strutturata'
+        ?'<strong>Fonte: dati strutturati della pagina</strong> (schema.org/Recipe). Nessuna elaborazione AI: testi, quantità e unità come nella fonte, non tradotti.'
+        :'<strong>Fonte: testo della pagina</strong> ('+escAttr(fonte.caratteri)+' caratteri'+(fonte.daRicetta?' selezionati dalla parte gastronomica':'')+'), interpretato dall\'AI'+(fonte.parziale?' insieme ai dati strutturati incompleti':'')+(fonte.jsonld&&fonte.jsonld.scelta==='ambigua'?'; la pagina contiene più ricette strutturate e nessuna è stata scelta automaticamente':'')+': verifica quantità e unità.'}
+      ${tempiTesto?`<div class="preview-fonte-tempi">Tempi dalla fonte (non salvati nella Ricetta): ${escAttr(tempiTesto)}</div>`:''}
+      ${fonte.notaResa?`<div class="preview-fonte-resa">${escAttr(fonte.notaResa)}</div>`:''}
+      ${fonte.sezioni&&fonte.sezioni.length?`<div class="preview-fonte-sezioni">Possibili preparazioni intermedie (da confermare; restano passaggi della Ricetta): ${fonte.sezioni.map(z=>'«'+escAttr(z.nome)+'» passaggi '+z.da+(z.a!==z.da?'–'+z.a:'')).join(', ')}</div>`:''}
+      ${daConfermare?`<div class="preview-fonte-confermare"><strong>${daConfermare} ingredient${daConfermare===1?'e':'i'} da confermare:</strong> quantità o unità non rappresentabili. Inseriscile qui o nel LAB; se restano vuote, oggi KHUB le salva come 0 g.</div>`:''}
+    </div>`;
   const destinazioneEsistente=S.loadDestinazione==='esistente';
   const schedaScelta=destinazioneEsistente?R(S.loadDestinazioneSchedaId):null;
   return `<div class="card">
@@ -9115,6 +9400,7 @@ function renderPreview(){
       </div>
       <button class="btn btn-outline btn-sm" id="btn-back-load"><i class="ti ti-arrow-left"></i> Indietro</button>
     </div>
+    ${bandaFonte}
     <div class="form-row" style="margin-bottom:14px">
       <div class="form-group">
         <label class="form-label">Nome ricetta</label>
@@ -9138,10 +9424,10 @@ function renderPreview(){
       <span class="preview-ing-name">${escAttr(ing.name)}</span>
       <input class="preview-ing-qty" type="number" value="${escAttr(ing.qty)}" data-prev-ing="${idx}" data-field="qty">
       <select class="preview-ing-unit" data-prev-ing="${idx}" data-field="unit">
-        ${UNITS.map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}
+        ${UNITS.includes(ing.unit)?'':'<option value="" selected>—</option>'}${UNITS.map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}
       </select>
       <span class="preview-ing-pct" style="font-size:11px;color:var(--light);min-width:35px;text-align:right" title="Quota del peso a crudo">${pctPrev(ing,idx)}</span>
-    </div>`).join('')}
+    </div>${ing.originale&&ing.statoImport&&ing.statoImport!=='estratto'?`<div class="preview-ing-originale" style="font-size:11px;color:var(--mid);margin:-2px 0 6px">Nella fonte: «${escAttr(ing.originale)}» — <strong>${ing.statoImport==='mancante'?'quantità non indicata':'da confermare'}</strong></div>`:''}`).join('')}
     ${notaPesiPrev?`<div class="preview-weights-note" style="font-size:11px;color:var(--mid);margin-top:6px">${notaPesiPrev}</div>`:''}
     ${p.steps&&p.steps.length?`
     <div class="card-label" style="margin-top:18px"><i class="ti ti-list-numbers"></i> Procedimento</div>
