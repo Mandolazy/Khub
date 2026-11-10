@@ -46,7 +46,10 @@ const fetchLocale = async function (url, opts) {
   Object.keys(h).forEach(k => { if (/^(apikey|authorization)$/i.test(k)) delete h[k]; }); // PostgREST locale: ruolo anonimo
   o.headers = h;
   const r = await fetchOriginale(REST + u.slice(SUPABASE_FINTO.length + '/rest/v1'.length), o);
-  registro.push({ metodo: o.method || 'GET', percorso: u.slice(SUPABASE_FINTO.length + 9).split('?')[0], stato: r.status, righe: o.body && o.body.trim().startsWith('[') ? JSON.parse(o.body).length : (o.body ? 1 : 0) });
+  let corpo = null; try { corpo = o.body ? JSON.parse(o.body) : null; } catch (e) { corpo = null; }
+  const primo = Array.isArray(corpo) ? corpo[0] : corpo;
+  registro.push({ metodo: o.method || 'GET', percorso: u.slice(SUPABASE_FINTO.length + 9).split('?')[0], stato: r.status, righe: Array.isArray(corpo) ? corpo.length : (corpo ? 1 : 0),
+    chiavi: primo && typeof primo === 'object' ? Object.keys(primo).sort() : [], firma: primo && typeof primo === 'object' && 'contenuto_hash' in primo });
   return r;
 };
 Object.defineProperty(globalThis, 'fetch', { value: fetchLocale, writable: false, configurable: false });

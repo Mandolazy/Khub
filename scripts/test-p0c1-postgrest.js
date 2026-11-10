@@ -132,12 +132,18 @@ let tmp;
     const vecchio = path.join(tmp, 'chat-7e0604b.js');
     fs.writeFileSync(vecchio, execFileSync('git', ['show', '7e0604b:api/chat.js'], { cwd: ROOT, encoding: 'utf8' }));
     const sPrima = await avviaServer(vecchio);
-    await test('T1. PRIMA (7e0604b): Scheda importata + ingrediente aggiunto nel LAB -> salvataggio rifiutato, ingrediente non salvato', async () => {
+    // P0-c.2: un nuovo ingrediente del LAB ha sempre un tipo; il caso misto reale e'
+    // quindi una Scheda precedente (righe senza tipo) con un ingrediente aggiunto.
+    await test('T1. PRIMA (7e0604b): Scheda precedente + ingrediente aggiunto nel LAB -> salvataggio rifiutato (PGRST102), ingrediente non salvato', async () => {
       const P = await nuovaPagina(sPrima.origine);
-      const { idBozza, esito } = await importaEAggiungi(P);
+      await P.ev(() => { S.view = 'recipe'; S.mode = 'lab'; S.selectedId = 'rL'; S.addIngMode = 'ingrediente'; render(); });
+      await P.page.waitForSelector('#new-ing-name');
+      await P.ev(() => { document.getElementById('new-ing-name').value = 'Vaniglia'; document.getElementById('new-ing-qty').value = '2'; document.getElementById('new-ing-unit').value = 'g'; addIngredient('rL'); });
+      await attendi(async () => P.salvataggi.length >= 1, 8000, 'salvataggio');
+      const esito = P.salvataggi[P.salvataggi.length - 1];
       assert.notStrictEqual(esito && esito.ok, true, JSON.stringify(esito));
       assert.ok(/PGRST102|All object keys must match/.test(JSON.stringify(esito)), JSON.stringify(esito));
-      assert.ok(!vista(idBozza).some(r => r.name === 'Lievito'), 'Lievito non salvato');
+      assert.ok(!vista('lL').some(r => r.name === 'Vaniglia'), 'Vaniglia non salvata');
       await P.context.close();
     });
     sPrima.ferma();
@@ -159,7 +165,7 @@ let tmp;
       assert.deepStrictEqual(vista('lL').map(r => [r.name, r.qty, r.unit, r.qty_kind, r.source_text]), [['Latte', 520, 'ml', null, null], ['Zucchero', 150, 'g', null, null]]);
     });
 
-    await test('T3. DOPO: Scheda importata + ingrediente aggiunto nel LAB -> salvato; metadati P0-c intatti; due richieste con chiavi uniformi', async () => {
+    await test('T3. DOPO: Scheda importata + ingrediente aggiunto nel LAB -> salvato; metadati P0-c intatti; una sola richiesta', async () => {
       const n0 = (await registro(s.origine)).length;
       const r = await importaEAggiungi(P); idScheda = r.idScheda; idBozza = r.idBozza;
       assert.strictEqual(r.esito.ok, true, JSON.stringify(r.esito));
@@ -170,17 +176,17 @@ let tmp;
         { name: 'Sale', qty: 0, unit: 'g', qty_kind: 'variabile', qty_min: null, qty_max: null, source_text: 'Sale q.b.' },
         { name: 'Burro', qty: 0, unit: 'g', qty_kind: 'mancante', qty_min: null, qty_max: null, source_text: 'Burro' },
         { name: 'acqua', qty: 0, unit: 'g', qty_kind: 'intervallo', qty_min: 20, qty_max: 30, source_text: '20–30 g acqua' },
-        { name: 'Lievito', qty: 10, unit: 'g', qty_kind: null, qty_min: null, qty_max: null, source_text: null }]);
+        { name: 'Lievito', qty: 10, unit: 'g', qty_kind: 'certa', qty_min: null, qty_max: null, source_text: null }]); // P0-c.2: nuovo ingrediente = certa
       const post = (await registro(s.origine)).slice(n0).filter(x => x.percorso === 'ingredients' && x.metodo === 'POST');
       assert.ok(post.every(x => x.stato === 201), JSON.stringify(post));
-      assert.deepStrictEqual(post.slice(-2).map(x => x.righe).sort(), [1, 6], 'ultimo salvataggio: 6 righe P0-c + 1 riga senza tipo');
+      assert.deepStrictEqual(post.slice(-1).map(x => x.righe), [7], 'ultimo salvataggio: una sola richiesta con le 7 righe (P0-c.2)');
     });
 
-    await test('T4. ricaricamento: tipi, intervallo, unita\' originali e testo della fonte riletti; riga del LAB senza tipo; firma della bozza stabile', async () => {
+    await test('T4. ricaricamento: tipi, intervallo, unita\' originali e testo della fonte riletti; riga del LAB certa; firma della bozza stabile', async () => {
       await P.avvia();
       const ings = await P.ev(id => R(id).labVersions[0].ingredients.map(i => [i.name, i.qty, i.unit, i.qtyKind || null, i.qtyMin == null ? null : i.qtyMin, i.qtyMax == null ? null : i.qtyMax]), idScheda);
       assert.deepStrictEqual(ings, [['farina', 500, 'g', 'certa', null, null], ['aglio', 2, 'spicchio', 'certa', null, null], ['vaniglia', 1, 'baccello', 'certa', null, null],
-        ['Sale', null, 'g', 'variabile', null, null], ['Burro', null, 'g', 'mancante', null, null], ['acqua', null, 'g', 'intervallo', 20, 30], ['Lievito', 10, 'g', null, null, null]]);
+        ['Sale', null, 'g', 'variabile', null, null], ['Burro', null, 'g', 'mancante', null, null], ['acqua', null, 'g', 'intervallo', 20, 30], ['Lievito', 10, 'g', 'certa', null, null]]); // P0-c.2
       const hash = sql("select contenuto_hash from variants where id='" + idBozza + "'");
       assert.strictEqual(await P.ev(id => firmaContenutoBozza(R(id).labVersions[0]), idScheda), hash, 'firma identica a quella salvata');
     });
@@ -213,7 +219,7 @@ let tmp;
       assert.deepStrictEqual(v.Burro, [100, 'g', 'certa', null, null]);
       assert.deepStrictEqual(v.aglio, [0, 'spicchio', 'intervallo', 3, 4]);
       assert.deepStrictEqual(v.vaniglia, [0, 'baccello', 'variabile', null, null]);
-      assert.deepStrictEqual(v.Lievito, [10, 'g', null, null, null]);
+      assert.deepStrictEqual(v.Lievito, [10, 'g', 'certa', null, null]); // P0-c.2: nuovo ingrediente = certa
     });
 
     // Ricetta Attiva costruita con il salvataggio del server (come V2 del test P0-c).

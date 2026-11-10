@@ -1872,6 +1872,13 @@ function toggleActiveV2(recipeId,variantId,currentActive){
   const vv=r&&r.validatedVariants.find(v=>v.id===variantId);
   if(!vv||vv.status==='retired')return;
   const newActive=!currentActive;
+  // P0-c.2: una Ricetta con quantita' da indicare non diventa Attiva. Il server
+  // lo rifiuta comunque (quantita_mancante); qui si evita di mostrarla attiva
+  // e di annunciarlo prima del rifiuto, con un messaggio che dice cosa manca.
+  if(newActive){
+    const daIndicare=(vv.ingredients||[]).filter(i=>i&&i.qtyKind==='mancante');
+    if(daIndicare.length){toast('Prima di renderla attiva indica la quantità di '+daIndicare.slice(0,3).map(i=>'«'+(i.name||'ingrediente')+'»').join(', ')+(daIndicare.length>3?' e altri':'')+'.','ti-alert-circle');return;}
+  }
   upRec(recipeId,rec=>({
     ...rec,
     validatedVariants:rec.validatedVariants.map(v=>v.id===variantId?{...v,active:newActive}:v)
@@ -3925,17 +3932,26 @@ function clearMattoncinoSelection(){
 function addIngredient(recipeId){
   const qtyEl=document.getElementById('new-ing-qty');
   const unitEl=document.getElementById('new-ing-unit');
+  // P0-c.2: la quantita' di un nuovo ingrediente ha sempre un tipo esplicito.
+  // Vuota (o 0) -> da indicare; "q.b." -> variabile; "20-30" -> intervallo;
+  // numero positivo -> certa. Mai uno 0 g al posto di una quantita' assente.
+  const q=interpretaTestoQuantita(qtyEl?qtyEl.value:'');
+  if(q.kind==='non_valido'){toast('Quantità non valida: scrivi un numero, «q.b.» oppure un intervallo (es. 20-30), o lascia vuoto.','ti-alert-circle');return;}
+  const quantitaNuova=q.kind==='numero'&&q.qty>0?{qty:q.qty,qtyKind:'certa',qtyMin:null,qtyMax:null}
+    :q.kind==='variabile'?{qty:null,qtyKind:'variabile',qtyMin:null,qtyMax:null}
+    :q.kind==='intervallo'?{qty:null,qtyKind:'intervallo',qtyMin:q.min,qtyMax:q.max}
+    :{qty:null,qtyKind:'mancante',qtyMin:null,qtyMax:null};
   let ing;
   if(S.addIngMode==='mattoncino'){
     const m=S.addIngSelectedMattoncino;
     if(!m)return; // nessuna Scheda selezionata ancora
     const label=m.recipeName+(m.variantLabel?' — '+m.variantLabel:'');
-    ing={id:uid(),name:label,qty:parseFloat(qtyEl?.value)||0,unit:unitEl?.value||'g',
-      isSubRecipe:true,subRecipeId:m.variantId,estimatedYieldPct:null,measuredYieldPct:null};
+    ing=Object.assign({id:uid(),name:label,unit:unitEl?.value||'g',
+      isSubRecipe:true,subRecipeId:m.variantId,estimatedYieldPct:null,measuredYieldPct:null},quantitaNuova);
   }else{
     const nameEl=document.getElementById('new-ing-name');
     if(!nameEl||!nameEl.value.trim())return;
-    ing={id:uid(),name:nameEl.value.trim(),qty:parseFloat(qtyEl?.value)||0,unit:unitEl?.value||'g',isSubRecipe:false,subRecipeId:null,estimatedYieldPct:null,measuredYieldPct:null};
+    ing=Object.assign({id:uid(),name:nameEl.value.trim(),unit:unitEl?.value||'g',isSubRecipe:false,subRecipeId:null,estimatedYieldPct:null,measuredYieldPct:null},quantitaNuova);
   }
   // LAB FIX 2C (C1): aggiungere un ingrediente non modifica mai l'obiettivo
   // di Produzione (niente G/porzione calcolato sommando le quantita').
@@ -3947,6 +3963,9 @@ function addIngredient(recipeId){
 }
 
 function onIngQty(recipeId,ingId,val){
+  // P0-c.2: campo svuotato dallo chef -> quantita' da indicare, mai 0 g. Solo per
+  // un'azione esplicita: gli zeri storici non vengono mai convertiti da soli.
+  if(String(val==null?'':val).trim()===''){upLab(recipeId,v=>({...v,ingredients:v.ingredients.map(i=>i.id===ingId?{...i,qty:null,qtyKind:'mancante',qtyMin:null,qtyMax:null}:i)}));return;}
   upLab(recipeId,v=>({...v,ingredients:v.ingredients.map(i=>i.id===ingId?{...i,qty:parseFloat(val)||0}:i)}));
 }
 // P0-c: campo quantita' del LAB. Numero su un ingrediente precedente (senza
@@ -3958,7 +3977,7 @@ function onIngQtyTesto(recipeId,ingId,val){
   var ing=v&&v.ingredients.find(function(i){return i.id===ingId;});
   if(!ing)return;
   var q=interpretaTestoQuantita(val);
-  if(!qtyKindDi(ing)&&(q.kind==='numero'||q.kind==='vuoto')){onIngQty(recipeId,ingId,val);return;}
+  if(!qtyKindDi(ing)&&q.kind==='numero'&&q.qty>0){onIngQty(recipeId,ingId,String(q.qty));return;} // P0-c.2: numero positivo gia' interpretato (anche "2,5"); vuoto o 0 scritto dallo chef -> da indicare (sotto)
   if(q.kind==='non_valido'){toast('Quantità non valida: scrivi un numero, «q.b.» oppure un intervallo (es. 20-30).','ti-alert-circle');return;}
   var patch=q.kind==='numero'&&q.qty>0?{qty:q.qty,qtyKind:'certa',qtyMin:null,qtyMax:null}
     :q.kind==='variabile'?{qty:null,qtyKind:'variabile',qtyMin:null,qtyMax:null}
@@ -9842,7 +9861,7 @@ function renderLabRecipe(recipe){
           const rigaPrincipale=`
         <tr${isBrick?' style="background:var(--sage-light)"':''}>
           <td>${isBrick?'<i class="ti ti-brick" style="color:var(--sage-dark);margin-right:5px" title="Mattoncino: questo ingrediente è un\'altra Scheda"></i>':''}<input class="ing-qty-input" style="width:100%;min-width:100px" value="${escAttr(ing.name)}" onchange="onIngName('${recipe.id}','${ing.id}',this.value)">${notaQ?`<div class="ing-qty-nota" style="font-size:11px;color:var(--mid);margin-top:2px"${ing.sourceText?` title="Nella fonte: ${escAttr(ing.sourceText)}"`:''}>${notaQ}</div>`:''}</td>
-          <td>${kq?`<input class="ing-qty-input" type="text" inputmode="decimal" autocomplete="off" value="${escAttr(testoQ)}" placeholder="${kq==='mancante'?'da indicare':''}" title="Numero, «q.b.» oppure da-a (es. 20-30)" onchange="onIngQtyTesto('${recipe.id}','${ing.id}',this.value)">`:`<input class="ing-qty-input" type="number" value="${ing.qty}" onchange="onIngQty('${recipe.id}','${ing.id}',this.value)">`}</td>
+          <td>${kq?`<input class="ing-qty-input" type="text" inputmode="decimal" autocomplete="off" value="${escAttr(testoQ)}" placeholder="${kq==='mancante'?'da indicare':''}" title="Numero, «q.b.» oppure da-a (es. 20-30)" onchange="onIngQtyTesto('${recipe.id}','${ing.id}',this.value)">`:`<input class="ing-qty-input" type="text" inputmode="decimal" autocomplete="off" value="${ing.qty}" title="Numero, «q.b.» oppure da-a (es. 20-30). Vuoto = quantità da indicare" onchange="onIngQtyTesto('${recipe.id}','${ing.id}',this.value)">`}</td>
           <td><select class="ing-unit-select" onchange="onIngUnit('${recipe.id}','${ing.id}',this.value)">${UNITS.includes(ing.unit)?'':`<option value="${escAttr(ing.unit)}" selected>${escAttr(ing.unit)}</option>`}${UNITS.map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}</select></td>
           <td class="ing-pct">${pesiLab.status==='complete'&&pesiLab.raw>0&&pesiLab.byId[ing.id]?(pesiLab.byId[ing.id].rawGrams/pesiLab.raw*100).toFixed(1)+'%':'—'}</td>
           <td style="text-align:right"><input type="number" min="0" max="500" placeholder="—"
@@ -9911,7 +9930,7 @@ function renderLabRecipe(recipe){
       `:`
         <input class="add-ing-input" id="new-ing-name" placeholder="Nome ingrediente" onkeydown="if(event.key==='Enter')addIngredient('${recipe.id}')">
       `}
-      <input class="add-ing-input-sm" id="new-ing-qty" type="number" placeholder="Qty">
+      <input class="add-ing-input-sm" id="new-ing-qty" type="text" inputmode="decimal" placeholder="Qty" title="Numero, «q.b.» oppure da-a (es. 20-30). Vuoto = quantità da indicare">
       <select class="unit-select" id="new-ing-unit">${UNITS.map(u=>`<option>${u}</option>`).join('')}</select>
       <button class="btn btn-outline btn-sm" onclick="toggleAddIngMode()" title="${S.addIngMode==='mattoncino'?'Torna a ingrediente normale':'Usa una Scheda come ingrediente'}" style="${S.addIngMode==='mattoncino'?'background:var(--sage-light);border-color:var(--sage);color:var(--sage-dark)':''}"><i class="ti ti-brick"></i></button>
       <button class="btn btn-outline btn-sm" onclick="addIngredient('${recipe.id}')"><i class="ti ti-plus"></i> Aggiungi</button>

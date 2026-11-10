@@ -1325,6 +1325,52 @@ export default async function handler(req, res) {
         if (r.error) throw new Error(label + ': ' + r.error);
       };
 
+      // P0-c.2: ingredienti con chiavi uniformi in UNA sola richiesta (atomica).
+      // PostgREST rifiuta un upsert multiplo con oggetti dalle chiavi diverse
+      // (PGRST102). Quando nella stessa Scheda ci sono righe con i campi P0-c e
+      // righe senza, i quattro campi sono resi ESPLICITI su ogni riga prima di
+      // scrivere, con regole dichiarate:
+      //  - riga con almeno un campo P0-c: i campi assenti fra i quattro = null;
+      //  - riga senza campi P0-c: si leggono dal database i suoi valori salvati;
+      //    se la riga ha gia' metadati P0-c sono RIPORTATI identici (mai cancellati,
+      //    nessun q.b./da indicare/intervallo che diventa certa), altrimenti null
+      //    (riga precedente: nessun cambiamento).
+      // Righe tutte senza campi P0-c (Schede precedenti, Preview P0-a): nessuna
+      // lettura e richiesta identica a prima. Qualunque altra differenza di chiavi
+      // e' rifiutata prima di scrivere. La normalizzazione avviene sul posto, prima
+      // dei controlli: la validazione vede esattamente cio' che verra' scritto.
+      const CAMPI_P0C = ['qty_kind', 'qty_min', 'qty_max', 'source_text'];
+      if (Array.isArray(ingredients) && ingredients.length > 1) {
+        const haCampi = i => i && typeof i === 'object' && CAMPI_P0C.some(k => Object.prototype.hasOwnProperty.call(i, k));
+        const conCampi = ingredients.filter(haCampi).length;
+        if (conCampi > 0) {
+          // Lettura solo se ci sono righe senza i quattro campi (Scheda mista).
+          const daLeggere = conCampi < ingredients.length ? ingredients.filter(i => i && typeof i === 'object' && !haCampi(i) && isValidId(i.id)).map(i => i.id) : [];
+          let salvati = [];
+          try {
+            for (let k = 0; k < daLeggere.length; k += 100) {
+              salvati = salvati.concat(await sbSelectAll('ingredients?select=id,qty_kind,qty_min,qty_max,source_text&id=in.' + listaIn(daLeggere.slice(k, k + 100)) + '&order=id.asc'));
+            }
+          } catch (e) {
+            console.error('Lettura dei metadati P0-c non riuscita:', e && e.message);
+            return res.status(200).json({ ok: false, code: 'controllo_non_eseguibile', errors: ['lettura degli ingredienti salvati non riuscita: nessun dato salvato'] });
+          }
+          const perId = new Map(salvati.map(r => [r.id, r]));
+          for (let k = 0; k < ingredients.length; k++) {
+            const i = ingredients[k];
+            if (!i || typeof i !== 'object') continue;
+            const base = haCampi(i) ? {} : (perId.get(i.id) || {});
+            const espliciti = {};
+            CAMPI_P0C.forEach(c => { espliciti[c] = Object.prototype.hasOwnProperty.call(i, c) ? i[c] : (base[c] === undefined ? null : base[c]); });
+            ingredients[k] = Object.assign({}, i, espliciti);
+          }
+        }
+        const chiavi = o => Object.keys(o && typeof o === 'object' ? o : {}).sort().join(',');
+        if (ingredients.some(o => chiavi(o) !== chiavi(ingredients[0]))) {
+          return res.status(200).json({ ok: false, code: 'ingredienti_non_uniformi', errors: ['ingredienti con campi diversi fra loro: nessun dato salvato'] });
+        }
+      }
+
       // P0-c: tipo di quantita' coerente prima di scrivere (gli stessi vincoli
       // della migrazione 0012, cosi' l'errore e' chiaro e nulla viene scritto).
       const problemaQuantita = (Array.isArray(ingredients) ? ingredients : []).map(i => {
@@ -1360,32 +1406,30 @@ export default async function handler(req, res) {
         // 1. Upsert ricetta
         await mustSave('recipes', recipe, 'recipes');
 
-        // 2. Upsert varianti una per volta — si ferma alla prima che fallisce
+        // 2. Upsert varianti una per volta — si ferma alla prima che fallisce.
+        //    P0-c.2: la firma del contenuto (contenuto_hash) NON e' scritta qui:
+        //    viene scritta solo dopo che ingredienti e cancellazioni sono riusciti
+        //    (passo 3c). Se il salvataggio si interrompe prima, nel database resta
+        //    la firma dell'ultimo salvataggio completo: mai una firma che descrive
+        //    ingredienti non scritti.
+        const firmeDaScrivere = [];
         if (variants && variants.length) {
           for (const v of variants) {
-            await mustSave('variants', v, 'variant ' + v.id);
+            if (v && typeof v === 'object' && Object.prototype.hasOwnProperty.call(v, 'contenuto_hash')) {
+              const { contenuto_hash, ...senzaFirma } = v;
+              await mustSave('variants', senzaFirma, 'variant ' + v.id);
+              firmeDaScrivere.push(v);
+            } else {
+              await mustSave('variants', v, 'variant ' + v.id);
+            }
           }
         }
 
         // 3. Ingredienti: upsert di tutti quelli presenti nel payload.
-        // P0-c.1: PostgREST rifiuta un upsert multiplo i cui oggetti non hanno
-        // tutti le stesse chiavi (PGRST102 "All object keys must match"): con
-        // righe precedenti (senza qty_kind/qty_min/qty_max/source_text) e righe
-        // P0-c nella stessa Scheda il salvataggio fallirebbe per intero. Le righe
-        // sono quindi inviate in gruppi con lo stesso insieme di chiavi. Nessuna
-        // chiave viene aggiunta come NULL: con merge-duplicates PostgREST aggiorna
-        // solo le colonne presenti, quindi i metadati P0-c gia' salvati di una riga
-        // inviata senza quei campi restano intatti. Righe con le stesse chiavi
-        // (tutte le Schede precedenti): una sola richiesta, identica a prima.
+        // P0-c.2: chiavi gia' rese uniformi prima dei controlli (vedi sopra):
+        // una sola richiesta, quindi tutti gli ingredienti o nessuno.
         if (ingredients && ingredients.length) {
-          const gruppi = new Map();
-          for (const riga of ingredients) {
-            const firma = riga && typeof riga === 'object' ? Object.keys(riga).sort().join('\u0001') : '';
-            if (!gruppi.has(firma)) gruppi.set(firma, []);
-            gruppi.get(firma).push(riga);
-          }
-          if (gruppi.size <= 1) await mustSave('ingredients', ingredients, 'ingredients upsert');
-          else for (const gruppo of gruppi.values()) await mustSave('ingredients', gruppo, 'ingredients upsert');
+          await mustSave('ingredients', ingredients, 'ingredients upsert');
         }
 
         // 3b. Cancellazioni SOLO esplicite: il client elenca in
@@ -1411,6 +1455,14 @@ export default async function handler(req, res) {
             const detail = await dr.text().catch(() => '');
             throw new Error('ingredients delete (variant ' + vid + '): ' + detail);
           }
+        }
+
+        // 3c. P0-c.2: firma del contenuto, solo ora che variante, ingredienti e
+        //     cancellazioni sono scritti. Stessa riga completa del passo 2 (stesso
+        //     meccanismo di scrittura: la data di ultima modifica segue la firma
+        //     come prima).
+        for (const v of firmeDaScrivere) {
+          await mustSave('variants', v, 'variant ' + v.id + ' (firma)');
         }
 
         // 4. L3Items: identita' stabile, sempre upsert per id, mai delete+insert.

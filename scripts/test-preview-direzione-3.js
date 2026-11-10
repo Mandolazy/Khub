@@ -206,7 +206,7 @@ const PROTETTE = {
   "async function saveToSupabase(recipe)": "f9dc1d860de4899d",
   "async function loadFromSupabase()": "d7b44d135ae075e5",
   "function firmaContenutoBozza(v)": "846ec26eda61f09a",
-  "function toggleActiveV2(recipeId,variantId,currentActive)": "ca8f22881e9ba641",
+  "function toggleActiveV2(recipeId,variantId,currentActive)": "d5278818ecdb15f9",
   "async function confirmActiveYieldEdit()": "92f6565ceacf884a",
   "function creaBozzaDaSorgente(recipeId,attiva)": "24ff4e49d1353fae",
   "function onRecipeNameChange(recipeId,val)": "b23f74fd6e79d3ac",
@@ -350,13 +350,23 @@ function clientMain(fetchImpl, nomi) {
     const c = await setup(); const cm = clientMain(clientFetch, ['renderLabRecipe', 'renderRicettaMadreV2']);
     cm.S.recipes = clone(c.S.recipes); cm.S.selectedId = 'rB';
     for (const k of [c, cm]) { k.S.mode = 'lab'; k.S.view = 'recipe'; labOf(k); }
-    assert.strictEqual(c.renderLabRecipe(rec(c)), cm.renderLabRecipe(rec(cm)), 'LAB classico');
+    // P0-c.2 (approvato): i due campi quantita' del LAB classico diventano testuali (numero, "q.b.", "20-30";
+    // vuoto = da indicare). Il resto del LAB deve restare identico a main: si applicano a main solo queste due
+    // sostituzioni esatte (docs/import-engine/P0-c2.md §2).
+    const conCampiP0c2 = h => h
+      .replace(/<input class="ing-qty-input" type="number" value="([^"]*)" onchange="onIngQty\('([^']*)','([^']*)',this\.value\)">/g,
+        (m, v, r, i) => `<input class="ing-qty-input" type="text" inputmode="decimal" autocomplete="off" value="${v}" title="Numero, «q.b.» oppure da-a (es. 20-30). Vuoto = quantità da indicare" onchange="onIngQtyTesto('${r}','${i}',this.value)">`)
+      .replace('<input class="add-ing-input-sm" id="new-ing-qty" type="number" placeholder="Qty">',
+        '<input class="add-ing-input-sm" id="new-ing-qty" type="text" inputmode="decimal" placeholder="Qty" title="Numero, «q.b.» oppure da-a (es. 20-30). Vuoto = quantità da indicare">');
+    const labMain = cm.renderLabRecipe(rec(cm));
+    assert.ok(/class="ing-qty-input" type="number"/.test(labMain) && /id="new-ing-qty" type="number"/.test(labMain), 'i campi sostituiti esistono in main');
+    assert.strictEqual(c.renderLabRecipe(rec(c)), conCampiP0c2(labMain), 'LAB classico');
     for (const k of [c, cm]) k.S.view = 'ricetta-madre-v2';
     assert.strictEqual(c.renderRicettaMadreV2(rec(c)), cm.renderRicettaMadreV2(rec(cm)), 'Scheda classica');
     const k = await setup({ search: '?ui=classic' }); k.initUiD3();
     assert.ok(k.S.uiD3 === false && !k.bodyClasses.has('ui-d3'), 'grafica classica con ?ui=classic');
     k.S.mode = 'lab'; k.S.view = 'recipe'; labOf(k);
-    assert.strictEqual(k.renderLabRecipe(rec(k)), cm.renderLabRecipe(rec(cm)), 'LAB classico con ?ui=classic identico a main');
+    assert.strictEqual(k.renderLabRecipe(rec(k)), conCampiP0c2(cm.renderLabRecipe(rec(cm))), 'LAB classico con ?ui=classic identico a main (salvo i campi quantita\' P0-c.2)');
   });
 
   await test('P2. motore preservato: LAB, scaling, rese, conversioni, Sessioni, salvataggio e MichelinAI identici a main; cambiano solo le funzioni di presentazione', async () => {
@@ -377,10 +387,13 @@ function clientMain(fetchImpl, nomi) {
       // test-p0c-equivalenza e test-p0c1-assistenti; motivi in docs/import-engine/P0-c.md §6 e P0-c1.md.
       'buildPreparedInputDaRicettaAttiva', 'buildSessionSnapshotV1', 'buildValidatedVariantPayload', 'computeFormulationWeights', 'computeSessionScaling',
       'confirmMandaInProduzione', 'contaVariabiliCambiate', 'costruisciPayloadM2', 'firmaContenutoBozza', 'openMandaInProduzione', 'renderActiveYieldSection',
-      'renderLabWeightsPanel', 'renderMandaInProduzioneModal', 'renderQuickCalcPanel', 'renderSessioneOperativa', 'runM1'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
+      'renderLabWeightsPanel', 'renderMandaInProduzioneModal', 'renderQuickCalcPanel', 'renderSessioneOperativa', 'runM1',
+      // P0-c.2: quantita' inserite a mano (vuoto/0 -> da indicare, q.b., intervallo) e attivazione rifiutata con
+      // quantita' da indicare; test-p0c2-postgrest Q6-Q12 e docs/import-engine/P0-c2.md §2.
+      'addIngredient', 'onIngQty', 'toggleActiveV2'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
     assert.deepStrictEqual(rimosse, [], 'nessuna funzione rimossa');
     // P0-c: computeFormulationWeights, computeSessionScaling e buildValidatedVariantPayload cambiano (elenco sopra).
-    for (const n of ['deriveYieldPerUnit', 'computeLabRounding', 'applyLabRound', 'undoLabRound', 'createProductionSession', 'onValidate', 'confirmValidate', 'rendiAttivaPronta', 'riapriProntaInLab', 'onLabDeclaredYield', 'onIngQty', 'onStepText'])
+    for (const n of ['deriveYieldPerUnit', 'computeLabRounding', 'applyLabRound', 'undoLabRound', 'createProductionSession', 'onValidate', 'confirmValidate', 'rendiAttivaPronta', 'riapriProntaInLab', 'onLabDeclaredYield', 'onStepText']) // P0-c.2: onIngQty cambia (elenco sopra)
       assert.ok(n in b && a[n] === b[n], 'invariata: ' + n);
     // Il segnaposto "MichelinAI" e' solo una card di testo (presentazione), non il motore.
     // P0-c.1: runM1 e costruisciPayloadM2 cambiano solo nella rappresentazione delle quantita' (test-p0c1-assistenti).

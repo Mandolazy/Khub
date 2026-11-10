@@ -147,7 +147,7 @@ const PAGINA = '<html><head>' + ld({ '@type': 'Recipe', name: 'Pane P0-c', recip
     await ev(id => { document.getElementById('new-ing-name').value = 'Lievito'; document.getElementById('new-ing-qty').value = '10'; document.getElementById('new-ing-unit').value = 'g'; addIngredient(id); }, idScheda);
     await page.waitForTimeout(2500);
     const r = (await righeDb(idBozza)).map(vista);
-    assert.deepStrictEqual(r[r.length - 1], ['Lievito', 10, 'g', null, null, null]);
+    assert.deepStrictEqual(r[r.length - 1], ['Lievito', 10, 'g', 'certa', null, null]); // P0-c.2: nuovo ingrediente = certa
     assert.deepStrictEqual(r.slice(3, 6).map(x => x[3]), ['variabile', 'certa', 'intervallo'], 'tipi intatti');
     assert.ok(!/Salvataggio non riuscito/.test(await ev(() => document.body.innerText)), 'nessun errore di salvataggio visibile');
   });

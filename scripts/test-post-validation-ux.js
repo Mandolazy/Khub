@@ -205,7 +205,7 @@ const PROTETTE = {
   "async function saveToSupabase(recipe)": "f9dc1d860de4899d",
   "async function loadFromSupabase()": "d7b44d135ae075e5",
   "function firmaContenutoBozza(v)": "846ec26eda61f09a",
-  "function toggleActiveV2(recipeId,variantId,currentActive)": "ca8f22881e9ba641",
+  "function toggleActiveV2(recipeId,variantId,currentActive)": "d5278818ecdb15f9",
   "async function confirmActiveYieldEdit()": "92f6565ceacf884a",
   "function creaBozzaDaSorgente(recipeId,attiva)": "24ff4e49d1353fae",
   "function onRecipeNameChange(recipeId,val)": "b23f74fd6e79d3ac",

@@ -406,8 +406,8 @@ const box = (h, cls) => { const m = h.match(new RegExp('class="' + cls + '"[^>]*
       'function buildValidatedVariantPayload(recipeId,vv)': 'f4fc64648a86a261', 'async function saveToSupabase(recipe)': 'f9dc1d860de4899d',
       'async function loadFromSupabase()': 'd7b44d135ae075e5', 'function firmaContenutoBozza(v)': '846ec26eda61f09a',
       'function computeFormulationWeights(ingredients,resolveFact)': 'f481a42d06c68c3a', 'function costruisciPayloadM2(recipeId, message, classification)': 'bfe146dcab9a721d',
-      'async function runM1(recipeId)': '5eb87f13cfe9d839', 'function onIngQty(recipeId,ingId,val)': 'f70be59577371d4a',
-      'function onLabDeclaredYield(recipeId,field,value)': '7bbbd369b9438f26', 'function toggleActiveV2(recipeId,variantId,currentActive)': 'ca8f22881e9ba641',
+      'async function runM1(recipeId)': '5eb87f13cfe9d839', 'function onIngQty(recipeId,ingId,val)': '6525a50d6ecda173',
+      'function onLabDeclaredYield(recipeId,field,value)': '7bbbd369b9438f26', 'function toggleActiveV2(recipeId,variantId,currentActive)': 'd5278818ecdb15f9',
       'async function confirmValidate()': '84c902e4f4cba6ae', 'function validateLabProductionTarget(field,value)': 'fefbd04eed656496',
       'function computeRecipeWeightSummary(recipe,vv)': 'beac67cc93eee93b', 'function onIngUnit(recipeId,ingId,val)': '9839d1f8237ed53e',
       // Finalizzazione D3: solo il ramo S.uiD3 di "Elimina" (classico identico a main, test-preview-direzione-3 P10).

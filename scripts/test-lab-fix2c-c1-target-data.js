@@ -160,7 +160,7 @@ const SRC = [
   'function parseLocaleNumber(value)', 'function normalizeDeclaredYield(qty,unit)', 'function classifyYieldUnit(unit)',
   'function targetFromDb(value)', 'function targetForDb(value)', 'function declaredYieldFromRow(row)', 'function copyDeclaredYield(src)', 'function declaredYieldPayload(v)',
   'function validateLabProductionTarget(field,value)', 'function setLabProductionTarget(recipeId,field,rawValue)', 'function onLabTargetPortions(recipeId,val)',
-  'function addIngredient(recipeId)', 'function creaBozzaDaSorgente(recipeId,attiva)', 'function duplicaVersioneLAB(recipeId)', 'async function creaSchedaDaLab(recipeId)',
+  'function interpretaTestoQuantita(testo)', 'function addIngredient(recipeId)', 'function creaBozzaDaSorgente(recipeId,attiva)', 'function duplicaVersioneLAB(recipeId)', 'async function creaSchedaDaLab(recipeId)',
   'function rendiAttiva(recipeId)', 'function onValidate()', 'async function confirmValidate()', 'function toggleActiveV2(recipeId,variantId,currentActive)',
   'function uid()', 'function normalizeIngredientName(name)', 'function conversionFactSourcePriority(sourceType)', 'function isBetterConversionFact(candidate,current)',
   'function buildKnownIngredientIds(ingredientRows)', 'function computeIngredientDeletions(knownByVariant,currentByVariant)',
