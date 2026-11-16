@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
 import http from 'node:http';
 import https from 'node:https';
 import dns from 'node:dns';
@@ -374,7 +374,8 @@ function supabaseConfig() {
 
 // Le sole tabelle che il server legge o scrive (schema public).
 const SB_TABLES = ['recipes', 'variants', 'ingredients', 'l2_items', 'l3_items', 'families', 'variant_families',
-  'ingredient_conversions', 'm2_turns', 'production_sessions', 'session_ingredient_state', 'session_step_state', 'session_notes'];
+  'ingredient_conversions', 'm2_turns', 'production_sessions', 'session_ingredient_state', 'session_step_state', 'session_notes',
+  'ideas']; // P2-a.1: solo tramite le azioni dedicate delle Idee (nessuna regola generica update/delete)
 
 // Azione generica 'update': usata dal client SOLO per creare una Sessione di
 // produzione (createProductionSession). Ammesse solo queste tabelle, queste
@@ -408,6 +409,131 @@ const GENERIC_UPDATE_MAX_ROWS = 1000;
 
 function isPlainObject(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
 function isValidId(v) { return typeof v === 'string' && v.length > 0 && v.length <= SB_ID_MAX_LENGTH; }
+
+// ══════════════════════════════════════════════════════════
+// P2-a.1 — IDEE (materiale di partenza, separato dalle Ricette)
+// Validazione e normalizzazione lato server. Il server non inventa nulla:
+// copia solo i campi presenti, rifiuta (non tronca) i valori troppo lunghi,
+// toglie i caratteri di controllo. Gli stessi vincoli sono anche nel
+// database (migrazione 0013): qui l'errore e' chiaro e nulla viene scritto.
+// ══════════════════════════════════════════════════════════
+const IDEA_STATI = ['aperta', 'trasformata', 'archiviata'];
+const IDEA_TIPI = ['link', 'testo', 'appunto'];
+const IDEA_ORIGINI = ['strutturata', 'ai'];
+const IDEA_LIMITI = { titolo: 200, url: 2000, testo: 20000, note: 5000, anteprima: 200000 };
+const IDEA_QTY_KINDS = ['certa', 'variabile', 'mancante', 'intervallo'];
+const IDEA_COLONNE = 'id,title,status,source_type,source_url,source_text,preview,preview_origin,notes,linked_recipe_id,linked_variant_id,created_at,updated_at';
+const IDEA_ID = /^idea_[A-Za-z0-9_-]{8,64}$/;
+
+class IdeaNonValida extends Error {}
+const ideaErrore = msg => { throw new IdeaNonValida(msg); };
+// Testo: stringa, senza caratteri di controllo (a capo e tab ammessi solo se
+// multilinea), spazi esterni tolti. Vuoto -> null. Oltre il limite: errore.
+function ideaTesto(v, max, campo, multilinea) {
+  if (v == null) return null;
+  if (typeof v !== 'string') ideaErrore(campo + ' non e\' un testo');
+  let t = multilinea ? v.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim()
+    : v.replace(/[\u0000-\u001F\u007F]+/g, ' ').replace(/\s+/g, ' ').trim(); // una riga: spazi raccolti
+  if (!t) return null;
+  if (t.length > max) ideaErrore(campo + ' troppo lungo (massimo ' + max + ' caratteri)');
+  return t;
+}
+function ideaUrl(v) {
+  const t = ideaTesto(v, IDEA_LIMITI.url, 'indirizzo', false);
+  if (t == null) return null;
+  let u;
+  try { u = new URL(t); } catch (e) { ideaErrore('indirizzo non valido'); }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') ideaErrore('indirizzo non ammesso: solo http o https');
+  if (u.username || u.password) ideaErrore('indirizzo non ammesso: credenziali nell\'indirizzo');
+  if (u.href.length > IDEA_LIMITI.url) ideaErrore('indirizzo troppo lungo');
+  return u.href;
+}
+const ideaNumero = (v, campo) => {
+  if (v == null || v === '') return null;
+  const n = typeof v === 'number' ? v : Number(String(v).replace(',', '.'));
+  if (!Number.isFinite(n)) ideaErrore(campo + ' non e\' un numero');
+  return n;
+};
+// Anteprima strutturata: dal formato dell'anteprima KHUB (S.loadPreview) a una
+// forma normalizzata e chiusa (solo i campi noti). Quantita' coerenti con P0-c.
+function ideaAnteprima(p) {
+  if (p == null) return null;
+  if (!isPlainObject(p)) ideaErrore('anteprima non valida');
+  const ing = p.ingredients == null ? [] : p.ingredients;
+  if (!Array.isArray(ing) || ing.length > 200) ideaErrore('anteprima: ingredienti non validi');
+  const ingredienti = ing.map((i, n) => {
+    if (!isPlainObject(i)) ideaErrore('anteprima: ingrediente ' + (n + 1) + ' non valido');
+    const nome = ideaTesto(i.name, 300, 'anteprima: nome dell\'ingrediente ' + (n + 1), false);
+    if (!nome) ideaErrore('anteprima: ingrediente ' + (n + 1) + ' senza nome');
+    const k = i.qtyKind == null || i.qtyKind === '' ? null : i.qtyKind;
+    if (k !== null && !IDEA_QTY_KINDS.includes(k)) ideaErrore('anteprima: tipo di quantita\' non ammesso (' + (n + 1) + ')');
+    const qty = ideaNumero(i.qty, 'anteprima: quantita\''), mn = ideaNumero(i.qtyMin, 'anteprima: minimo'), mx = ideaNumero(i.qtyMax, 'anteprima: massimo');
+    const coerente = k === 'certa' ? qty > 0 && mn === null && mx === null
+      : k === 'variabile' || k === 'mancante' ? !qty && mn === null && mx === null
+      : k === 'intervallo' ? !qty && mn > 0 && mx > mn
+      : mn === null && mx === null && (qty === null || qty >= 0);
+    if (!coerente) ideaErrore('anteprima: quantita\' non coerente per «' + nome + '»');
+    return { nome, qty: k === 'certa' || k === null ? qty : null, unit: ideaTesto(i.unit, 40, 'anteprima: unita\'', false), qtyKind: k, qtyMin: mn, qtyMax: mx,
+      testoFonte: ideaTesto(i.sourceText != null ? i.sourceText : i.originale, 300, 'anteprima: testo della fonte', false) };
+  });
+  const st = p.steps == null ? [] : p.steps;
+  if (!Array.isArray(st) || st.length > 200) ideaErrore('anteprima: passaggi non validi');
+  const passi = st.map((x, n) => ideaTesto(x, 5000, 'anteprima: passaggio ' + (n + 1), true)).filter(Boolean);
+  let resa = null;
+  const dy = p.declaredYield;
+  if (dy != null) {
+    if (!isPlainObject(dy)) ideaErrore('anteprima: resa non valida');
+    const r = dy.range;
+    const intervallo = isPlainObject(r) ? { min: ideaNumero(r.min, 'anteprima: resa minima'), max: ideaNumero(r.max, 'anteprima: resa massima'), unit: ideaTesto(r.unit, 40, 'anteprima: unita\' della resa', false) } : null;
+    const q = ideaTesto(dy.qty == null ? null : String(dy.qty), 20, 'anteprima: resa', false), u = ideaTesto(dy.unit, 40, 'anteprima: unita\' della resa', false);
+    const fonte = ideaTesto(dy.source, 300, 'anteprima: citazione della resa', false);
+    if (q || u || fonte || intervallo) resa = { qty: q, unit: u, fonte, intervallo, daVerificare: dy.toVerify === true };
+  }
+  const f = isPlainObject(p.importFonte) ? p.importFonte : {};
+  let tempi = null;
+  if (isPlainObject(f.tempi)) {
+    tempi = {};
+    for (const k of ['preparazione', 'cottura', 'esecuzione', 'totale']) {
+      const d = f.tempi[k];
+      if (d == null) continue;
+      if (!isPlainObject(d)) ideaErrore('anteprima: tempo non valido');
+      const m = d.minuti == null ? null : ideaNumero(d.minuti, 'anteprima: minuti');
+      if (m !== null && (!Number.isInteger(m) || m < 0)) ideaErrore('anteprima: minuti non validi');
+      const o = ideaTesto(d.originale, 60, 'anteprima: tempo originale', false);
+      if (m !== null || o) tempi[k] = { minuti: m, originale: o };
+    }
+    if (!Object.keys(tempi).length) tempi = null;
+  }
+  const note = ['notaResa', 'notaTempi', 'notaPorzioni', 'notaPassi'].map(k => ideaTesto(f[k], 600, 'anteprima: nota', false)).filter(Boolean);
+  const out = {
+    versione: 1,
+    nome: ideaTesto(p.name, 300, 'anteprima: nome', false),
+    ingredienti, passi, resa, tempi, note,
+    fonte: { url: f.url ? ideaUrl(f.url) : null, descrizione: ideaTesto(f.descrizione, 600, 'anteprima: descrizione', true) },
+  };
+  if (Buffer.byteLength(JSON.stringify(out), 'utf8') > IDEA_LIMITI.anteprima) ideaErrore('anteprima troppo grande');
+  return out;
+}
+// Nuova Idea: sempre "aperta", nessun riferimento a Ricette, id generato dal server.
+function ideaDaCreare(x) {
+  if (!isPlainObject(x)) ideaErrore('idea non valida');
+  const ammessi = ['title', 'sourceType', 'sourceUrl', 'sourceText', 'preview', 'previewOrigin', 'notes'];
+  const estranei = Object.keys(x).filter(k => !ammessi.includes(k));
+  if (estranei.length) ideaErrore('campi non ammessi: ' + estranei.join(', '));
+  const titolo = ideaTesto(x.title, IDEA_LIMITI.titolo, 'titolo', false);
+  if (!titolo) ideaErrore('titolo mancante');
+  if (!IDEA_TIPI.includes(x.sourceType)) ideaErrore('tipo di fonte non ammesso');
+  const url = ideaUrl(x.sourceUrl), testo = ideaTesto(x.sourceText, IDEA_LIMITI.testo, 'testo', true);
+  const anteprima = ideaAnteprima(x.preview);
+  const origine = x.previewOrigin == null || x.previewOrigin === '' ? null : x.previewOrigin;
+  if (origine !== null && !IDEA_ORIGINI.includes(origine)) ideaErrore('origine dell\'anteprima non ammessa');
+  if ((anteprima === null) !== (origine === null)) ideaErrore('anteprima e origine dell\'anteprima vanno indicate insieme');
+  if (x.sourceType === 'link' && !url) ideaErrore('link mancante');
+  if ((x.sourceType === 'testo' || x.sourceType === 'appunto') && !testo) ideaErrore('testo mancante');
+  if (x.sourceType === 'appunto' && (url || anteprima)) ideaErrore('un appunto non ha link ne\' anteprima');
+  return { id: 'idea_' + randomUUID().replace(/-/g, ''), title: titolo, status: 'aperta', source_type: x.sourceType, source_url: url, source_text: testo,
+    preview: anteprima, preview_origin: origine, notes: ideaTesto(x.notes, IDEA_LIMITI.note, 'note', true) };
+}
 
 // null se (table, data) e' ammesso per l'azione 'update', altrimenti il motivo.
 function genericUpdateProblem(table, data) {
@@ -1005,6 +1131,64 @@ export default async function handler(req, res) {
         return res.status(200).json({ error: detail || ('HTTP ' + r.status), status: r.status });
       }
       return res.status(200).json({ ok: true });
+    }
+
+    // P2-a.1 — Idee: azioni dedicate (lettura, creazione, note, archiviazione).
+    // Nessuna azione generica: la tabella non e' in GENERIC_UPDATE_RULES ne' in
+    // GENERIC_DELETE_TABLES. Le Idee non toccano Ricette, varianti o Produzione.
+    if (['loadIdeas', 'createIdea', 'updateIdeaNotes', 'archiveIdea'].includes(body.supabaseAction)) {
+      const azione = body.supabaseAction;
+      const leggiIdea = async id => {
+        const r = await fetch(SB + '/rest/v1/ideas?select=' + IDEA_COLONNE + '&id=eq.' + encodeURIComponent(id), { headers: SH_READ });
+        if (!r.ok) throw new Error('lettura non riuscita (' + r.status + ')');
+        const righe = await r.json();
+        return Array.isArray(righe) && righe.length ? righe[0] : null;
+      };
+      // Sempre e solo la tabella ideas: cambia soltanto il filtro (id gia' validato).
+      const scrivi = async (metodo, filtro, dati) => {
+        const r = await fetch(SB + '/rest/v1/ideas' + filtro, { method: metodo, headers: { ...SH_READ, Prefer: 'return=representation' }, body: JSON.stringify(dati) });
+        if (!r.ok) {
+          const detail = await r.text().catch(() => '');
+          console.error('Supabase error [ideas]:', r.status, detail);
+          return { errore: detail || ('HTTP ' + r.status) };
+        }
+        const righe = await r.json().catch(() => null);
+        return { riga: Array.isArray(righe) ? righe[0] : null };
+      };
+      try {
+        if (azione === 'loadIdeas') {
+          const conArchiviate = body.includeArchived === true;
+          const ideas = await sbSelectAll('ideas?select=' + IDEA_COLONNE + (conArchiviate ? '' : '&status=neq.archiviata') + '&order=created_at.desc,id.asc');
+          return res.status(200).json({ ok: true, ideas });
+        }
+        if (azione === 'createIdea') {
+          let riga;
+          try { riga = ideaDaCreare(body.idea); } catch (e) { if (e instanceof IdeaNonValida) return res.status(200).json({ ok: false, code: 'idea_non_valida', error: e.message }); throw e; }
+          const w = await scrivi('POST', '', riga);
+          if (w.errore) return res.status(200).json({ ok: false, code: 'scrittura_non_riuscita', error: 'Idea non salvata' });
+          return res.status(200).json({ ok: true, idea: w.riga });
+        }
+        const id = typeof body.id === 'string' ? body.id : '';
+        if (!IDEA_ID.test(id)) return res.status(200).json({ ok: false, code: 'idea_non_valida', error: 'id non valido' });
+        const attuale = await leggiIdea(id);
+        if (!attuale) return res.status(200).json({ ok: false, code: 'idea_non_trovata', error: 'Idea non trovata' });
+        if (azione === 'updateIdeaNotes') {
+          let note;
+          try { note = ideaTesto(body.notes, IDEA_LIMITI.note, 'note', true); } catch (e) { if (e instanceof IdeaNonValida) return res.status(200).json({ ok: false, code: 'idea_non_valida', error: e.message }); throw e; }
+          if (attuale.status === 'archiviata') return res.status(200).json({ ok: false, code: 'idea_archiviata', error: 'Un\'Idea archiviata non si modifica' });
+          const w = await scrivi('PATCH', '?id=eq.' + encodeURIComponent(id) + '&status=neq.archiviata', { notes: note, updated_at: new Date().toISOString() });
+          if (w.errore || !w.riga) return res.status(200).json({ ok: false, code: 'scrittura_non_riuscita', error: 'Note non salvate' });
+          return res.status(200).json({ ok: true, idea: w.riga });
+        }
+        // archiveIdea: aperta o trasformata -> archiviata; gia' archiviata: nessuna scrittura.
+        if (attuale.status === 'archiviata') return res.status(200).json({ ok: true, idea: attuale });
+        const w = await scrivi('PATCH', '?id=eq.' + encodeURIComponent(id) + '&status=neq.archiviata', { status: 'archiviata', updated_at: new Date().toISOString() });
+        if (w.errore || !w.riga) return res.status(200).json({ ok: false, code: 'scrittura_non_riuscita', error: 'Idea non archiviata' });
+        return res.status(200).json({ ok: true, idea: w.riga });
+      } catch (e) {
+        console.error('Idee:', azione, e && e.message);
+        return res.status(200).json({ ok: false, code: 'idee_non_disponibili', error: 'Idee non disponibili' });
+      }
     }
 
     // Sprint Produzione — Micro-Step 10: lettura delle production_sessions
