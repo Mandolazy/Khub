@@ -21,7 +21,8 @@
 --
 -- Accesso: SOLO dal server (chiave secret = service_role, che ignora RLS).
 -- RLS attivo senza alcuna policy e privilegi revocati ad anon e
--- authenticated: nessun accesso diretto dall'API pubblica.
+-- authenticated: nessun accesso diretto dall'API pubblica. service_role
+-- riceve esplicitamente SELECT, INSERT, UPDATE (nessun DELETE).
 -- Additiva, idempotente, in un'unica transazione. Nessuna tabella esistente
 -- viene modificata. Se una tabella public.ideas esiste gia' con una struttura
 -- diversa la migrazione si ferma senza modificare nulla.
@@ -76,6 +77,13 @@ create table if not exists public.ideas (
 create index if not exists ideas_status_created_idx on public.ideas (status, created_at desc);
 
 -- Accesso privato: RLS senza policy + nessun privilegio per i ruoli dell'API pubblica.
+-- service_role (chiave secret del server): privilegi ESPLICITI, mai dedotti dai
+-- privilegi predefiniti dello schema. Supabase non concede piu' in automatico
+-- le nuove tabelle di public ai ruoli dell'API: senza questo grant il server
+-- riceve "permission denied for table ideas" (42501), come visto su KHUB Test.
+-- Prima revoke all, poi solo cio' che serve: lo stesso risultato con il vecchio
+-- comportamento (grant automatico di tutto, DELETE compreso) e con il nuovo
+-- (nessun grant). Nessun DELETE: il server non cancella mai le Idee.
 alter table public.ideas enable row level security;
 do $$
 declare r text;
@@ -85,6 +93,10 @@ begin
       execute format('revoke all on table public.ideas from %I', r);
     end if;
   end loop;
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    revoke all on table public.ideas from service_role;
+    grant select, insert, update on table public.ideas to service_role;
+  end if;
   if exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'ideas') then
     raise exception 'P2-a.1: public.ideas ha policy inattese: nessuna modifica';
   end if;

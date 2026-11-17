@@ -1,6 +1,6 @@
 # Migrazione 0013 — Idee (`public.ideas`)
 
-**Stato:** preparata e testata solo su PostgreSQL 16 + PostgREST 12.2.3 locali. **Non applicata.** Va applicata prima su KHUB Test, solo dopo un'autorizzazione esplicita.
+**Stato:** applicata su **KHUB Test** (versione iniziale + `grant` manuale a `service_role`, vedi §6). **Non applicata in Production.** Il file del repository contiene ora anche i privilegi espliciti di `service_role`: è la versione da usare per Production.
 
 | File | Ruolo |
 |---|---|
@@ -37,12 +37,13 @@ Non esiste uno stato «analizzata»: un'Idea è grezza o analizzata **solo** in 
 
 **Accesso:**
 - RLS attivo **senza alcuna policy**;
-- `revoke all` per `anon` e `authenticated` (privilegi che Supabase concede di default alle nuove tabelle di `public`);
-- il server usa la chiave secret (`service_role`, che ignora RLS);
+- `revoke all` per `anon` e `authenticated`;
+- `service_role` (chiave secret del server, ignora RLS): `revoke all`, poi **`grant select, insert, update`** espliciti. Nessun `delete`: il server non cancella mai le Idee;
+- i privilegi **non dipendono** da quelli predefiniti dello schema. Supabase non concede più in automatico le nuove tabelle di `public` ai ruoli dell'API (§6); con il vecchio comportamento la migrazione toglie comunque `delete` e gli altri privilegi. Il risultato è lo stesso nei due casi;
 - la migrazione si ferma se trova policy sulla tabella.
 
 **Sicurezza della migrazione:**
-- idempotente;
+- idempotente: rieseguita su una tabella già esistente con lo schema previsto, riallinea solo i privilegi e non tocca i dati;
 - si ferma senza modificare nulla se `public.ideas` esiste già con colonne diverse, o se mancano `recipes` o `variants`.
 
 ## 2. Compatibilità
@@ -62,9 +63,13 @@ Non esiste uno stato «analizzata»: un'Idea è grezza o analizzata **solo** in 
    select relrowsecurity from pg_class where oid = 'public.ideas'::regclass;                 -- atteso true
    select count(*) from pg_policies where schemaname='public' and tablename='ideas';            -- atteso 0
    select r, has_table_privilege(r, 'public.ideas', 'SELECT') as sel, has_table_privilege(r, 'public.ideas', 'INSERT') as ins,
-          has_table_privilege(r, 'public.ideas', 'UPDATE') as upd, has_table_privilege(r, 'public.ideas', 'DELETE') as del
-     from unnest(array['anon','authenticated']) r;                                              -- atteso tutto false
+          has_table_privilege(r, 'public.ideas', 'UPDATE') as upd, has_table_privilege(r, 'public.ideas', 'DELETE') as del,
+          has_table_privilege(r, 'public.ideas', 'TRUNCATE,REFERENCES,TRIGGER') as altri
+     from unnest(array['service_role','anon','authenticated']) r;
+   -- atteso: service_role  sel/ins/upd = true, del = false, altri = false
+   --         anon, authenticated: tutto false
    ```
+4. **Prova dal server** (Console della Preview, sessione aperta): `createIdea` di un appunto deve rispondere `ok: true`. Con `scrittura_non_riuscita` controllare i log di Vercel (`Supabase error [ideas]`): `42501` indica privilegi mancanti.
 
 ## 4. Rollback (preparato, non eseguito)
 **Prima** si ripristina il codice precedente, poi si esegue `PREPARED_NOT_EXECUTED__0013_ideas_rollback.sql`.
@@ -86,3 +91,20 @@ Lettura dell'esito:
 - **`anon_select` = true e RLS non attivo:** tabella leggibile con la chiave anonima del progetto;
 - **RLS attivo con una policy verso `public` o `anon`:** stesso effetto per le operazioni coperte dalla policy;
 - **RLS attivo senza policy, o nessun privilegio:** accesso negato.
+
+## 6. Collaudo su KHUB Test: privilegi di `service_role`
+**Cosa è successo:**
+- la prima versione di 0013 revocava i privilegi ad `anon` e `authenticated`, ma dava per scontato che `service_role` li ricevesse dai privilegi predefiniti di Supabase;
+- su KHUB Test non è stato così: Supabase non concede più in automatico le nuove tabelle di `public` ai ruoli dell'API (le tabelle già esistenti mantengono i loro privilegi);
+- risultato: `createIdea` rispondeva `scrittura_non_riuscita`. PostgREST rifiutava con `42501 permission denied for table ideas`.
+
+**Correzione su KHUB Test (manuale, già eseguita):** `grant select, insert, update on table public.ideas to service_role;`. Dopo la correzione tutte le prove manuali sono passate.
+
+**Correzione nel repository:**
+- 0013 concede ora esplicitamente gli stessi privilegi, preceduti da `revoke all`;
+- rieseguirla su KHUB Test non cambia nulla: privilegi già corretti, dati invariati (test B11);
+- su Production la versione aggiornata funziona con entrambi i comportamenti di Supabase (test B7 e B10).
+
+**Verifiche aggiunte:**
+- §3: privilegi di `service_role`;
+- verifica post-migrazione: righe 18 e 19 (`service_role`: SELECT, INSERT, UPDATE sì; DELETE, TRUNCATE, REFERENCES, TRIGGER no).

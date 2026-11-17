@@ -12,6 +12,10 @@
  *   - "server": ruolo service_role (come la chiave secret usata da KHUB);
  *   - "pubblico": ruolo anon, con JWT per authenticated e service_role.
  * Il server reale dell'app gira collegato al PostgREST "server".
+ * B1-B9 usano i vecchi privilegi predefiniti di Supabase (ALL ai ruoli
+ * dell'API); B10-B11 il nuovo comportamento, in cui le nuove tabelle di
+ * public non sono concesse a nessuno: service_role deve ricevere dalla
+ * migrazione SELECT, INSERT, UPDATE espliciti (e nessun DELETE).
  * Mai Supabase, nessuna AI, nessuna rete esterna.
  */
 const assert = require('assert');
@@ -197,10 +201,10 @@ const ANTEPRIMA_NORMALIZZATA = {
     const somma = () => sql("select md5((select coalesce(string_agg(concat_ws('|',id,name,category),'#' order by id),'') from recipes)||(select coalesce(string_agg(concat_ws('|',id,recipe_id,name,status,active),'#' order by id),'') from variants)||(select coalesce(string_agg(concat_ws('|',id,variant_id,name,qty,unit),'#' order by id),'') from ingredients)||(select count(*)::text from production_sessions))");
     const sommaIniziale = somma();
 
-    const avviaRest = async (ruoloAnonimo, conJwt) => {
+    const avviaRest = async (ruoloAnonimo, conJwt, db = DB) => {
       const porta = await portaLibera();
-      const uri = 'postgres://' + (parti.user || 'postgres') + '@/' + DB + '?host=' + encodeURIComponent(parti.host || '/tmp') + '&port=' + (parti.port || 5432);
-      const conf = path.join(tmp, 'pgrst-' + ruoloAnonimo + '.conf');
+      const uri = 'postgres://' + (parti.user || 'postgres') + '@/' + db + '?host=' + encodeURIComponent(parti.host || '/tmp') + '&port=' + (parti.port || 5432);
+      const conf = path.join(tmp, 'pgrst-' + db + '-' + ruoloAnonimo + '.conf');
       fs.writeFileSync(conf, `db-uri = "${uri}"\ndb-schemas = "public"\ndb-anon-role = "${ruoloAnonimo}"\nserver-host = "127.0.0.1"\nserver-port = ${porta}\n` + (conJwt ? `jwt-secret = "${JWT_SECRET}"\n` : ''));
       const p = spawn(BIN, [conf], { stdio: ['ignore', 'pipe', 'pipe'] }); figli.push(p); let log = ''; p.stdout.on('data', d => { log += d; }); p.stderr.on('data', d => { log += d; });
       const url = 'http://127.0.0.1:' + porta;
@@ -209,11 +213,19 @@ const ANTEPRIMA_NORMALIZZATA = {
     };
     const REST_SERVER = await avviaRest('service_role', false);
     const REST_PUBBLICO = await avviaRest('anon', true);
-    const portaApp = await portaLibera();
-    const app = spawn(process.execPath, [path.join(ROOT, 'scripts/_p0c-postgrest-server.js'), String(portaApp), REST_SERVER], { env: { PATH: process.env.PATH, HOME: process.env.HOME }, stdio: ['ignore', 'pipe', 'pipe'] });
-    figli.push(app); let logApp = ''; app.stdout.on('data', d => { logApp += d; }); app.stderr.on('data', d => { logApp += d; });
-    await attendi(() => /pronto/.test(logApp), 15000, 'server di test ' + logApp);
-    const api = async body => { const r = await fetch('http://localhost:' + portaApp + '/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return r.json(); };
+    // Server reale dell'app collegato a un PostgREST locale; restituisce la funzione di chiamata e il log.
+    const avviaApp = async rest => {
+      const portaApp = await portaLibera();
+      const app = spawn(process.execPath, [path.join(ROOT, 'scripts/_p0c-postgrest-server.js'), String(portaApp), rest], { env: { PATH: process.env.PATH, HOME: process.env.HOME }, stdio: ['ignore', 'pipe', 'pipe'] });
+      figli.push(app); const stato = { log: '' }; app.stdout.on('data', d => { stato.log += d; }); app.stderr.on('data', d => { stato.log += d; });
+      await attendi(() => /pronto/.test(stato.log), 15000, 'server di test ' + stato.log);
+      const chiama = async body => { const r = await fetch('http://localhost:' + portaApp + '/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return r.json(); };
+      return { chiama, stato };
+    };
+    const api = (await avviaApp(REST_SERVER)).chiama;
+    // Privilegi effettivi su public.ideas (per ruolo), in un database a scelta.
+    const PRIV = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'];
+    const privilegi = (ruolo, db = DB) => PRIV.filter(p => sql(`select has_table_privilege('${ruolo}','public.ideas','${p}')`, db) === 't');
     console.log('P2-a.1 — Parte B: ' + sql('show server_version').split(' ')[0] + ' + PostgREST locale (migrazioni ' + migrazioni.map(f => f.slice(0, 4)).join(', ') + ')');
 
     const ids = {};
@@ -287,6 +299,13 @@ const ANTEPRIMA_NORMALIZZATA = {
       assert.strictEqual(sql("select count(*) from ideas where id='idea_esterna00'"), '0');
       assert.deepStrictEqual([sql("select relrowsecurity from pg_class where oid='public.ideas'::regclass"), sql("select count(*) from pg_policies where tablename='ideas'")], ['t', '0']);
       for (const ruolo of ['anon', 'authenticated']) assert.strictEqual(sql(`select has_table_privilege('${ruolo}','public.ideas','SELECT') or has_table_privilege('${ruolo}','public.ideas','INSERT') or has_table_privilege('${ruolo}','public.ideas','UPDATE') or has_table_privilege('${ruolo}','public.ideas','DELETE')`), 'f', ruolo);
+      for (const ruolo of ['anon', 'authenticated']) assert.deepStrictEqual(privilegi(ruolo), [], ruolo + ': nessun privilegio');
+      // Vecchio comportamento di Supabase (privilegi predefiniti = ALL): la migrazione toglie DELETE e il resto.
+      assert.deepStrictEqual(privilegi('service_role'), ['SELECT', 'INSERT', 'UPDATE'], 'service_role: solo lettura, inserimento, modifica');
+      const [stDel, txtDel] = await prova(jwt('service_role'), 'DELETE', '/ideas?id=eq.' + ids.link, null);
+      assert.ok(stDel === 401 || stDel === 403, 'service_role DELETE: ' + stDel + ' ' + txtDel.slice(0, 120));
+      assert.ok(/42501|permission denied/i.test(txtDel), txtDel.slice(0, 120));
+      assert.strictEqual(sql("select count(*) from ideas where id='" + ids.link + "'"), '1', 'nessuna Idea cancellata');
     });
     await test('B8. isolamento dalle Ricette: nessuna Scheda, bozza, ingrediente o Sessione toccata; la lettura delle Schede non contiene Idee; Scheda eliminata -> riferimento NULL', async () => {
       assert.strictEqual(somma(), sommaIniziale, 'Ricette invariate');
@@ -308,6 +327,81 @@ const ANTEPRIMA_NORMALIZZATA = {
       assert.strictEqual(sql("select to_regclass('public.ideas') is null"), 't');
     });
 
+    // ══ Nuovo comportamento di Supabase: le nuove tabelle di public NON sono concesse in automatico ai ruoli
+    // dell'API (anon, authenticated, service_role). Le tabelle preesistenti mantengono i loro privilegi.
+    const DB_NUOVO = DB + '_nuovo';
+    await test('B10. nuovo comportamento di Supabase (nessun privilegio automatico): service_role riceve solo SELECT, INSERT, UPDATE; percorso completo delle Idee dal server; anon e authenticated esclusi', async () => {
+      sql('drop database if exists ' + DB_NUOVO, 'postgres'); sql('create database ' + DB_NUOVO, 'postgres');
+      sql('grant usage on schema public to anon, authenticated, service_role;', DB_NUOVO); // nessun "alter default privileges"
+      const applicaN = f => { const r = psql(null, DB_NUOVO, f); if (r.status !== 0) throw new Error(path.basename(f) + ': ' + r.stderr); return r.stderr; };
+      applicaN(path.join(ROOT, 'scripts/db/p0c-schema-base-locale.sql'));
+      migrazioni.filter(f => f < '0013').forEach(f => applicaN(path.join(ROOT, 'supabase/migrations', f)));
+      // Tabelle create prima del cambiamento: privilegi gia' presenti (come su KHUB Test e Production).
+      sql('grant all on all tables in schema public to anon, authenticated, service_role;', DB_NUOVO);
+      assert.strictEqual(sql("select count(*) from pg_default_acl", DB_NUOVO), '0', 'nessun privilegio predefinito');
+      applicaN(MIG);
+      assert.deepStrictEqual(privilegi('service_role', DB_NUOVO), ['SELECT', 'INSERT', 'UPDATE']);
+      assert.deepStrictEqual(privilegi('anon', DB_NUOVO), []); assert.deepStrictEqual(privilegi('authenticated', DB_NUOVO), []);
+      assert.deepStrictEqual([sql("select relrowsecurity from pg_class where oid='public.ideas'::regclass", DB_NUOVO), sql("select count(*) from pg_policies where tablename='ideas'", DB_NUOVO)], ['t', '0']);
+      sql("insert into recipes (id,name,category,department,notes) values ('rN','Bavarese','Dolci','Pasticceria','');" +
+        "insert into variants (id,recipe_id,name,label,note,status,active,portions_count,grams_per_portion,steps) values ('vN','rN','Bavarese','Bozza 1','','lab',false,4,200,'[]');", DB_NUOVO);
+      const restN = await avviaRest('service_role', false, DB_NUOVO), restPubN = await avviaRest('anon', true, DB_NUOVO);
+      const { chiama, stato } = await avviaApp(restN);
+      // Il caso del collaudo: appunto creato dalla Console della Preview.
+      const c = await chiama({ supabaseAction: 'createIdea', idea: { title: 'Albicocche e rosmarino - Test', sourceType: 'appunto', sourceText: 'Vorrei creare un dessert con albicocche e rosmarino.' } });
+      assert.strictEqual(c.ok, true, JSON.stringify(c) + ' ' + stato.log.slice(-300));
+      assert.strictEqual(c.idea.status, 'aperta'); assert.strictEqual(c.idea.source_type, 'appunto');
+      const id = c.idea.id;
+      let l = await chiama({ supabaseAction: 'loadIdeas' }); assert.strictEqual(l.ok, true); assert.deepStrictEqual(l.ideas.map(i => i.id), [id]);
+      const n = await chiama({ supabaseAction: 'updateIdeaNotes', id, notes: 'Provare con miele di castagno.' });
+      assert.strictEqual(n.ok, true, JSON.stringify(n)); assert.strictEqual(n.idea.notes, 'Provare con miele di castagno.');
+      const a = await chiama({ supabaseAction: 'archiveIdea', id }); assert.strictEqual(a.ok, true); assert.strictEqual(a.idea.status, 'archiviata');
+      l = await chiama({ supabaseAction: 'loadIdeas' }); assert.deepStrictEqual(l.ideas, [], 'archiviata esclusa dall\'elenco ordinario');
+      l = await chiama({ supabaseAction: 'loadIdeas', includeArchived: true }); assert.deepStrictEqual(l.ideas.map(i => [i.id, i.status]), [[id, 'archiviata']], 'archiviata recuperabile');
+      assert.strictEqual((await chiama({ supabaseAction: 'updateIdeaNotes', id, notes: 'x' })).code, 'idea_archiviata');
+      assert.strictEqual(sql("select notes from ideas where id='" + id + "'", DB_NUOVO), 'Provare con miele di castagno.');
+      assert.ok(!/Supabase error \[ideas\]|Idee:/.test(stato.log), 'nessun errore del database: ' + stato.log.slice(-300));
+      // service_role non cancella le Idee (privilegio assente) ...
+      const del = await fetch(restN + '/ideas?id=eq.' + id, { method: 'DELETE' });
+      assert.ok(del.status === 401 || del.status === 403, 'DELETE ' + del.status); assert.ok(/42501/.test(await del.text()));
+      assert.strictEqual(sql("select count(*) from ideas", DB_NUOVO), '1');
+      // ... ma l'eliminazione di una Scheda collegata dal ruolo del server non e' bloccata (riferimento a NULL).
+      sql("update ideas set linked_recipe_id='rN', linked_variant_id='vN' where id='" + id + "'", DB_NUOVO);
+      const delR = await fetch(restN + '/recipes?id=eq.rN', { method: 'DELETE' }); assert.ok(delR.status === 204 || delR.status === 200, 'DELETE recipes ' + delR.status + ' ' + await delR.text());
+      assert.strictEqual(sql("select coalesce(linked_recipe_id,'NULL')||'/'||coalesce(linked_variant_id,'NULL') from ideas where id='" + id + "'", DB_NUOVO), 'NULL/NULL');
+      // anon e authenticated: accesso negato in ogni operazione.
+      const nuova = { id: 'idea_esterna01', title: 'X', source_type: 'appunto', source_text: 'x' };
+      for (const [nome, token] of [['anon', null], ['authenticated', jwt('authenticated')]]) {
+        for (const [m, p, corpo] of [['GET', '/ideas?select=id', null], ['POST', '/ideas', nuova], ['PATCH', '/ideas?id=eq.' + id, { title: 'Y' }], ['DELETE', '/ideas?id=eq.' + id, null]]) {
+          const h = { 'Content-Type': 'application/json' }; if (token) h.Authorization = 'Bearer ' + token;
+          const r = await fetch(restPubN + p, { method: m, headers: h, body: corpo ? JSON.stringify(corpo) : undefined }); const t = await r.text();
+          assert.ok((r.status === 401 || r.status === 403) && /42501|permission denied/i.test(t), nome + ' ' + m + ': ' + r.status + ' ' + t.slice(0, 120));
+        }
+      }
+      assert.strictEqual(sql("select count(*) from ideas", DB_NUOVO), '1');
+    });
+
+    await test('B11. tabella gia\' esistente con lo schema previsto: la migrazione ripetuta porta sempre service_role a SELECT, INSERT, UPDATE senza toccare i dati', async () => {
+      const dati = () => sql("select md5(string_agg(concat_ws('|',id,title,status,source_type,source_text,notes,created_at,updated_at),'#' order by id)) from ideas", DB_NUOVO);
+      const prima = dati();
+      for (const [caso, stato] of [
+        ['come KHUB Test prima della correzione (nessun privilegio)', 'revoke all on public.ideas from service_role;'],
+        ['vecchia 0013 con privilegi predefiniti (ALL, DELETE compreso)', 'grant all on public.ideas to service_role;'],
+        ['come KHUB Test dopo la correzione manuale', 'revoke all on public.ideas from service_role; grant select, insert, update on public.ideas to service_role;'],
+        ['privilegi parziali (solo SELECT)', 'revoke all on public.ideas from service_role; grant select on public.ideas to service_role;']]) {
+        sql(stato, DB_NUOVO);
+        const r = psql(null, DB_NUOVO, MIG); assert.strictEqual(r.status, 0, caso + ': ' + r.stderr);
+        assert.ok(/gia' presente con le colonne attese/.test(r.stderr), caso + ': tabella riconosciuta come esistente');
+        assert.deepStrictEqual(privilegi('service_role', DB_NUOVO), ['SELECT', 'INSERT', 'UPDATE'], caso);
+        assert.deepStrictEqual(privilegi('anon', DB_NUOVO), [], caso); assert.deepStrictEqual(privilegi('authenticated', DB_NUOVO), [], caso);
+        assert.strictEqual(dati(), prima, caso + ': dati invariati');
+      }
+      // Anche se anon/authenticated avessero ricevuto privilegi per errore, la migrazione li toglie.
+      sql('grant all on public.ideas to anon, authenticated;', DB_NUOVO);
+      assert.strictEqual(psql(null, DB_NUOVO, MIG).status, 0);
+      assert.deepStrictEqual([privilegi('anon', DB_NUOVO), privilegi('authenticated', DB_NUOVO)], [[], []]);
+    });
+
     // Diagnosi (non asserzioni): permessi effettivi di m2_turns e delle tabelle senza RLS nella REPLICA locale.
     console.log('P2-a.1 — Diagnosi della replica locale (Supabase simulato: privilegi predefiniti ai ruoli dell\'API)');
     const leggi = async (token, tabella) => { const h = token ? { Authorization: 'Bearer ' + token } : {}; const r = await fetch(REST_PUBBLICO + '/' + tabella + '?select=*&limit=1', { headers: h }); return r.status; };
@@ -319,6 +413,7 @@ const ANTEPRIMA_NORMALIZZATA = {
     figli.forEach(p => { try { p.kill(); } catch (e) { /* no */ } });
     await new Promise(r => setTimeout(r, 300));
     psql('drop database if exists ' + DB + ' with (force)', 'postgres');
+    psql('drop database if exists ' + DB + '_nuovo with (force)', 'postgres');
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) { /* no */ }
   }
   console.log('\n' + passed + ' passed, ' + failed + ' failed' + (skipped ? ', ' + skipped + ' skipped' : ''));
