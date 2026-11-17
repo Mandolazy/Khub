@@ -204,7 +204,7 @@ const PROTETTE = {
   "async function createProductionSession(preparedInput)": "185ca85dcee49397",
   "function buildValidatedVariantPayload(recipeId,vv)": "4186aeae0c1330e6",
   "async function saveToSupabase(recipe)": "55d82322a3c2285f",
-  "async function loadFromSupabase()": "0f20790b79f681e3",
+  "async function loadFromSupabase()": "532a7aaa4224a105", // Fase 1A: +lettura di created_at delle L3 (sola visualizzazione)
   "function firmaContenutoBozza(v)": "9426d786f4588837",
   "function toggleActiveV2(recipeId,variantId,currentActive)": "ca8f22881e9ba641",
   "async function confirmActiveYieldEdit()": "92f6565ceacf884a",
@@ -368,7 +368,9 @@ function clientMain(fetchImpl, nomi) {
       // Finalizzazione D3: solo presentazione (ramo S.uiD3) e criterio "Ultima modifica" estratto in una funzione condivisa.
       'renderConfronto', 'renderLabConversionModal', 'renderLabGlobale', 'renderMichelinAIGlobalePlaceholder', 'renderOnboarding', 'renderProdRecipe', 'renderProfiloPlaceholder', 'renderSearch',
       // Finalizzazione: errori di persistenza visibili (HTTP non 2xx, {ok:false}, risposte non valide); test E1-E9.
-      'loadFromSupabase', 'saveToSupabase'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
+      'loadFromSupabase', 'saveToSupabase',
+      // Fase 1A: Storico con selettore Elenco | Per ricetta e filtro sulle Ricette della Scheda (solo presentazione; motore MS17a invariato).
+      'renderStoricoProduzioni'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
     assert.deepStrictEqual(rimosse, [], 'nessuna funzione rimossa');
     for (const n of ['computeFormulationWeights', 'deriveYieldPerUnit', 'computeLabRounding', 'applyLabRound', 'undoLabRound', 'computeSessionScaling', 'createProductionSession', 'buildValidatedVariantPayload', 'onValidate', 'confirmValidate', 'rendiAttivaPronta', 'riapriProntaInLab', 'onLabDeclaredYield', 'onIngQty', 'onStepText'])
       assert.ok(n in b && a[n] === b[n], 'invariata: ' + n);

@@ -192,7 +192,7 @@ const PROTETTE = {
   "function firmaContenutoBozza(v)": "9426d786f4588837",
   "async function saveToSupabase(recipe)": "55d82322a3c2285f",
   // Conversioni per nomi equivalenti (approvato): caricamento con selectConversionFacts; impronta aggiornata solo qui.
-  "async function loadFromSupabase()": "0f20790b79f681e3",
+  "async function loadFromSupabase()": "532a7aaa4224a105", // Fase 1A: +lettura di created_at delle L3 (sola visualizzazione)
   "function buildValidatedVariantPayload(recipeId,vv)": "4186aeae0c1330e6",
   "function declaredYieldFromRow(row)": "1a670be06f8aeba4",
   "function copyDeclaredYield(src)": "f990f25c54e140b4",

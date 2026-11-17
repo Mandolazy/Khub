@@ -1574,6 +1574,15 @@ const S = {
   // preset 'all'|'today'|'last7'|'month'|'custom'; from/to = 'YYYY-MM-DD'
   // usati solo con 'custom'.
   historyFilters: {query:'',preset:'all',from:'',to:''},
+  // Fase 1A: presentazione dello Storico ('elenco' = comportamento originale,
+  // 'ricetta' = raggruppato per singola Ricetta) e filtro facoltativo sulle
+  // Ricette di una Scheda ({recipeId,name,variantIds} oppure null).
+  historyView: 'elenco',
+  historyScheda: null,
+  // Fase 1A: sezione «Conoscenze consolidate» della Scheda (sola lettura):
+  // aperta per Scheda e dettaglio d'origine aperto per singola conoscenza.
+  l3SezioneAperta: {},
+  l3DettaglioAperto: {},
   // MS17b: vista a cui tornare dalla Sessione operativa (null = comportamento
   // Home Produzione; 'storico-produzioni' = Storico).
   sessionReturnView: null,
@@ -2538,6 +2547,7 @@ async function loadFromSupabase(){
       const l3Items=(data.l3_items||[]).filter(x=>x.recipe_id===r.id).map(x=>({
         id:x.id,distilledContent:x.distilled_content,contextConditions:x.context_conditions||null,
         knownLimits:x.known_limits||null,originL2ItemId:x.origin_l2_item_id,supersedesId:x.supersedes_id||null,
+        createdAt:x.created_at||null, // Fase 1A: solo lettura/visualizzazione — mai reinviato al save (colonna gestita dal DB)
       }));
       return{
         id:r.id,name:r.name,category:r.category||'Altro',department:r.department||'Cucina',
@@ -6225,11 +6235,154 @@ function renderHistoryCard(r){
   </div>`;
 }
 
+// ══════════════════════════════════════════════════════════
+// FASE 1A — STORICO PER SINGOLA RICETTA (solo presentazione)
+// Raggruppa per identita' della Ricetta (sourceVariantId), MAI per Scheda:
+// groupHistoryByPreparation raggruppa prima per recipe_id, che dopo
+// un'unione di Schede puo' puntare alla Scheda precedente e dividerebbe la
+// stessa Ricetta in due gruppi; inoltre calcola totali per Scheda che
+// sommano Ricette diverse. Qui si riusa solo aggregateHistoryRecords, per
+// singola Ricetta: totali e scostamento SOLO sulle produzioni confrontabili,
+// scostamento percentuale ponderato sul previsto (mai media delle %).
+// Nessuna scrittura, nessun accesso alle Sessioni oltre ai record dati.
+// ══════════════════════════════════════════════════════════
+function groupHistoryByRecipeVersion(records){
+  var groups={},order=[];
+  (records||[]).forEach(function(r){
+    var key=r.sourceVariantId!=null?'v:'+r.sourceVariantId:'s:'+r.sessionId;
+    if(!groups[key]){groups[key]={key:key,sourceVariantId:r.sourceVariantId!=null?r.sourceVariantId:null,records:[]};order.push(key);}
+    groups[key].records.push(r);
+  });
+  var t=function(r){return Date.parse(r.completedAt)||0;};
+  return order.map(function(key){
+    var g=groups[key];
+    var recs=g.records.slice().sort(function(a,b){return t(b)-t(a)||(a.sessionId<b.sessionId?1:a.sessionId>b.sessionId?-1:0);});
+    var nomi=[];
+    recs.forEach(function(r){if(r.variantName!=null&&nomi.indexOf(r.variantName)===-1)nomi.push(r.variantName);});
+    var comparable=recs.filter(function(r){return r.absoluteDeviation!=null;});
+    var unita=[];
+    comparable.forEach(function(r){if(unita.indexOf(r.expectedYieldUnit)===-1)unita.push(r.expectedYieldUnit);});
+    return{
+      key:key,sourceVariantId:g.sourceVariantId,records:recs,
+      variantName:recs[0].variantName,recipeName:recs[0].recipeName,preparationId:recs[0].preparationId,variantNames:nomi,
+      count:recs.length,
+      withActual:recs.filter(function(r){return r.actualYield!=null;}).length,
+      // Unita' diverse fra produzioni confrontabili: nessun totale (mai sommare unita' incompatibili).
+      aggregate:unita.length<=1?aggregateHistoryRecords(comparable):null,
+      unit:unita.length===1?unita[0]:null,
+      mixedUnits:unita.length>1,
+      latestCompletedAt:recs[0].completedAt||null,
+    };
+  }).sort(function(a,b){
+    var d=(Date.parse(b.latestCompletedAt)||0)-(Date.parse(a.latestCompletedAt)||0);
+    return d||(a.key<b.key?-1:a.key>b.key?1:0);
+  });
+}
+
+// Scheda ATTUALE di una Ricetta (dopo eventuali unioni), dai dati caricati.
+function historySchedaDiRicetta(variantId){
+  if(variantId==null)return null;
+  var trovata=null;
+  (S.recipes||[]).some(function(r){
+    var ids=(r.labVersions||[]).map(function(v){return v.id;}).concat((r.validatedVariants||[]).map(function(v){return v.id;}));
+    if(ids.indexOf(variantId)!==-1){trovata={id:r.id,name:r.name};return true;}
+    return false;
+  });
+  return trovata;
+}
+
+// Ricette (variant id) che appartengono OGGI alla Scheda, o null se la
+// Scheda non e' fra quelle caricate.
+function historySchedaVariantIds(recipeId){
+  var r=(S.recipes||[]).find(function(x){return x.id===recipeId;});
+  if(!r)return null;
+  return(r.labVersions||[]).map(function(v){return v.id;}).concat((r.validatedVariants||[]).map(function(v){return v.id;}));
+}
+
+function apriProduzioniScheda(recipeId){
+  var r=(S.recipes||[]).find(function(x){return x.id===recipeId;});
+  if(!r)return;
+  S.historyScheda={recipeId:r.id,name:r.name,variantIds:historySchedaVariantIds(r.id)||[]};
+  S.historyView='ricetta';
+  goToStoricoProduzioni();
+}
+function togliFiltroSchedaStorico(){
+  S.historyScheda=null;
+  render();
+}
+// «Azzera filtri» con il filtro sulla Scheda attivo: toglie anche quello,
+// poi esegue l'azzeramento esistente (invariato).
+function azzeraFiltriStoricoConScheda(){
+  S.historyScheda=null;
+  resetHistoryFilters();
+}
+function setHistoryView(v){
+  S.historyView=v==='ricetta'?'ricetta':'elenco';
+  render();
+}
+
+function renderHistoryRicettaBlock(g){
+  var titolo=g.variantName||g.recipeName||'Ricetta';
+  var nomiStorici=g.variantNames.length>1?`<div class="ms17-card-sub">Nomi usati: ${g.variantNames.map(escAttr).join(', ')}</div>`:'';
+  var conteggio=`<div class="ms17-card-sub">${g.count===1?'1 produzione':g.count+' produzioni'} · ${g.withActual} con resa effettiva registrata</div>`;
+  var a=g.aggregate,riepilogo;
+  if(g.sourceVariantId==null){
+    riepilogo='<div class="ms17-card-sub">Ricetta non identificata nella produzione: non raggruppata con altre.</div>';
+  }else if(g.mixedUnits){
+    riepilogo='<div class="ms17-card-sub">Rese in unità diverse: nessun totale calcolato.</div>';
+  }else if(a&&a.comparableCount>0){
+    riepilogo=`<div class="ms17-card-yield" style="margin-top:6px">
+        <div><div class="ms17-label">Prevista</div><div class="ms17-card-yield-value">${formatHistoryQty(a.totalExpectedComparable)}</div></div>
+        <div class="ms17-card-yield-arrow">→</div>
+        <div><div class="ms17-label">Effettiva</div><div class="ms17-card-yield-value">${formatHistoryQty(a.totalActualComparable)}</div></div>
+        <div class="ms17-card-deviation"><div class="ms17-label">Scostamento</div><div class="ms17-card-yield-value">${formatHistorySigned(a.aggregateDeviation)}${a.aggregateDeviationPct!=null?' · '+formatHistoryPct(a.aggregateDeviationPct):''}</div></div>
+      </div>
+      <div class="ms17-card-sub">${a.comparableCount===1?'Totali sulla sola produzione':'Totali sulle '+a.comparableCount+' produzioni'} con resa confrontabile; scostamento percentuale sul totale previsto.</div>`;
+  }else{
+    riepilogo='<div class="ms17-card-sub">Nessuna produzione con resa effettiva confrontabile.</div>';
+  }
+  var nota=g.count>1&&g.sourceVariantId!=null?'<div class="ms17-card-sub ms17-ricetta-nota">Stessa Ricetta in tutte le produzioni: le differenze non hanno una causa registrata in KHUB.</div>':'';
+  return`<div class="pg-card ms17-ricetta-group" data-variant-id="${escAttr(g.sourceVariantId||'')}">
+    <div class="ms17-card-head"><div style="min-width:0">
+      <div class="ms17-card-name">${escAttr(titolo)}</div>
+      ${nomiStorici}${conteggio}
+    </div></div>
+    ${riepilogo}${nota}
+    <div class="pg-list" style="padding:10px 0 0;gap:10px">${g.records.map(renderHistoryCard).join('')}</div>
+  </div>`;
+}
+
+// Vista «Per ricetta»: le Schede sono solo intestazioni visive (nessun
+// totale di Scheda). Scheda = quella ATTUALE della Ricetta; se la Ricetta
+// non e' piu' fra quelle caricate, il nome della Scheda nella fotografia.
+function renderHistoryPerRicetta(records){
+  var gruppi=groupHistoryByRecipeVersion(records);
+  var sezioni={},ordine=[];
+  gruppi.forEach(function(g){
+    var sch=historySchedaDiRicetta(g.sourceVariantId);
+    var k=sch?'r:'+sch.id:'n:'+(g.recipeName||'');
+    if(!sezioni[k]){sezioni[k]={nome:sch?sch.name:(g.recipeName||'Preparazione'),attuale:!!sch,gruppi:[]};ordine.push(k);}
+    sezioni[k].gruppi.push(g);
+  });
+  return ordine.map(function(k){
+    var s=sezioni[k];
+    return`<div class="ms17-scheda-sez" style="display:flex;flex-direction:column;gap:10px">
+      <div class="ms17-summary-head ms17-scheda-titolo">${escAttr(s.nome)}${s.attuale?'':' <span class="ms17-card-sub">(Scheda non più presente)</span>'}</div>
+      ${s.gruppi.map(renderHistoryRicettaBlock).join('')}
+    </div>`;
+  }).join('');
+}
+
 function renderStoricoProduzioni(){
   var f=S.historyFilters||{query:'',preset:'all',from:'',to:''};
   var presets=[['all','Tutte'],['today','Oggi'],['last7','Ultimi 7 giorni'],['month','Questo mese'],['custom','Personalizzato']];
-  var filtriAttivi=!!(f.query&&f.query.trim())||f.preset!=='all';
-  var reset=`<button class="btn btn-ghost btn-sm" id="history-reset" onclick="resetHistoryFilters()"><i class="ti ti-x"></i> Azzera filtri</button>`;
+  // Fase 1A: presentazione (Elenco = comportamento originale) e filtro
+  // facoltativo sulle Ricette di una Scheda, ricalcolato sui dati attuali.
+  var vista=S.historyView==='ricetta'?'ricetta':'elenco';
+  var scheda=S.historyScheda||null;
+  var schedaIds=scheda?(historySchedaVariantIds(scheda.recipeId)||scheda.variantIds||[]):null;
+  var filtriAttivi=!!(f.query&&f.query.trim())||f.preset!=='all'||!!scheda;
+  var reset=`<button class="btn btn-ghost btn-sm" id="history-reset" onclick="${scheda?'azzeraFiltriStoricoConScheda()':'resetHistoryFilters()'}"><i class="ti ti-x"></i> Azzera filtri</button>`;
   var inputStyle='background:var(--cream);border:1px solid var(--border);border-radius:var(--r-md);padding:6px 10px;font-family:inherit;font-size:13px;color:var(--dark)';
   var head=`<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
       <div class="prod-title">Storico Produzioni</div>
@@ -6244,6 +6397,13 @@ function renderStoricoProduzioni(){
     ${f.preset==='custom'?`<div style="padding:0 22px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <label style="font-size:12px;color:var(--mid)">Da <input id="history-from" type="date" value="${escAttr(f.from)}" onchange="onHistoryDateInput('from',this.value)" style="${inputStyle}"></label>
       <label style="font-size:12px;color:var(--mid)">A <input id="history-to" type="date" value="${escAttr(f.to)}" onchange="onHistoryDateInput('to',this.value)" style="${inputStyle}"></label>
+    </div>`:''}
+    <div class="pg-tabs ms17-view-tabs" style="flex-wrap:wrap">
+      <button class="pg-tab ${vista==='elenco'?'pg-tab-active':''}" data-history-view="elenco" onclick="setHistoryView('elenco')">Elenco</button>
+      <button class="pg-tab ${vista==='ricetta'?'pg-tab-active':''}" data-history-view="ricetta" onclick="setHistoryView('ricetta')">Per ricetta</button>
+    </div>${scheda?`<div class="ms17-scheda-filtro" style="padding:0 22px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px">
+      <span>Solo la Scheda <strong>${escAttr(scheda.name)}</strong></span>
+      <button class="btn btn-ghost btn-sm" onclick="togliFiltroSchedaStorico()"><i class="ti ti-x"></i> Tutte le Schede</button>
     </div>`:''}`;
   var wrap=function(body){return`<div class="prod-env ms17-history">${head}<div style="padding:0 22px 22px;display:flex;flex-direction:column;gap:12px">${body}</div></div>`;};
   var sessions=S.productionSessions||[];
@@ -6257,6 +6417,10 @@ function renderStoricoProduzioni(){
     return wrap('<div class="prod-empty ms17-empty-none">Non ci sono ancora produzioni completate.</div>');
   }
   var res=selectHistoryRecords(sessions,{query:f.query,period:historyPeriodFromFilters(f,historyNow())});
+  // Fase 1A: filtro sulla Scheda per identita' della Ricetta (variant id),
+  // dopo la selezione: il motore MS17a resta invariato. Una produzione senza
+  // Ricetta identificata non appartiene mai alla Scheda (nessuna attribuzione per nome).
+  if(schedaIds&&!res.error)res={records:res.records.filter(function(r){return r.sourceVariantId!=null&&schedaIds.indexOf(r.sourceVariantId)!==-1;}),error:null};
   if(res.error){
     return wrap(`<div class="prod-empty ms17-period-error" style="color:#c0392b"><i class="ti ti-alert-triangle"></i> ${historyErrorMessage(res.error)}</div><div>${reset}</div>`);
   }
@@ -6265,7 +6429,9 @@ function renderStoricoProduzioni(){
   }
   return wrap(renderHistoryCount(res.records.length)
     +(filtriAttivi?`<div>${reset}</div>`:'')
-    +'<div class="pg-list" style="padding:0;gap:10px">'+res.records.map(renderHistoryCard).join('')+'</div>');
+    +(vista==='ricetta'
+      ?'<div class="ms17-per-ricetta" style="display:flex;flex-direction:column;gap:16px">'+renderHistoryPerRicetta(res.records)+'</div>'
+      :'<div class="pg-list" style="padding:0;gap:10px">'+res.records.map(renderHistoryCard).join('')+'</div>'));
 }
 
 
@@ -8683,6 +8849,140 @@ function renderContenutoVariante(v){
       `}
     `}`;
 }
+// ══════════════════════════════════════════════════════════
+// FASE 1A — CONOSCENZE CONSOLIDATE (L3) NELLA SCHEDA, SOLA LETTURA
+// Mostra cio' che KHUB gia' conserva in recipe.l3Items e fornisce a
+// MichelinAI. Nessuna modifica, eliminazione, sostituzione o conferma:
+// queste funzioni leggono soltanto. Ogni contenuto (L3 e L2 di origine)
+// arriva da MichelinAI/DB ed e' testo NON attendibile: viene sempre
+// convertito in testo semplice e poi passato da escAttr, mai inserito
+// come HTML. I campi sono jsonb di forma libera (vedi validateL3Candidate):
+// stringa, oggetto {label,text} o qualunque altra struttura.
+// ══════════════════════════════════════════════════════════
+function l3TestoValore(v,depth){
+  depth=depth||0;
+  if(v===null||v===undefined)return'';
+  if(typeof v==='string')return v;
+  if(typeof v==='number'||typeof v==='boolean')return String(v);
+  if(depth>3){try{return JSON.stringify(v);}catch(e){return'';}}
+  if(Array.isArray(v)){
+    return v.map(function(x){return l3TestoValore(x,depth+1);}).filter(function(x){return x!=='';}).map(function(x){return'• '+x;}).join('\n');
+  }
+  if(typeof v==='object'){
+    var label=typeof v.label==='string'?v.label:'',text=typeof v.text==='string'?v.text:'';
+    var altre=Object.keys(v).filter(function(k){return k!=='label'&&k!=='text';});
+    var righe=[];
+    if(label&&text)righe.push(label+' — '+text);else if(label||text)righe.push(label||text);
+    altre.forEach(function(k){var t=l3TestoValore(v[k],depth+1);if(t!=='')righe.push(k+': '+t);});
+    return righe.join('\n');
+  }
+  return'';
+}
+// Testo non attendibile -> HTML sicuro; gli a capo restano grazie a pre-wrap.
+function l3Html(v){return escAttr(l3TestoValore(v).trim());}
+
+// Osservazione L2 d'origine: prima nella Scheda, poi (dopo un'unione la
+// Ricetta puo' essere passata ad altra Scheda) fra tutte quelle caricate.
+function l3TrovaOrigine(recipe,l2Id){
+  if(!l2Id)return null;
+  var cerca=function(r){
+    var vv=(r.labVersions||[]).concat(r.validatedVariants||[]);
+    for(var i=0;i<vv.length;i++){
+      var l2=(vv[i].l2Items||[]).find(function(x){return x.id===l2Id;});
+      if(l2)return{l2:l2,ricetta:vv[i].name||vv[i].label||null,scheda:r.name,stessaScheda:r.id===recipe.id};
+    }
+    return null;
+  };
+  var trovata=cerca(recipe);
+  if(trovata)return trovata;
+  for(var j=0;j<(S.recipes||[]).length;j++){
+    if(S.recipes[j].id===recipe.id)continue;
+    trovata=cerca(S.recipes[j]);
+    if(trovata)return trovata;
+  }
+  return null;
+}
+
+function l3DataTesto(iso){
+  var d=new Date(iso);
+  if(!iso||isNaN(d.getTime()))return'';
+  return d.toLocaleDateString('it-IT',{day:'numeric',month:'long',year:'numeric'});
+}
+
+function l3ConfermaTesto(origine){
+  if(!origine)return'Non verificabile: osservazione d\'origine non disponibile';
+  var s=origine.l2.decisionState;
+  if(s==='confirmed')return'Confermata dallo chef';
+  if(s==='probable')return'Osservazione d\'origine non confermata (probabile)';
+  return'Osservazione d\'origine senza decisione dello chef';
+}
+
+function l3ProvenienzaTesto(p){
+  if(p==='m1')return'MichelinAI — Primo Consulto';
+  if(p==='m2')return'MichelinAI — Sviluppo';
+  if(p==='handoff')return'Osservazione ripresa da un\'altra Ricetta';
+  return p?String(p):'';
+}
+
+function toggleConoscenzeConsolidate(recipeId){
+  S.l3SezioneAperta=S.l3SezioneAperta||{};
+  S.l3SezioneAperta[recipeId]=!S.l3SezioneAperta[recipeId];
+  render();
+}
+function toggleDettaglioConoscenza(l3Id){
+  S.l3DettaglioAperto=S.l3DettaglioAperto||{};
+  S.l3DettaglioAperto[l3Id]=!S.l3DettaglioAperto[l3Id];
+  render();
+}
+
+// ui: 'd3' (Direzione 3) | 'classic'. Nessuna conoscenza -> sezione omessa,
+// come le altre sezioni vuote della Scheda.
+function renderConoscenzeConsolidate(recipe,ui){
+  var items=(recipe&&recipe.l3Items)||[];
+  if(!items.length)return'';
+  var d3=ui==='d3';
+  var aperta=!!(S.l3SezioneAperta&&S.l3SezioneAperta[recipe.id]);
+  var ordinate=items.slice().sort(function(a,b){
+    var ta=Date.parse(a.createdAt)||0,tb=Date.parse(b.createdAt)||0;
+    if(ta!==tb)return tb-ta;
+    return String(a.id)<String(b.id)?-1:String(a.id)>String(b.id)?1:0;
+  });
+  var blocco=function(etichetta,html){
+    return html?`<div class="l3-campo" style="margin-top:8px"><div class="l3-etichetta" style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;opacity:.7">${etichetta}</div><div class="l3-valore" style="white-space:pre-wrap;overflow-wrap:anywhere">${html}</div></div>`:'';
+  };
+  var voce=function(l3){
+    var origine=l3TrovaOrigine(recipe,l3.originL2ItemId);
+    var dettaglioAperto=!!(S.l3DettaglioAperto&&S.l3DettaglioAperto[l3.id]);
+    var data=l3DataTesto(l3.createdAt);
+    var provenienza=origine?(origine.ricetta?escAttr(origine.ricetta):'Ricetta senza nome')+(origine.stessaScheda?'':' (Scheda «'+escAttr(origine.scheda)+'»)'):'';
+    var dettaglio=dettaglioAperto?(origine
+      ?blocco('Osservazione originale',l3Html(origine.l2.content))
+        +blocco('Evidenza',l3Html(origine.l2.evidence))
+        +blocco('Origine dell\'osservazione',escAttr(l3ProvenienzaTesto(origine.l2.provenanceType)))
+      :'<div class="l3-valore" style="margin-top:8px">Osservazione d\'origine non disponibile fra i dati caricati.</div>'):'';
+    var bottone=`<button class="${d3?'d3-btn d3-btn-text':'si-riga-btn'} l3-dettaglio-btn" data-l3-toggle="${escAttr(l3.id)}" onclick="toggleDettaglioConoscenza(this.getAttribute('data-l3-toggle'))" aria-expanded="${dettaglioAperto}">${dettaglioAperto?'Nascondi origine':'Mostra origine'}</button>`;
+    return`<div class="l3-voce" data-l3-id="${escAttr(l3.id)}" style="padding:14px ${d3?'20px':'22px'};border-top:1px solid ${d3?'var(--d3-bordo)':'var(--dpop-filetto-riga)'}">
+      ${blocco('Conoscenza',l3Html(l3.distilledContent))||'<div class="l3-valore">Contenuto non disponibile.</div>'}
+      ${blocco('Valida se',l3Html(l3.contextConditions))}
+      ${blocco('Limiti noti',l3Html(l3.knownLimits))}
+      ${blocco('Dalla Ricetta',provenienza)}
+      ${blocco('Conferma',escAttr(l3ConfermaTesto(origine)))}
+      ${blocco('Creata il',data?escAttr(data):'')}
+      <div style="margin-top:6px">${bottone}</div>
+      ${dettaglio}
+    </div>`;
+  };
+  var nota=`<div class="l3-nota" style="padding:12px ${d3?'20px':'22px'};font-size:13px;opacity:.8">Conoscenze che MichelinAI riceve quando lavori sulle bozze di questa Scheda. In sola lettura: oggi non si possono modificare né rimuovere.</div>`;
+  var corpo=aperta?nota+ordinate.map(voce).join(''):'';
+  if(d3){
+    return`<div class="d3-card d3-archiviate l3-sezione" data-l3-recipe="${escAttr(recipe.id)}"><button class="d3-arch-toggle" data-l3-recipe-toggle="${escAttr(recipe.id)}" onclick="toggleConoscenzeConsolidate(this.getAttribute('data-l3-recipe-toggle'))" aria-expanded="${aperta}"><span>Conoscenze consolidate (${items.length})</span><span>${aperta?'Nascondi':'Mostra'} ›</span></button>${corpo}</div>`;
+  }
+  return`<div class="l3-sezione" data-l3-recipe="${escAttr(recipe.id)}">
+    <div class="si-sezione-cesura" style="border-top:none"><span class="si-sezione-titolo" style="font-size:12px">Conoscenze consolidate</span><span class="si-sezione-count">${items.length}</span><button class="si-riga-btn" style="margin-left:auto" data-l3-recipe-toggle="${escAttr(recipe.id)}" onclick="toggleConoscenzeConsolidate(this.getAttribute('data-l3-recipe-toggle'))" aria-expanded="${aperta}">${aperta?'Nascondi':'Mostra'}</button></div>
+    ${corpo}
+  </div>`;
+}
+
 function renderRicettaMadreV2(recipe){
   const all=allVariants(recipe);
   const attive=all.filter(v=>v._type==='active');
@@ -8816,7 +9116,7 @@ function renderRicettaMadreV2(recipe){
     ${zonaDopoValidazione}
     ${zonaAzionePrincipale}
     ${zonaOggi}
-    ${zonaStoria}
+    ${zonaStoria}${renderConoscenzeConsolidate(recipe,'classic')}
     ${zonaSecondarie}
   </div>`;
 }
@@ -11392,6 +11692,7 @@ function renderSchedaD3(recipe){
       <div class="d3-scheda-cta"><button class="d3-btn d3-btn-line" onclick="duplicaVersioneLAB('${rid}')">+ Nuova ricetta</button><span class="d3-menu-wrap">${d3MenuButton('scheda-'+rid,'Azioni della Scheda')}${d3MenuHtml('scheda-'+rid,[
         {label:'Rinomina Scheda',onclick:`apriRinomina('scheda','${rid}')`},
         recipe.validatedVariants.length>=2?{label:'Confronta Ricette',onclick:`S.view='confronto';S.confrontoA=null;S.confrontoB=null;render()`}:null,
+        {label:'Produzioni di questa Scheda',onclick:`apriProduzioniScheda('${rid}')`},
         {label:"Unisci con un'altra Scheda",onclick:`openMergePicker('${rid}')`},
         {label:'Elimina Scheda',onclick:`S.confirmDeleteId='${rid}';render()`,danger:true}])}</span></div>
     </div>
@@ -11399,7 +11700,7 @@ function renderSchedaD3(recipe){
     ${scelta}${conferma}
     ${!attive.length&&!pronte.length&&!inLab.length?`<div class="d3-card d3-vuoto">Nessuna Ricetta in questa Scheda. <button class="d3-btn d3-btn-line" onclick="duplicaVersioneLAB('${rid}')">+ Nuova ricetta</button></div>`:''}
     ${sezione('Attive',attive,'attiva')}${sezione('Validate',pronte,'validata')}${sezione('In LAB',inLab,'lab')}
-    ${archiviate.length?`<div class="d3-card d3-archiviate"><button class="d3-arch-toggle" onclick="S.d3ShowArchiviate=!S.d3ShowArchiviate;render()" aria-expanded="${!!S.d3ShowArchiviate}"><span>– Archiviate · ${archiviate.length} · ${archiviate.map(function(v){return d3Esc(v.name);}).join(', ')}</span><span>${S.d3ShowArchiviate?'Nascondi':'Mostra'} ›</span></button></div>${S.d3ShowArchiviate?archiviate.map(function(v){return card(v,'archiviata');}).join(''):''}`:''}
+    ${archiviate.length?`<div class="d3-card d3-archiviate"><button class="d3-arch-toggle" onclick="S.d3ShowArchiviate=!S.d3ShowArchiviate;render()" aria-expanded="${!!S.d3ShowArchiviate}"><span>– Archiviate · ${archiviate.length} · ${archiviate.map(function(v){return d3Esc(v.name);}).join(', ')}</span><span>${S.d3ShowArchiviate?'Nascondi':'Mostra'} ›</span></button></div>${S.d3ShowArchiviate?archiviate.map(function(v){return card(v,'archiviata');}).join(''):''}`:''}${renderConoscenzeConsolidate(recipe,'d3')}
   </div>`;
 }
 

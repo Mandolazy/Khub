@@ -413,7 +413,7 @@ function makeClient(fetchImpl) {
       // confirmConversionPreflightStep salva il marcatore di gruppo; impronte aggiornate solo per queste due funzioni.
       // Errori di persistenza visibili (Direzione 3, finalizzazione): load e save trattano come
       // fallimento HTTP non 2xx, {ok:false} e risposte non valide; impronte aggiornate solo per queste due.
-      'async function loadFromSupabase()': '6c09c0dca1b39b51', 'async function saveToSupabase(recipe)': '092375a4ed25929a',
+      'async function loadFromSupabase()': 'b54b202893fed7de' /* Fase 1A: +lettura di created_at delle L3 (sola visualizzazione) */, 'async function saveToSupabase(recipe)': '092375a4ed25929a',
     };
     // LAB FIX 2B I4 aggiunge a load/save SOLO righe della resa dichiarata:
     // tolte quelle righe, le due funzioni sono identiche a main.

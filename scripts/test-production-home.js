@@ -438,7 +438,7 @@ const sha = (x) => crypto.createHash('sha256').update(strip(x)).digest('hex').sl
       'function historyMatchesPeriod(record,period)': 'ab0399db9b230a23', 'function selectHistoryRecords(sessions,filters)': '67360bfe5b7174bf',
       'function aggregateHistoryRecords(records)': '35bcb68933bb2812', 'function groupHistoryByPreparation(records)': 'cbf3a262b9abd594',
       // FIX 4: riepilogo aggregato rimosso dallo Storico (solo conteggio)
-      'function renderStoricoProduzioni()': '4fea137f75ac1d5c', 'function renderHistoryCount(count)': '0ba29da4e8144370',
+      'function renderStoricoProduzioni()': '2fc3913baaa1562b' /* Fase 1A: selettore Elenco | Per ricetta e filtro Scheda; Elenco invariato */, 'function renderHistoryCount(count)': '0ba29da4e8144370',
       'function renderHistoryCard(r)': '63d9a2ad82f2b6ff', 'function historyPeriodFromFilters(filters,now)': '212600a2326fe511',
       // Calcolo Produzione
       'function onVarPortions(recipeId,varId,val)': 'e9611d9a3b9b0279', 'function onVarGpp(recipeId,varId,val)': 'aca83356c53d81e0',
