@@ -390,7 +390,10 @@ function clientMain(fetchImpl, nomi) {
       'renderLabWeightsPanel', 'renderMandaInProduzioneModal', 'renderQuickCalcPanel', 'renderSessioneOperativa', 'runM1',
       // P0-c.2: quantita' inserite a mano (vuoto/0 -> da indicare, q.b., intervallo) e attivazione rifiutata con
       // quantita' da indicare; test-p0c2-postgrest Q6-Q12 e docs/import-engine/P0-c2.md §2.
-      'addIngredient', 'onIngQty', 'toggleActiveV2'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
+      'addIngredient', 'onIngQty', 'toggleActiveV2',
+      // P2-a.2 (blocco 2a): area Idee. Riga «Idee» nella Home classica, Idea aperta ricordata dal tasto Indietro;
+      // render/bindEvents erano gia' nell'elenco. Test: test-p2a2-idee-ui.
+      'navState', 'renderAppHome'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
     assert.deepStrictEqual(rimosse, [], 'nessuna funzione rimossa');
     // P0-c: computeFormulationWeights, computeSessionScaling e buildValidatedVariantPayload cambiano (elenco sopra).
     for (const n of ['deriveYieldPerUnit', 'computeLabRounding', 'applyLabRound', 'undoLabRound', 'createProductionSession', 'onValidate', 'confirmValidate', 'rendiAttivaPronta', 'riapriProntaInLab', 'onLabDeclaredYield', 'onStepText']) // P0-c.2: onIngQty cambia (elenco sopra)
@@ -513,7 +516,10 @@ function clientMain(fetchImpl, nomi) {
       assert.strictEqual(c.renderBottomNav(), cm.renderBottomNav(), 'barra in basso ' + view + '/' + mode);
       assert.strictEqual(senzaInterruttore(c.renderSidebar()), senzaInterruttore(cm.renderSidebar()), 'barra laterale ' + view + '/' + mode);
     }
-    assert.strictEqual(c.renderAppHome(), cm.renderAppHome(), 'Home');
+    // P2-a.2: l'unica differenza ammessa nella Home classica e' la riga «Idee» (test-p2a2-idee-ui H2).
+    const rigaIdee = '\n    <button class="apphome-row" id="apphome-idee">Idee</button>';
+    assert.ok(c.renderAppHome().includes(rigaIdee), 'riga Idee presente');
+    assert.strictEqual(c.renderAppHome().replace(rigaIdee, ''), cm.renderAppHome(), 'Home');
     assert.strictEqual(c.renderLabGlobale(), cm.renderLabGlobale(), 'elenco LAB');
     c.S.view = cm.S.view = 'attive'; c.S.produzioneHome = cm.S.produzioneHome = { recipeQuery: '', expanded: null };
     assert.strictEqual(c.renderAttive(), cm.renderAttive(), 'Produzione');
@@ -586,7 +592,8 @@ function clientMain(fetchImpl, nomi) {
     const h = c.renderAppHomeD3();
     assert.deepStrictEqual(ordine(h, ho), ['lab', 'schede', 'produzione']);
     assert.ok(/d3-amb-lab" id="apphome-lab"/.test(h) && /d3-amb-schede" id="apphome-schede"/.test(h) && /d3-amb-produzione" id="apphome-produzione"/.test(h), 'colori di ambiente');
-    assert.ok((h.match(/<svg /g) || []).length === 3, 'icone nel codice, nessun carattere esterno');
+    assert.ok((h.match(/<svg /g) || []).length === 4, 'icone nel codice, nessun carattere esterno (P2-a.2: quarta area Idee)');
+    assert.ok(/d3-amb-idee" id="apphome-idee"/.test(h), 'P2-a.2: Idee con il proprio colore d\'ambiente');
     const foglio = html.slice(html.indexOf('<style>'), html.indexOf('</style>'));
     assert.ok(/--d3-amb-lab:#24533F/.test(foglio) && /--d3-amb-schede:#94661C/.test(foglio) && /--d3-amb-produzione:#B4501C/.test(foglio), 'LAB verde, Schede ocra, Produzione terracotta');
     assert.ok(!/d3-amb-/.test(c.renderSchedaD3(rec(c))), 'i colori di ambiente non entrano negli stati delle Ricette');
@@ -684,7 +691,9 @@ function clientMain(fetchImpl, nomi) {
       assert.ok(new RegExp('body\\.ui-d3\\[data-d3-amb="' + amb + '"\\]\\{--d3-primario:var\\(--d3-amb-' + amb + '\\);\\}').test(html), amb);
     }
     assert.ok(/document\.body\.setAttribute\('data-d3-amb',d3SezioneNav\(\)\)/.test(html) && /body\.ui-d3 \.d3-btn-primary\{background:var\(--d3-primario\)/.test(html));
-    const colori = Object.fromEntries([...html.match(/body\.ui-d3\{--d3-amb-lab:[^}]*\}/)[0].matchAll(/--d3-amb-(lab|schede|produzione):(#[0-9A-Fa-f]{6})/g)].map(m => [m[1], m[2]]));
+    // P2-a.2: i colori degli ambienti sono nei token di tema centralizzati (stessi valori), non piu' in una regola a parte.
+    const tokenTema = html.match(/body\.ui-d3,body:not\(\.ui-d3\) \.idee-env\{[^}]*\}/)[0];
+    const colori = Object.fromEntries([...tokenTema.matchAll(/--d3-amb-(lab|schede|produzione):(#[0-9A-Fa-f]{6})/g)].map(m => [m[1], m[2]]));
     const lum = h => { const c3 = [1, 3, 5].map(i => parseInt(h.substr(i, 2), 16) / 255).map(x => x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4)); return 0.2126 * c3[0] + 0.7152 * c3[1] + 0.0722 * c3[2]; };
     for (const [k, h] of Object.entries(colori)) assert.ok(1.05 / (lum(h) + 0.05) >= 4.5, k + ' ' + h + ': testo bianco leggibile');
     assert.strictEqual(Object.keys(colori).length, 3);
