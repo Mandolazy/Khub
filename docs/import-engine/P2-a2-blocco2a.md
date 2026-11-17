@@ -72,6 +72,36 @@ Nella barra laterale e nella barra in basso non c'è una voce Idee: come approva
 - `#C6BBAA` (indice), `#F3F6F2` (evidenza), `#3A2E24` (hover di un pulsante);
 - i colori della grafica classica e quelli scritti negli attributi `style` del codice JavaScript.
 
+## Rifinitura dopo il collaudo della Preview: colori pieni e navigazione
+**Causa dei pulsanti bianchi a contorno:** i colori pieni approvati della D3 sono su `main` (Production) con due commit:
+- `b2ac4af`: carte della Home, voce di navigazione attiva, titolo di pagina, schede e bozza attive a colore pieno;
+- `f13b6d1`: intestazione come fascia dell'ambiente, con icona e nome.
+
+Il ramo di P0-a…P2-a parte da `0de0e8f` e non li conteneva: per questo la Preview mostrava carte e voci bianche con il contorno.
+
+**Correzione:**
+- i due commit sono applicati al branch senza modifiche: stesse regole, stessi controlli P25 e P26 nel test di guardia;
+- confronto degli stili calcolati contro `main`: 10 schermate, D3 e classica, 1280 e 390 px, esclusi i soli elementi Idee. **0 differenze**: LAB, Schede e Produzione hanno esattamente la resa approvata.
+
+**Stessa resa per le Idee, in giallo miele.** Sul giallo testi e icone sono in inchiostro: 9,3:1, mentre il bianco darebbe 1,8:1.
+- carta Idee della Home a colore pieno;
+- voce «Idee» nella navigazione principale della D3, prima di LAB, con icona lampadina:
+  - barra laterale e barra in basso, che su mobile passa a 4 colonne;
+  - apre l'elenco;
+  - attiva, gialla e piena in elenco, Nuova Idea e dettaglio;
+- fascia d'intestazione gialla con icona e nome «Idee»;
+- titolo di pagina nella variante leggibile `#7A5A12`.
+
+La grafica classica non ha la voce Idee nella navigazione (resta la riga nella Home): l'HTML della navigazione classica è identico a `main` (test P10).
+
+**Pulsanti, primari e secondari:**
+- **primari** (`d3-btn-primary`, pieni nel colore della sezione tramite `--d3-primario`): «+ Nuova Idea», «Salva Idea» e ora «Salva note», l'azione principale del dettaglio;
+- **secondari**, a contorno come nella D3 di Production: «Detta», «Riprova», «+ Nuova Scheda» e «Carica Scheda» in Home, «+ Nuova» nelle Schede;
+- testuali: «Annulla», «Archivia Idea»;
+- la conferma di archiviazione è inchiostro pieno, come nel resto della D3.
+
+**Disattivati delle Idee:** senza trasparenza. Il primario passa a tinta `#FBF1D6` con testo `#6B5F55` (5,5:1); il secondario a carta con testo `#6B5F55` (6,1:1).
+
 ## Dettatura
 - Riusa il motore condiviso (`startDictation`) con i target `idea-spunto`, `idea-nuova-note` e `idea-note`.
 - Il testo riconosciuto viene **aggiunto** al campo: mai inviato o salvato da solo.
@@ -101,7 +131,7 @@ Nella barra laterale e nella barra in basso non c'è una voce Idee: come approva
   - in P21, colori degli ambienti letti dai token centralizzati.
 
 ## Test
-`scripts/test-p2a2-idee-ui.js`: 16/16 (pagina reale + server reale + PostgREST e PostgreSQL locali con le migrazioni del repository; privilegi come su Supabase oggi; AI intercettata e vietata).
+`scripts/test-p2a2-idee-ui.js`: 17/17 (pagina reale + server reale + PostgREST e PostgreSQL locali con le migrazioni del repository; privilegi come su Supabase oggi; AI intercettata e vietata).
 
 | Test | Cosa verifica |
 |---|---|
@@ -117,6 +147,7 @@ Nella barra laterale e nella barra in basso non c'è una voce Idee: come approva
 | E1 | server non disponibile |
 | M1 | mobile a 390 px |
 | X1 | LAB, Schede e Produzione invariati |
+| G1 | voce Idee nella navigazione D3 (barra laterale e in basso), voce attiva, fascia gialla, «Salva note» primario e disattivato leggibile, navigazione classica invariata |
 | C1 | colore Idee e contrasti, colori degli altri ambienti invariati, token assenti nella grafica classica fuori dalle Idee |
 | Z1 | solo le quattro azioni di P2-a.1, zero richieste AI, nessun errore JavaScript |
 

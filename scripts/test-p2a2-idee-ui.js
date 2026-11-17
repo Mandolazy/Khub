@@ -342,6 +342,44 @@ let tmp;
       } finally { await M.context.close(); }
     });
 
+    await test('G1. Navigazione principale (Direzione 3): voce «Idee» prima di LAB nella barra laterale e in quella in basso; apre l\'elenco; evidenziata in elenco, creazione e dettaglio; fascia d\'intestazione gialla; grafica classica invariata', async () => {
+      const ordine = async (sel, re) => P.page.$$eval(sel, (l, r) => l.map(e => e.id).filter(id => new RegExp(r).test(id)), re);
+      await P.home();
+      assert.deepStrictEqual(await ordine('#sidebar button', '^sb-'), ['sb-idee', 'sb-lab', 'sb-ricette', 'sb-produzione']);
+      assert.strictEqual(await P.page.$$eval('#sidebar .active', l => l.length), 0, 'in Home nessuna voce attiva');
+      await P.page.click('#sb-idee'); await P.page.waitForSelector('#idee-elenco');
+      for (const vista of [() => apriIdee(), () => apriNuovaIdea(), i => apriIdea(i)]) {
+        await P.ev(vista, idee.appunto); await P.page.waitForTimeout(150);
+        assert.deepStrictEqual(await P.page.$$eval('#sidebar .active', l => l.map(e => e.id)), ['sb-idee'], 'solo Idee attiva in ' + await P.ev(() => S.view));
+        const [fondo, testo] = await P.page.$eval('#sb-idee', e => [getComputedStyle(e).backgroundColor, getComputedStyle(e).color]);
+        assert.deepStrictEqual([fondo, testo], ['rgb(233, 185, 73)', 'rgb(35, 27, 20)'], 'voce attiva gialla, testo inchiostro');
+        assert.strictEqual(await P.page.$eval('.topbar', e => getComputedStyle(e).backgroundColor), 'rgb(233, 185, 73)', 'fascia dell\'ambiente Idee');
+        assert.ok(await P.page.$eval('.d3-amb-testa-voce[data-amb="idee"]', e => e.offsetParent !== null || getComputedStyle(e).display === 'contents'), 'nome e icona Idee nella fascia');
+      }
+      assert.match(await P.page.$eval('#idea-note-salva', e => e.className), /d3-btn-primary/, '«Salva note» e\' l\'azione primaria del dettaglio');
+      // Disattivato leggibile: niente trasparenza, testo a contrasto AA sul fondo del pulsante.
+      const dis = await P.page.$eval('#idea-note-salva', e => { const c = getComputedStyle(e); return { d: e.disabled, o: c.opacity, bg: c.backgroundColor, col: c.color }; });
+      assert.deepStrictEqual([dis.d, dis.o, dis.bg, dis.col], [true, '1', 'rgb(251, 241, 214)', 'rgb(107, 95, 85)'], 'Salva note disattivato: tinta chiara, testo grigio scuro');
+      await P.page.click('#sb-lab'); await P.page.waitForFunction(() => S.view === 'lab-globale');
+      assert.deepStrictEqual(await P.page.$$eval('#sidebar .active', l => l.map(e => e.id)), ['sb-lab'], 'le altre voci funzionano come prima');
+      const M = await nuovaPagina({ viewport: { width: 390, height: 844 } });
+      try {
+        await M.ev(() => { S.view = 'lab-globale'; render(); });
+        assert.deepStrictEqual(await M.page.$$eval('#bottom-nav button', l => l.map(e => e.id)), ['bnav-idee', 'bnav-lab', 'bnav-ricette', 'bnav-produzione']);
+        assert.strictEqual(await M.page.$eval('#bottom-nav', e => getComputedStyle(e).gridTemplateColumns.split(' ').length), 4);
+        await M.page.click('#bnav-idee'); await M.page.waitForSelector('#idee-elenco');
+        assert.deepStrictEqual(await M.page.$$eval('#bottom-nav .active', l => l.map(e => e.id)), ['bnav-idee']);
+        assert.ok(await M.ev(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'nessuno scorrimento orizzontale');
+        if (FOTO) await M.page.screenshot({ path: path.join(FOTO, 'mobile-elenco.png') });
+        assert.deepStrictEqual(M.errori, []);
+      } finally { await M.context.close(); }
+      const C = await nuovaPagina({ ui: 'classic' });
+      try {
+        await C.ev(() => { S.view = 'home'; render(); });
+        assert.strictEqual(await C.page.$$eval('#sb-idee,#bnav-idee', l => l.length), 0, 'grafica classica: navigazione invariata');
+      } finally { await C.context.close(); }
+    });
+
     await test('C1. Colore delle Idee: giallo miele #E9B949 (banda, pulsante primario, filtro selezionato); testi e icone leggibili (contrasto WCAG); colori di LAB, Schede e Produzione invariati; con la grafica classica i token restano dentro le Idee', async () => {
       // Contrasto WCAG fra due colori rgb(...) calcolati dal browser.
       const contrasto = (a, b) => { const L = c => { const v = c.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number).map(x => x / 255).map(x => x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4)); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
@@ -350,14 +388,17 @@ let tmp;
       await P.home();
       const token = await P.ev(() => { const cs = getComputedStyle(document.body); return ['--d3-amb-idee', '--d3-amb-idee-testo', '--d3-amb-idee-tinta', '--d3-amb-lab', '--d3-amb-schede', '--d3-amb-produzione', '--d3-terra', '--d3-ink', '--d3-bg', '--d3-card'].map(k => cs.getPropertyValue(k).trim()); });
       assert.deepStrictEqual(token, ['#E9B949', '#7A5A12', '#FBF1D6', '#24533F', '#94661C', '#B4501C', '#B4501C', '#231B14', '#F4EEE2', '#FFFDF9']);
-      const [banda] = await stile('#apphome-idee', ['box-shadow']); assert.match(banda, /rgb\(233, 185, 73\)/, 'banda gialla');
-      const [cont, fondo] = await stile('#apphome-idee .d3-home-card-conteggio', ['color', 'background-color']);
-      const [cartaFondo] = await stile('#apphome-idee', ['background-color']);
-      assert.ok(contrasto(cont, cartaFondo) >= 4.5, 'conteggio leggibile: ' + contrasto(cont, cartaFondo).toFixed(2));
+      // Colori pieni (b2ac4af): la carta Idee e' gialla, testi in inchiostro.
+      const [cartaFondo] = await stile('#apphome-idee', ['background-color']); assert.strictEqual(cartaFondo, 'rgb(233, 185, 73)', 'carta Idee a colore pieno');
+      for (const sel of ['.d3-home-card-titolo', '.d3-home-card-descr', '.d3-home-card-conteggio', '.d3-home-card-freccia']) {
+        const [col] = await stile('#apphome-idee ' + sel, ['color']);
+        assert.ok(contrasto(col, cartaFondo) >= 4.5, sel + ' leggibile sul giallo: ' + contrasto(col, cartaFondo).toFixed(2));
+      }
       const [icona, iconaFondo] = await stile('#apphome-idee .d3-home-card-icona', ['color', 'background-color']);
       assert.ok(contrasto(icona, iconaFondo) >= 3, 'icona: ' + contrasto(icona, iconaFondo).toFixed(2));
       for (const [id, colore] of [['#apphome-lab', 'rgb(36, 83, 63)'], ['#apphome-schede', 'rgb(148, 102, 28)'], ['#apphome-produzione', 'rgb(180, 80, 28)']]) {
-        assert.match((await stile(id, ['box-shadow']))[0], new RegExp(colore.replace(/[()]/g, '\\$&')), id + ' invariato');
+        assert.strictEqual((await stile(id, ['background-color']))[0], colore, id + ': colore pieno invariato');
+        assert.strictEqual((await stile(id + ' .d3-home-card-titolo', ['color']))[0], 'rgb(255, 255, 255)', id + ': testo bianco invariato');
       }
       // Sezione Idee: pulsante primario giallo con testo inchiostro; filtro selezionato con il segno giallo.
       await P.ev(() => { apriIdee(); setIdeeFiltro('aperte'); }); await P.page.waitForSelector('#idee-nuova'); await P.page.waitForSelector('.idee-riga');
@@ -385,6 +426,7 @@ let tmp;
 
     if (FOTO) {
       await P.page.setViewportSize({ width: 1280, height: 860 });
+      await P.page.mouse.move(1270, 850); // nessun effetto di passaggio del puntatore nelle schermate
       for (const [nome, f] of [['home', () => { S.view = 'app-home'; render(); }], ['elenco', () => { apriIdee(); setIdeeFiltro('aperte'); }], ['nuova', () => apriNuovaIdea()]]) {
         await P.ev(f); await P.page.waitForTimeout(250); await P.page.screenshot({ path: path.join(FOTO, 'desktop-' + nome + '.png'), fullPage: true });
       }

@@ -1142,7 +1142,10 @@ body.ui-d3 .d3-lab .btn-outline{color:var(--d3-ink);border-color:var(--d3-bordo)
 .idee-env .d3-btn-primary{background:var(--d3-amb-idee);border-color:var(--d3-amb-idee);color:var(--d3-ink);}
 .idee-env .d3-btn-primary:is(:hover,:active){background:var(--d3-amb-idee);border-color:var(--d3-amb-idee);filter:brightness(.88);}
 .idee-env .d3-ordine button[aria-pressed="true"]{box-shadow:inset 0 -3px 0 var(--d3-amb-idee);}
-.idee-env .d3-btn[disabled]{opacity:.5;cursor:not-allowed;}
+/* Disattivati leggibili, senza trasparenza: primario su tinta chiara (5.5:1), secondario su carta (6.1:1) */
+.idee-env .d3-btn[disabled]{opacity:1;cursor:not-allowed;filter:none;}
+.idee-env .d3-btn.d3-btn-primary[disabled]{background:var(--d3-amb-idee-tinta);border-color:var(--d3-amb-idee);color:var(--d3-ink2);}
+.idee-env .d3-btn.d3-btn-line[disabled]{background:var(--d3-card);border-color:var(--d3-campo);color:var(--d3-ink2);}
 .idee-testa{display:flex;align-items:flex-end;justify-content:space-between;gap:12px 16px;flex-wrap:wrap;}
 .idee-testa .d3-sub{margin-top:6px;max-width:560px;}
 .idee-env .d3-ordine{align-self:flex-start;}
@@ -1218,6 +1221,7 @@ body.ui-d3 .btn-ghost-danger{background:transparent;color:#A33A2A;border:1.5px s
 .d3-amb-lab{--amb:var(--d3-amb-lab);--amb-tinta:var(--d3-amb-lab-tinta);}
 .d3-amb-schede{--amb:var(--d3-amb-schede);--amb-tinta:var(--d3-amb-schede-tinta);}
 .d3-amb-produzione{--amb:var(--d3-amb-produzione);--amb-tinta:var(--d3-amb-produzione-tinta);}
+.d3-amb-testa{display:none;} /* fascia dell'ambiente: visibile solo nella Direzione 3, dentro un ambiente */
 .d3-home-card[class*="d3-amb-"]{grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"i t f" "i d f" "i c f";box-shadow:inset 4px 0 0 var(--amb);}
 .d3-home-card-icona{grid-area:i;align-self:start;width:42px;height:42px;border-radius:10px;display:flex;align-items:center;justify-content:center;background:var(--amb-tinta);color:var(--amb);margin-right:2px;}
 .d3-home-card[class*="d3-amb-"] .d3-home-card-conteggio,.d3-home-card[class*="d3-amb-"] .d3-home-card-freccia{color:var(--amb);}
@@ -1330,6 +1334,40 @@ body.ui-d3 .mode-switcher{background:var(--d3-card);border-color:var(--d3-bordo)
 body.ui-d3 .mode-btn{font-family:inherit;font-size:13px;font-weight:600;color:var(--d3-ink2);min-height:32px;}
 body.ui-d3 .mode-btn.lab-active{background:var(--d3-amb-lab);color:#fff;}
 body.ui-d3 .mode-btn.prod-active{background:var(--d3-amb-produzione);color:#fff;}
+/* Uniformita' cromatica degli ambienti (solo Direzione 3). Stessi colori gia'
+   assegnati: LAB #24533F, Schede #94661C, Produzione #B4501C, a colore pieno,
+   senza sfumature. Bianco sui tre colori: 8.8:1, 5.0:1, 5.1:1 (AA).
+   Superfici di lettura e compilazione neutre; colori di stato (Attiva, In LAB),
+   avvisi, errori e azioni distruttive invariati. */
+/* Home: le tre schede degli ambienti a colore pieno */
+body.ui-d3 .d3-home-card[class*="d3-amb-"]{background:var(--amb);border-color:var(--amb);color:#fff;box-shadow:none;}
+body.ui-d3 .d3-home-card[class*="d3-amb-"]:hover{background:var(--amb);border-color:var(--amb);filter:brightness(.9);}
+body.ui-d3 .d3-home-card[class*="d3-amb-"]:focus-visible{outline:3px solid var(--d3-ink);outline-offset:3px;}
+body.ui-d3 .d3-home-card[class*="d3-amb-"] :is(.d3-home-card-titolo,.d3-home-card-descr,.d3-home-card-conteggio,.d3-home-card-freccia){color:#fff;}
+body.ui-d3 .d3-home-card[class*="d3-amb-"] .d3-home-card-icona{background:#fff;color:var(--amb);}
+/* Navigazione: la voce dell'ambiente aperto e' nel suo colore pieno */
+body.ui-d3 #sb-lab.active,body.ui-d3 #bnav-lab:is(.active,.active-lab){background:var(--d3-amb-lab);color:#fff;box-shadow:none;}
+body.ui-d3 #sb-ricette.active,body.ui-d3 #bnav-ricette:is(.active,.active-lab){background:var(--d3-amb-schede);color:#fff;box-shadow:none;}
+body.ui-d3 #sb-produzione.active,body.ui-d3 #bnav-produzione:is(.active,.active-lab){background:var(--d3-amb-produzione);color:#fff;box-shadow:none;}
+body.ui-d3 :is(#sb-lab,#sb-ricette,#sb-produzione,#bnav-lab,#bnav-ricette,#bnav-produzione):is(.active,.active-lab) i{color:#fff;}
+/* Fascia dell'ambiente: l'intestazione esistente diventa a colore pieno,
+   con icona e nome dell'ambiente accanto al logo (nessuna altezza in piu').
+   La Home (nessun ambiente) resta neutra. L'indicatore "Salvato" e il
+   selettore LAB/Produzione restano su fondo chiaro. */
+body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) .topbar{background:var(--d3-primario);border-bottom-color:var(--d3-primario);}
+body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) .topbar :is(.logo,.logo-tag,#btn-search-toggle){color:#fff !important;}
+body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) .topbar #btn-search-toggle:focus-visible{outline:2px solid #fff;outline-offset:2px;}
+body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) .d3-amb-testa{display:flex;align-items:center;gap:10px;margin-left:6px;padding-left:16px;border-left:1.5px solid #fff;min-height:30px;color:#fff;font-family:'Instrument Sans','DM Sans',sans-serif;font-size:17px;font-weight:600;line-height:1;white-space:nowrap;}
+body.ui-d3 .d3-amb-testa-voce{display:none;}
+body.ui-d3[data-d3-amb="lab"] .d3-amb-testa-voce[data-amb="lab"],body.ui-d3[data-d3-amb="schede"] .d3-amb-testa-voce[data-amb="schede"],body.ui-d3[data-d3-amb="produzione"] .d3-amb-testa-voce[data-amb="produzione"]{display:contents;}
+body.ui-d3 .d3-amb-testa-icona{display:flex;}
+body.ui-d3 .d3-amb-testa-icona svg{width:24px;height:24px;}
+body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) .mode-switcher{background:#fff;border-color:#fff;}
+/* Dentro l'ambiente: titolo di pagina e indicatori delle schede nel colore
+   dell'ambiente */
+body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) :is(.d3-h1,.prod-title,.labg-title){color:var(--d3-primario);}
+body.ui-d3 .d3-tab.attivo{border-bottom-color:var(--d3-primario);}
+body.ui-d3 .d3-bozza.attiva{box-shadow:inset 0 3px 0 var(--d3-primario);}
 /* Confronta Ricette */
 .d3-confronto-testa{display:flex;flex-direction:column;gap:6px;margin-bottom:18px;}
 .d3-confronto-sub{font-size:14px;color:var(--d3-ink2);}
@@ -1382,9 +1420,27 @@ body.ui-d3 .d3-segnaposto>div:last-of-type{font-size:14px !important;color:var(-
 .d3-scorre-sx.d3-scorre-dx{-webkit-mask-image:linear-gradient(to right,transparent,#000 40px,#000 calc(100% - 40px),transparent);mask-image:linear-gradient(to right,transparent,#000 40px,#000 calc(100% - 40px),transparent);}
 /* Idee (P2-a.2): colore d'ambiente e Home con quattro aree */
 .d3-amb-idee{--amb:var(--d3-amb-idee-testo);--amb-tinta:var(--d3-amb-idee-tinta);} /* icona, conteggio, freccia: variante scura leggibile */
-.d3-home-card.d3-amb-idee{box-shadow:inset 4px 0 0 var(--d3-amb-idee);} /* banda: giallo miele */
+.d3-home-card.d3-amb-idee{box-shadow:inset 4px 0 0 var(--d3-amb-idee);} /* banda (solo senza colori pieni) */
 body.ui-d3[data-d3-amb="idee"]{--d3-primario:var(--d3-amb-idee);}
 body.ui-d3[data-d3-amb="idee"] .d3-btn-primary{color:var(--d3-ink);} /* sul giallo si scrive con l'inchiostro */
+/* Idee a colore pieno, come LAB, Schede e Produzione (b2ac4af, f13b6d1): fondo giallo miele;
+   testi e icone in inchiostro (9.3:1), mai bianco (1.8:1 sul giallo). */
+body.ui-d3 .d3-home-card.d3-amb-idee{background:var(--d3-amb-idee);border-color:var(--d3-amb-idee);color:var(--d3-ink);box-shadow:none;}
+body.ui-d3 .d3-home-card.d3-amb-idee:hover{background:var(--d3-amb-idee);border-color:var(--d3-amb-idee);}
+body.ui-d3 .d3-home-card.d3-amb-idee :is(.d3-home-card-titolo,.d3-home-card-descr,.d3-home-card-conteggio,.d3-home-card-freccia){color:var(--d3-ink);}
+body.ui-d3 .d3-home-card.d3-amb-idee .d3-home-card-icona{background:var(--d3-card);color:var(--d3-amb-idee-testo);}
+/* Navigazione: voce Idee (prima di LAB), icona nella variante leggibile; attiva a colore pieno */
+body.ui-d3 :is(#sb-idee,#bnav-idee) i{color:var(--d3-amb-idee-testo);}
+body.ui-d3 #sb-idee.active,body.ui-d3 #bnav-idee.active{background:var(--d3-amb-idee);color:var(--d3-ink);box-shadow:none;}
+body.ui-d3 :is(#sb-idee,#bnav-idee).active i{color:var(--d3-ink);}
+/* Intestazione come fascia dell'ambiente Idee: stessa struttura degli altri ambienti, testo inchiostro */
+body.ui-d3[data-d3-amb="idee"] .topbar{background:var(--d3-amb-idee);border-bottom-color:var(--d3-amb-idee);}
+body.ui-d3[data-d3-amb="idee"] .topbar :is(.logo,.logo-tag,#btn-search-toggle){color:var(--d3-ink) !important;}
+body.ui-d3[data-d3-amb="idee"] .topbar #btn-search-toggle:focus-visible{outline:2px solid var(--d3-ink);outline-offset:2px;}
+body.ui-d3[data-d3-amb="idee"] .d3-amb-testa{display:flex;align-items:center;gap:10px;margin-left:6px;padding-left:16px;border-left:1.5px solid var(--d3-ink);min-height:30px;color:var(--d3-ink);font-family:'Instrument Sans','DM Sans',sans-serif;font-size:17px;font-weight:600;line-height:1;white-space:nowrap;}
+body.ui-d3[data-d3-amb="idee"] .d3-amb-testa-voce[data-amb="idee"]{display:contents;}
+/* Titolo di pagina nella variante leggibile del giallo (5.5:1 sullo sfondo) */
+body.ui-d3[data-d3-amb="idee"] .d3-h1{color:var(--d3-amb-idee-testo);}
 /* Home con quattro aree: due per riga su schermi larghi (una per riga su mobile, regola esistente) */
 @media(min-width:769px){.d3-home-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
 @media(max-width:768px){
@@ -1399,6 +1455,12 @@ body.ui-d3[data-d3-amb="idee"] .d3-btn-primary{color:var(--d3-ink);} /* sul gial
   body.ui-d3 .prod-header .recipe-name{font-size:26px;}
   body.ui-d3 :is(.toast,.toast-action){bottom:calc(68px + env(safe-area-inset-bottom));}
   body.ui-d3:has(.d3-actionbar) :is(.toast,.toast-action){bottom:136px;}
+  body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) .topbar .logo-tag{display:none;}
+  body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"]) .d3-amb-testa{margin-left:2px;padding-left:12px;font-size:15px;}
+  body.ui-d3 .topbar:has(#mode-switcher[style*="flex"]) .d3-amb-testa-nome{display:none;}
+  body.ui-d3[data-d3-amb="idee"] .topbar .logo-tag{display:none;}
+  body.ui-d3 .bottom-nav{grid-template-columns:repeat(4,1fr);} /* Idee, LAB, Schede, Produzione */
+  body.ui-d3[data-d3-amb="idee"] .d3-amb-testa{margin-left:2px;padding-left:12px;font-size:15px;}
 }
 
 </style>
@@ -9317,7 +9379,8 @@ function renderSidebar(){
   return `<button class="new-btn" id="btn-new-recipe"><i class="ti ti-plus"></i> Nuova Scheda</button>
   <button class="load-btn ${S.view==='load'?'active':''}" id="btn-load-view"><i class="ti ti-upload"></i> Carica Scheda</button>
   <div class="sec-label">Navigazione</div>
-  ${d3OrdineNav([`<button class="load-btn ${isProduzione?'active':''}" id="sb-produzione"><i class="ti ti-tools-kitchen-2"></i> Produzione</button>`,
+  ${S.uiD3?`<button class="load-btn ${nav==='idee'?'active':''}" id="sb-idee"><i class="ti ti-bulb"></i> Idee</button>
+  `:''}${d3OrdineNav([`<button class="load-btn ${isProduzione?'active':''}" id="sb-produzione"><i class="ti ti-tools-kitchen-2"></i> Produzione</button>`,
   `<button class="load-btn ${isRicette?'active':''}" id="sb-ricette"><i class="ti ti-book-2"></i> Schede</button>`,
   `<button class="load-btn ${isLab?'active':''}" id="sb-lab"><i class="ti ti-flask"></i> LAB</button>`]).join('\n  ')}
   <button class="d3-sb-toggle" onclick="setUiD3(${S.uiD3?'false':'true'})" title="Cambia grafica: stessi dati e stesse funzioni">${S.uiD3?'Direzione 3 · passa alla grafica classica':'Passa alla Direzione 3'}</button>`;
@@ -11356,7 +11419,8 @@ function renderBottomNav(){
   const isProduzione=nav?nav==='produzione':(S.view==='attive'||S.view==='produzione-guidata'||S.view==='sessione-operativa'||S.view==='storico-produzioni');
   const isLab=nav?nav==='lab':S.view==='lab-globale';
   return `
-    ${d3OrdineNav([`<button class="bnav-btn ${isProduzione?'active':''}" id="bnav-produzione"><i class="ti ti-tools-kitchen-2"></i>Produzione</button>`,
+    ${S.uiD3?`<button class="bnav-btn ${nav==='idee'?'active':''}" id="bnav-idee"><i class="ti ti-bulb"></i>Idee</button>
+    `:''}${d3OrdineNav([`<button class="bnav-btn ${isProduzione?'active':''}" id="bnav-produzione"><i class="ti ti-tools-kitchen-2"></i>Produzione</button>`,
     `<button class="bnav-btn ${isRicette?'active':''}" id="bnav-ricette"><i class="ti ti-book-2"></i>Schede</button>`,
     `<button class="bnav-btn ${isLab?'active':''}" id="bnav-lab"><i class="ti ti-flask"></i>LAB</button>`]).join('\n    ')}`;
 }
@@ -11547,6 +11611,8 @@ function bindEvents(){
   if(sbProduzione)sbProduzione.addEventListener('click',()=>{S.view='attive';render();});
   const sbLab=document.getElementById('sb-lab');
   if(sbLab)sbLab.addEventListener('click',()=>{S.view='lab-globale';render();});
+  const sbIdee=document.getElementById('sb-idee'); // solo Direzione 3
+  if(sbIdee)sbIdee.addEventListener('click',()=>{apriIdee();});
 
   // Ricette: sotto-tab Tutte / Famiglie
   const ratabAll=document.getElementById('ratab-all');
@@ -11759,6 +11825,8 @@ function bindEvents(){
   if(bnavProduzione)bnavProduzione.addEventListener('click',()=>{S.view='attive';render();});
   const bnavLab=document.getElementById('bnav-lab');
   if(bnavLab)bnavLab.addEventListener('click',()=>{S.view='lab-globale';render();});
+  const bnavIdee=document.getElementById('bnav-idee'); // solo Direzione 3
+  if(bnavIdee)bnavIdee.addEventListener('click',()=>{apriIdee();});
 
   // app-home — sei ingressi. Nuova Ricetta/Carica Ricetta riusano gli stessi
   // id (btn-new-recipe/btn-load-view) dei flussi già esistenti: nessuna logica
@@ -12134,7 +12202,7 @@ function renderIdea(){
   var note=aperta
     ?`<textarea id="idea-note" rows="4" maxlength="${IDEA_LIMITI.note}" placeholder="Annota cosa vuoi provare, dubbi, riferimenti…" oninput="ideaNoteInput(this)">${escAttr(noteTesto)}</textarea>
       <div class="d3-riga-azioni">
-        <button class="d3-btn d3-btn-line" id="idea-note-salva" onclick="salvaNoteIdea()" ${S.ideaSalvaNote||noteTesto===(idea.notes||'')?'disabled':''}>${S.ideaSalvaNote?'Salvataggio…':'Salva note'}</button>
+        <button class="d3-btn d3-btn-primary" id="idea-note-salva" onclick="salvaNoteIdea()" ${S.ideaSalvaNote||noteTesto===(idea.notes||'')?'disabled':''}>${S.ideaSalvaNote?'Salvataggio…':'Salva note'}</button>
         ${ideaMicHtml('note')}
       </div>${ideaVoceHtml('note')}`
     :(idea.notes?`<div class="idee-spunto" id="idea-note-testo">${escAttr(idea.notes)}</div>`:`<div class="idee-aiuto" id="idea-note-testo">Nessuna nota.</div>`);
@@ -12182,12 +12250,24 @@ function renderIdea(){
 // azione server. Con la grafica classica l'app e' identica a prima.
 // ══════════════════════════════════════════════════════════
 var D3_UI_KEY='khub_ui';
+// Fascia dell'ambiente nell'intestazione (statica, inserita una volta): icona
+// e nome dei tre ambienti; il CSS mostra quella dell'ambiente aperto
+// (body[data-d3-amb]) e solo con la Direzione 3. Icone SVG gia' presenti.
+function d3InserisciTestaAmbiente(){
+  var logo=document.getElementById('khub-logo');
+  if(!logo||document.getElementById('d3-amb-testa'))return;
+  var d=document.createElement('div');d.id='d3-amb-testa';d.className='d3-amb-testa';
+  d.innerHTML=[['lab','ti-flask','LAB'],['schede','ti-book-2','Schede'],['produzione','ti-tools-kitchen-2','Produzione'],['idee','ti-bulb','Idee']].map(function(a){
+    return'<span class="d3-amb-testa-voce" data-amb="'+a[0]+'"><span class="d3-amb-testa-icona" aria-hidden="true">'+D3_ICONE_AMBIENTE[a[1]]+'</span><span class="d3-amb-testa-nome">'+a[2]+'</span></span>';}).join('');
+  logo.insertAdjacentElement('afterend',d);
+}
 function initUiD3(){
   var v=null;
   try{var q=new URLSearchParams(location.search).get('ui');if(q==='d3'||q==='classic'){localStorage.setItem(D3_UI_KEY,q);}v=localStorage.getItem(D3_UI_KEY);}catch(e){}
   S.uiD3=v!=='classic'; // Direzione 3 predefinita: classica solo se scelta
   if(!initUiD3.ascolto){
     initUiD3.ascolto=true;
+    d3InserisciTestaAmbiente();
     // Schede del LAB: l'indicatore di scorrimento segue la posizione.
     document.addEventListener('scroll',function(e){var t=e.target;if(t&&t.classList&&(t.classList.contains('d3-secnav')||t.classList.contains('d3-bozze')))d3AggiornaScorrimento();},true);
     window.addEventListener('resize',function(){if(S.uiD3)d3AggiornaScorrimento();});

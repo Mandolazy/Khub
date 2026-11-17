@@ -768,6 +768,61 @@ function clientMain(fetchImpl, nomi) {
     }
   });
 
+  await test('P25. colori degli ambienti (solo Direzione 3): schede della Home a colore pieno senza sfumature, testi a contrasto AA, colori gia\' definiti, stati invariati, grafica classica non toccata', async () => {
+    const token = n => (html.match(new RegExp('--' + n + ':(#[0-9A-Fa-f]{6});')) || [])[1];
+    const amb = { lab: token('d3-amb-lab'), schede: token('d3-amb-schede'), produzione: token('d3-amb-produzione') };
+    assert.deepStrictEqual(amb, { lab: '#24533F', schede: '#94661C', produzione: '#B4501C' }, 'stessi colori gia\' assegnati agli ambienti');
+    const lum = h => { const c = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4))); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; };
+    const contrasto = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+    for (const [k, c] of Object.entries(amb)) assert.ok(contrasto(c, '#FFFFFF') >= 4.5, k + ': bianco sul colore pieno ' + contrasto(c, '#FFFFFF').toFixed(2));
+    for (const [k, c] of Object.entries(amb)) assert.ok(contrasto(c, token('d3-bg')) >= 3, k + ': titolo grande sullo sfondo ' + contrasto(c, token('d3-bg')).toFixed(2));
+    // Regole del blocco: tutte limitate alla Direzione 3, nessuna sfumatura, nessun colore nuovo.
+    const blocco = html.slice(html.indexOf("/* Uniformita' cromatica degli ambienti"), html.indexOf('body.ui-d3 .d3-bozza.attiva{'));
+    const regole = blocco.replace(/\/\*[\s\S]*?\*\//g, '').split('}').map(r => r.trim()).filter(Boolean);
+    const selettori = sel => { const out = []; let d = 0, cur = ''; for (const ch of sel) { if (ch === '(') d++; if (ch === ')') d--; if (ch === ',' && !d) { out.push(cur); cur = ''; } else cur += ch; } return out.concat(cur); };
+    assert.ok(regole.length >= 10 && regole.every(r => selettori(r.split('{')[0]).every(sel => /^body\.ui-d3/.test(sel.trim()))), 'ogni regola vale solo con body.ui-d3');
+    assert.ok(!/gradient|rgba|opacity/i.test(blocco.replace(/\/\*[\s\S]*?\*\//g, '')), 'nessuna sfumatura o trasparenza');
+    assert.deepStrictEqual([...new Set((blocco.replace(/\/\*[\s\S]*?\*\//g, '').match(/#[0-9A-Fa-f]{3,6}\b/g) || []))], ['#fff'], 'solo i colori degli ambienti (variabili) e il bianco');
+    assert.ok(/\.d3-home-card\[class\*="d3-amb-"\]\{background:var\(--amb\)/.test(blocco), 'Home: sfondo pieno del colore dell\'ambiente');
+    assert.ok(/:focus-visible\{outline:3px solid/.test(blocco), 'Home: fuoco da tastiera visibile sul colore pieno');
+    // Colori semantici invariati: stato Attiva, bozza In LAB, avvisi ed eliminazione non citati nel blocco.
+    assert.ok(!/d3-pill|d3-band|d3-verde|toast|danger|elimina|errore|avviso/i.test(blocco), 'nessun colore di stato, avviso o eliminazione toccato');
+    // Markup invariato: la Home D3 usa le stesse classi; la grafica classica non ha classi d3-amb.
+    const c = await setup(); c.S.uiD3 = true;
+    const h = c.renderAppHomeD3();
+    for (const k of ['lab', 'schede', 'produzione']) assert.ok(h.includes('d3-home-card d3-amb-' + k), 'scheda Home: ' + k);
+    c.S.uiD3 = false; assert.ok(!/d3-amb-/.test(c.renderAppHome()), 'Home classica senza classi della Direzione 3');
+  });
+
+  await test('P26. fascia dell\'ambiente nell\'intestazione (Direzione 3): colore pieno, icona SVG gia\' presente e nome; nessuna altezza in piu\'; Home e grafica classica neutre; icona sempre visibile su mobile', async () => {
+    // Elemento: creato una sola volta accanto al logo, con le tre voci e le icone di D3_ICONE_AMBIENTE.
+    const icone = new Function(html.match(/var D3_ICONE_AMBIENTE=\(function\(\)\{[\s\S]*?\n\}\)\(\);/)[0] + '\nreturn D3_ICONE_AMBIENTE;')();
+    const creati = []; let inserito = null;
+    const doc = { getElementById: id => (id === 'khub-logo' ? { insertAdjacentElement: (pos, el) => { inserito = [pos, el]; } } : (id === 'd3-amb-testa' ? inserito && inserito[1] : null)),
+      createElement: tag => { const el = { tag }; creati.push(el); return el; } };
+    const inserisci = new Function('document', 'D3_ICONE_AMBIENTE', extractFunction('function d3InserisciTestaAmbiente()') + '\nreturn d3InserisciTestaAmbiente;')(doc, icone);
+    inserisci(); inserisci();
+    assert.strictEqual(creati.length, 1, 'inserita una sola volta');
+    const [pos, el] = inserito;
+    assert.deepStrictEqual([pos, el.id, el.className], ['afterend', 'd3-amb-testa', 'd3-amb-testa'], 'accanto al logo, nell\'intestazione esistente');
+    for (const [amb, ic, nome] of [['lab', 'ti-flask', 'LAB'], ['schede', 'ti-book-2', 'Schede'], ['produzione', 'ti-tools-kitchen-2', 'Produzione']])
+      assert.ok(el.innerHTML.includes('data-amb="' + amb + '"><span class="d3-amb-testa-icona" aria-hidden="true">' + icone[ic] + '</span><span class="d3-amb-testa-nome">' + nome + '</span>'), 'voce ' + amb + ' con l\'icona SVG gia\' presente');
+    assert.ok(/initUiD3\.ascolto=true;\s*d3InserisciTestaAmbiente\(\);/.test(html), 'inserita all\'avvio, una volta');
+    // CSS: nascosta di base (anche nella grafica classica); a colore pieno solo dentro un ambiente della Direzione 3.
+    assert.ok(/\n\.d3-amb-testa\{display:none;\}/.test(html), 'nascosta di base');
+    const blocco = html.slice(html.indexOf("/* Fascia dell'ambiente"), html.indexOf("/* Dentro l'ambiente: titolo di pagina"));
+    const AMB = 'body.ui-d3:is([data-d3-amb="lab"],[data-d3-amb="schede"],[data-d3-amb="produzione"])';
+    assert.ok(blocco.includes(AMB + ' .topbar{background:var(--d3-primario);border-bottom-color:var(--d3-primario);}'), 'intestazione a colore pieno dell\'ambiente');
+    assert.ok(blocco.includes(AMB + ' .d3-amb-testa{display:flex;'), 'fascia visibile solo dentro un ambiente (Home: data-d3-amb="nessuna", neutra)');
+    assert.ok(!/height|padding:|position|z-index/.test(blocco.replace(/\/\*[\s\S]*?\*\//g, '').replace(/min-height:30px|padding-left:16px|line-height:1;|width:24px;height:24px;/g, '')), 'nessuna altezza, spaziatura o livello nuovi per l\'intestazione');
+    assert.ok(!/save-indicator/.test(blocco), 'indicatore "Salvato" invariato (pillola chiara)');
+    assert.ok(blocco.includes(AMB + ' .mode-switcher{background:#fff;border-color:#fff;}'), 'selettore LAB/Produzione su fondo chiaro');
+    const mobile = html.slice(html.lastIndexOf('@media(max-width:768px){'), html.indexOf('</style>', html.lastIndexOf('@media(max-width:768px){')));
+    assert.ok(/:has\(#mode-switcher\[style\*="flex"\]\) \.d3-amb-testa-nome\{display:none;\}/.test(mobile) && !/d3-amb-testa-icona\{display:none/.test(html), 'su mobile al massimo si nasconde il nome, mai l\'icona');
+    assert.ok(!/gradient|rgba|opacity/.test(blocco), 'colore pieno, nessuna sfumatura');
+    // Le regole di P25 restano valide (stesso blocco, nuovi selettori limitati a body.ui-d3).
+  });
+
   // ── Errori di persistenza: mai un successo silenzioso, stato locale intatto ──
   const risposta = (status, corpo) => () => ({ ok: status >= 200 && status < 300, status, json: async () => (corpo === undefined ? JSON.parse('non json') : clone(corpo)) });
   const GUASTI = [
