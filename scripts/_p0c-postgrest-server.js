@@ -41,7 +41,17 @@ const CHAT = process.argv[4] ? path.resolve(process.argv[4]) : path.join(ROOT, '
 const fetchOriginale = globalThis.fetch;
 const registro = []; // richieste verso PostgREST: metodo, tabella, esito
 // MichelinAI simulato: modo e ritardo impostabili dal test (POST /test/ia), richieste registrate.
-const IA = { modo: 'ok', ritardo: 0, testo: null, chiamate: [] };
+const IA = { modo: 'ok', ritardo: 0, testo: null, proposta: null, chiamate: [] };
+// Proposta di Ricetta simulata (blocco 2d): semifreddo con le noci; muffin e mandorle tra gli scarti.
+const IA_PROPOSTA_DEFAULT = JSON.stringify({ pronta: true, titolo: 'Semifreddo albicocche, rosmarino e noci', resa: { qty: 6, unit: 'porzioni', origine: 'ai', evidenza: null },
+  ingredienti: [
+    { nome: 'Albicocche', qty: 400, unit: 'g', qtyKind: 'certa', origine: 'ai', evidenza: null },
+    { nome: 'Panna fresca', qty: 250, unit: 'g', qtyKind: 'certa', origine: 'ai', evidenza: null },
+    { nome: 'Zucchero', qty: 80, unit: 'g', qtyKind: 'certa', origine: 'ai', evidenza: null },
+    { nome: 'Noci', qty: 60, unit: 'g', qtyKind: 'certa', origine: 'ai', evidenza: null },
+    { nome: 'Rosmarino', qtyKind: 'variabile', origine: null, evidenza: null }],
+  passi: ['Cuocere le albicocche con lo zucchero e il rosmarino.', 'Montare la panna e unire la purea fredda.', 'Aggiungere le noci tostate e congelare.'],
+  scartate: ['muffin (rifiutati)', 'mandorle (sostituite dalle noci)'], note: null });
 const iaTestoDefault = body => {
   const ultimo = String((body.messages[body.messages.length - 1] || {}).content || '').toLowerCase();
   if (/ingredienti/.test(ultimo)) return 'Proposta indicativa (quantita\' mie, da verificare): albicocche 400 g, panna 250 g, zucchero 80 g, noci 60 g. Le noci le hai scelte tu.';
@@ -53,7 +63,8 @@ const iaRisposta = async body => {
   IA.chiamate.push({ model: body.model, system: body.system, messages: body.messages, max_tokens: body.max_tokens });
   if (IA.ritardo) await new Promise(r => setTimeout(r, IA.ritardo));
   if (IA.modo === 'errore') return { ok: false, status: 529, json: async () => ({ type: 'error', error: { type: 'overloaded_error' } }) };
-  const testo = IA.testo || iaTestoDefault(body);
+  const proposta = /PREPARARE LA RICETTA/.test(String(body.system || ''));
+  const testo = proposta ? (IA.proposta || IA_PROPOSTA_DEFAULT) : (IA.testo || iaTestoDefault(body));
   return { ok: true, status: 200, json: async () => ({ content: [{ type: 'text', text: testo }], stop_reason: 'end_turn' }) };
 };
 const fetchLocale = async function (url, opts) {
@@ -101,7 +112,7 @@ const leggiCorpo = req => new Promise((ok, ko) => { const p = []; req.on('data',
         return res.end(JSON.stringify(uscita === undefined ? null : uscita));
       }
       if (IA_SIMULATA && url.pathname === '/test/ia') {
-        if (req.method === 'POST') { const b = JSON.parse(await leggiCorpo(req) || '{}'); ['modo', 'ritardo', 'testo'].forEach(k => { if (k in b) IA[k] = b[k]; }); }
+        if (req.method === 'POST') { const b = JSON.parse(await leggiCorpo(req) || '{}'); ['modo', 'ritardo', 'testo', 'proposta'].forEach(k => { if (k in b) IA[k] = b[k]; }); }
         res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ modo: IA.modo, ritardo: IA.ritardo, chiamate: IA.chiamate }));
       }
       if (req.method === 'GET' && url.pathname === '/test/registro') {

@@ -1194,6 +1194,21 @@ body.ui-d3 .d3-lab .btn-outline{color:var(--d3-ink);border-color:var(--d3-bordo)
 .idee-puntini span:nth-child(2){animation-delay:.2s}.idee-puntini span:nth-child(3){animation-delay:.4s}
 @keyframes idee-puntino{0%,100%{opacity:.2}50%{opacity:1}}
 @media (prefers-reduced-motion:reduce){.idee-puntini span{animation:none;opacity:1}}
+.idee-ricetta-domanda{flex-direction:column;align-items:flex-start;}
+/* Anteprima di una proposta da Idea (stessa anteprima dell'importazione) */
+.preview-fonte-idea{font-size:13px;line-height:1.5;background:var(--d3-amb-idee-tinta,#FBF1D6);border:1px solid var(--d3-amb-idee,#E9B949);border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;flex-direction:column;gap:8px;color:var(--d3-ink,#231B14);}
+.preview-ing-name-input{flex:1;min-width:0;font:inherit;font-size:14px;border:1px solid var(--border);border-radius:6px;padding:6px 8px;background:var(--white);color:inherit;}
+.idea-prev-origine{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:-2px 0 8px;font-size:12px;}
+.idea-orig{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.03em;padding:2px 8px;border-radius:999px;border:1px solid transparent;}
+.idea-orig-chef{background:#E6EFE8;color:var(--d3-verde,#2E6A45);border-color:var(--d3-verde,#2E6A45);}
+.idea-orig-fonte{background:#EEF0F1;color:#3C454D;border-color:#55606A;}
+.idea-orig-ai{background:var(--d3-amb-idee-tinta,#FBF1D6);color:var(--d3-amb-idee-testo,#7A5A12);border-color:var(--d3-amb-idee,#E9B949);}
+.idea-orig-ai.confermata{background:transparent;}
+.idea-orig-nota{color:var(--mid,#6B5F55);overflow-wrap:anywhere;}
+.idea-orig-conferma{display:inline-flex;align-items:center;gap:6px;font-weight:600;cursor:pointer;min-height:32px;}
+.preview-step-idea{display:flex;align-items:flex-start;gap:6px;margin-bottom:8px;}
+.preview-step-idea textarea{flex:1;min-width:0;font:inherit;font-size:14px;line-height:1.45;border:1px solid var(--border);border-radius:6px;padding:6px 8px;resize:vertical;background:var(--white);color:inherit;}
+.preview-ing-rimuovi{min-width:32px;padding:4px 8px;}
 .idee-chat-composer{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--d3-bordo);padding-top:14px;}
 .idee-conv-testa{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
 .idee-conv-vuota{color:var(--d3-ink2);font-size:14px;max-width:560px;}
@@ -9895,7 +9910,7 @@ function renderPreview(){
       :k==='intervallo'?'intervallo: il valore si sceglie in Produzione'
       :k==='certa'&&!UNITS.includes(i.unit)?'unità della fonte: la conversione in grammi verrà chiesta quando serve':'';
     if(!stato)return'';
-    const fonte=i.sourceText||i.originale;
+    const fonte=daIdea?null:(i.sourceText||i.originale); // da Idea: la provenienza ha la sua riga
     return`<div class="preview-ing-originale" style="font-size:11px;color:var(--mid);margin:-2px 0 6px">${fonte?'Nella fonte: «'+escAttr(fonte)+'» — ':''}<strong>${stato}</strong></div>`;
   };
   const daConfermare=p.ingredients.filter(i=>['variabile','mancante','intervallo'].indexOf(tipoQ(i))!==-1||(tipoQ(i)==='certa'&&!UNITS.includes(i.unit))).length;
@@ -9915,15 +9930,30 @@ function renderPreview(){
     </div>`;
   const destinazioneEsistente=S.loadDestinazione==='esistente';
   const schedaScelta=destinazioneEsistente?R(S.loadDestinazioneSchedaId):null;
-  return `<div class="card">
+  // P2-a.2 (blocco 2d): proposta nata da un'Idea. Stessa anteprima, con provenienza e
+  // conferma delle quantita', nomi e passaggi modificabili; nessun salvataggio in questo blocco.
+  const daIdea=!!(fonte&&fonte.tipo==='idea');
+  const ideaDaConfermare=daIdea?ideaPrevDaConfermare():0;
+  const bandaIdea=!daIdea?'':`<div class="preview-fonte preview-fonte-idea" id="preview-fonte-idea" role="note">
+      <div><strong>Proposta di MichelinAI</strong> ricostruita dalla conversazione dell'Idea «${escAttr(fonte.ideaTitolo||'')}»: riflette le tue scelte più recenti. Controlla e correggi tutto prima di salvarla.</div>
+      ${fonte.scartate&&fonte.scartate.length?`<div class="preview-idea-scartate" id="preview-idea-scartate"><strong>Alternative scartate</strong> (non incluse negli ingredienti): ${fonte.scartate.map(function(x){return escAttr(x);}).join(' · ')}</div>`:''}
+      ${fonte.note?`<div class="preview-idea-note">${escAttr(fonte.note)}</div>`:''}
+      <div class="preview-idea-quantita" id="preview-idea-quantita">${ideaDaConfermare?`<strong>${ideaDaConfermare} quantit${ideaDaConfermare===1?'à proposta':'à proposte'} da MichelinAI da confermare.</strong> Una quantità non confermata non diventa certa: resterà «da indicare» con la proposta in nota.`:'Nessuna quantità di MichelinAI da confermare.'}</div>
+      <div class="d3-riga-azioni">
+        ${ideaDaConfermare?'<button type="button" class="btn btn-outline btn-sm" id="preview-idea-conferma-tutte" onclick="ideaPrevConfermaTutte()">Conferma tutte le quantità proposte</button>':''}
+        <button type="button" class="btn btn-outline btn-sm" id="preview-idea-rigenera" onclick="ideaPrevLeggiCampi();ideaPreparaRicetta(true)" ${S.ideaProposta&&S.ideaProposta[fonte.ideaId]&&S.ideaProposta[fonte.ideaId].carica?'disabled':''}>Rigenera la proposta</button>
+      </div>
+      ${fonte.salvata===false?'<div class="preview-idea-avviso">La proposta non è stata conservata nell\'Idea: se chiudi questa pagina servirà una nuova richiesta a MichelinAI.</div>':''}
+    </div>`;
+  return `<div class="card${daIdea?' preview-da-idea':''}">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
       <div>
         <div class="card-label" style="margin-bottom:4px"><i class="ti ti-eye"></i> Anteprima ricetta</div>
-        <div style="font-size:11px;color:var(--mid)">Controlla la ricetta prima di salvarla</div>
+        <div style="font-size:11px;color:var(--mid)">${daIdea?'Controlla e correggi la proposta della tua Idea':'Controlla la ricetta prima di salvarla'}</div>
       </div>
-      <button class="btn btn-outline btn-sm" id="btn-back-load"><i class="ti ti-arrow-left"></i> Indietro</button>
+      ${daIdea?'<button class="btn btn-outline btn-sm" id="btn-back-idea" onclick="tornaAllIdeaDaAnteprima()"><i class="ti ti-arrow-left"></i> Torna all\'Idea</button>':'<button class="btn btn-outline btn-sm" id="btn-back-load"><i class="ti ti-arrow-left"></i> Indietro</button>'}
     </div>
-    ${bandaFonte}
+    ${daIdea?bandaIdea:bandaFonte}
     <div class="form-row" style="margin-bottom:14px">
       <div class="form-group">
         <label class="form-label">Nome ricetta</label>
@@ -9944,16 +9974,23 @@ function renderPreview(){
     <div class="card-label"><i class="ti ti-list-details"></i> Ingredienti (${p.ingredients.length})</div>
     ${p.ingredients.map((ing,idx)=>`
     <div class="preview-ing-row">
-      <span class="preview-ing-name">${escAttr(ing.name)}</span>
+      ${daIdea?`<input class="preview-ing-name preview-ing-name-input" type="text" maxlength="120" aria-label="Nome dell'ingrediente" value="${escAttr(ing.name)}" data-idea-ing="${idx}" oninput="ideaPrevNomeIng(${idx},this)">`:`<span class="preview-ing-name">${escAttr(ing.name)}</span>`}
       <input class="preview-ing-qty" type="text" inputmode="decimal" autocomplete="off" value="${escAttr(testoCampoQ(ing))}" placeholder="${tipoQ(ing)==='mancante'?'da indicare':''}" title="Numero, «q.b.» oppure da-a (es. 20-30)" data-prev-ing="${idx}" data-field="qty">
       <select class="preview-ing-unit" data-prev-ing="${idx}" data-field="unit">
         ${!ing.unit?'<option value="" selected>—</option>':UNITS.includes(ing.unit)?'':`<option value="${escAttr(ing.unit)}" selected>${escAttr(ing.unit)}</option>`}${UNITS.map(u=>`<option ${ing.unit===u?'selected':''}>${u}</option>`).join('')}
       </select>
       <span class="preview-ing-pct" style="font-size:11px;color:var(--light);min-width:35px;text-align:right" title="Quota del peso a crudo">${pctPrev(ing,idx)}</span>
-    </div>${notaQ(ing)}`).join('')}
+      ${daIdea?`<button type="button" class="btn btn-outline btn-sm preview-ing-rimuovi" aria-label="Togli l'ingrediente" title="Togli l'ingrediente" onclick="ideaPrevRimuoviIng(${idx})">✕</button>`:''}
+    </div>${daIdea?ideaPrevOrigineHtml(ing,idx):''}${notaQ(ing)}`).join('')}
+    ${daIdea?'<div style="margin:6px 0 4px"><button type="button" class="btn btn-outline btn-sm" id="preview-idea-aggiungi-ing" onclick="ideaPrevAggiungiIng()">+ Aggiungi ingrediente</button></div>':''}
     ${notaPesiPrev?`<div class="preview-weights-note" style="font-size:11px;color:var(--mid);margin-top:6px">${notaPesiPrev}</div>`:''}
     ${notaEsclusiPrev?`<div class="preview-weights-excluded" style="font-size:11px;color:var(--mid);margin-top:4px">${notaEsclusiPrev}</div>`:''}
-    ${p.steps&&p.steps.length?`
+    ${daIdea?`
+    <div class="card-label" style="margin-top:18px"><i class="ti ti-list-numbers"></i> Procedimento</div>
+    <div class="preview-steps preview-steps-idea">
+      ${(p.steps||[]).map((s,i)=>`<div class="preview-step preview-step-idea"><span style="font-weight:600;color:var(--mid);margin-right:6px">${i+1}.</span><textarea rows="2" maxlength="2000" aria-label="Passaggio ${i+1}" data-idea-passo="${i}" oninput="ideaPrevPasso(${i},this)">${escAttr(s)}</textarea><button type="button" class="btn btn-outline btn-sm" aria-label="Togli il passaggio" title="Togli il passaggio" onclick="ideaPrevRimuoviPasso(${i})">✕</button></div>`).join('')}
+      <div><button type="button" class="btn btn-outline btn-sm" id="preview-idea-aggiungi-passo" onclick="ideaPrevAggiungiPasso()">+ Aggiungi passaggio</button></div>
+    </div>`:p.steps&&p.steps.length?`
     <div class="card-label" style="margin-top:18px"><i class="ti ti-list-numbers"></i> Procedimento</div>
     <div class="preview-steps">
       ${p.steps.map((s,i)=>`<div class="preview-step"><span style="font-weight:600;color:var(--mid);margin-right:6px">${i+1}.</span>${escAttr(s)}</div>`).join('')}
@@ -9964,6 +10001,10 @@ function renderPreview(){
     </div>
     <div style="margin-top:12px">${p.subRecipes.map((sr,i)=>renderImportYieldFields(sr.declaredYield,'prev-sr-yield-'+i,'Resa dichiarata di '+escAttr(sr.name||'preparazione '+(i+1)))).join('')}</div>`:''}
 
+    ${daIdea?`<div class="preview-idea-fine" id="preview-idea-fine" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <div class="idee-aiuto">La proposta resta nell'Idea: puoi tornare alla conversazione e prepararla di nuovo quando vuoi. Il salvataggio in una Scheda e l'apertura nel LAB arrivano nel passaggio successivo.</div>
+      <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="btn btn-outline" onclick="tornaAllIdeaDaAnteprima()"><i class="ti ti-arrow-left"></i> Torna all'Idea</button></div>
+    </div>`:`
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
       <div class="card-label" style="margin-bottom:10px"><i class="ti ti-folder"></i> Destinazione</div>
       <div style="display:flex;gap:8px;margin-bottom:${destinazioneEsistente?'12px':'0'}">
@@ -9984,7 +10025,7 @@ function renderPreview(){
       <button class="btn btn-lab" id="btn-save-preview" ${destinazioneEsistente&&!S.loadDestinazioneSchedaId?'disabled':''}>
         <i class="ti ti-flask"></i> ${destinazioneEsistente?'Aggiungi come nuova Ricetta':'Crea Scheda'}
       </button>
-    </div>
+    </div>`}
   </div>`;
 }
 
@@ -11700,6 +11741,14 @@ function bindEvents(){
   });
   const btnBackLoad=document.getElementById('btn-back-load');
   if(btnBackLoad)btnBackLoad.addEventListener('click',()=>{S.loadDestinazione='nuova';S.loadDestinazioneSchedaId=null;S.view='load';render();});
+  // P2-a.2 (blocco 2d): anteprima di una proposta da Idea, modifiche tenute nello stato.
+  if(S.view==='preview'&&anteprimaDaIdea()){
+    document.querySelectorAll('[data-prev-ing]').forEach(el=>{
+      el.addEventListener('input',()=>{el.dataset.cambiato='1';});
+      el.addEventListener('change',()=>{el.dataset.cambiato='1';ideaPrevQuantita(Number(el.dataset.prevIng),el);});
+    });
+    ['prev-name','prev-cat','prev-portions','prev-gpp','prev-yield-qty','prev-yield-unit'].forEach(id=>{const el=document.getElementById(id);if(el)el.addEventListener('input',ideaPrevLeggiCampi);});
+  }
   const btnSavePreview=document.getElementById('btn-save-preview');
   if(btnSavePreview)btnSavePreview.addEventListener('click',()=>{
     // Aggiorna nome e categoria dall'anteprima
@@ -12483,6 +12532,164 @@ function renderIdeaChat(idea){
     </section>`;
 }
 
+// ── Dalla conversazione alla proposta di Ricetta (P2-a.2, blocco 2d) ──
+// «Prepara la Ricetta» chiede al server (ideaProposal) la proposta finale e la apre
+// nell'anteprima GIA' ESISTENTE dell'Import Engine (renderPreview, S.loadPreview),
+// con in piu' provenienza e conferma delle quantita'. Nessun salvataggio qui.
+function ideaPropostaStato(id){if(!S.ideaProposta)S.ideaProposta={};if(!S.ideaProposta[id])S.ideaProposta[id]={carica:false,domanda:null,avviso:null};return S.ideaProposta[id];}
+function ideaPropostaSalvata(idea){return idea&&idea.preview&&idea.preview.tipo==='proposta_michelinai'?idea.preview:null;}
+function ideaPropostaMessaggio(esito){
+  var c=esito&&esito.code;
+  return{sessione:'Sessione scaduta: accedi di nuovo.',rete:'Connessione non riuscita: riprova.',proposta_senza_contenuto:'Per preparare la Ricetta serve almeno uno scambio con MichelinAI o un testo nell\'Idea.',
+    ai_non_disponibile:'MichelinAI non è disponibile in questo momento: riprova.',ai_tempo_scaduto:'MichelinAI non ha risposto in tempo: riprova.',risposta_non_valida:'MichelinAI ha dato una proposta non utilizzabile: riprova.',
+    ai_non_configurata:'MichelinAI non è configurato in questo ambiente.',limite_proposte:'Troppe proposte per questa Idea oggi: riprova domani o rivedi l\'ultima.',limite_giornaliero:'Limite giornaliero di MichelinAI raggiunto: riprova domani.',
+    idea_archiviata:'L\'Idea è archiviata.',idea_trasformata:'L\'Idea è già diventata una Ricetta.'}[c]||'Proposta non disponibile in questo momento: riprova.';
+}
+async function ideaPreparaRicetta(rigenera){
+  var id=ideaIdSicuro(S.ideaAnteprimaId&&S.view==='preview'?S.ideaAnteprimaId:S.ideaAperta);if(!id)return;
+  var idea=ideaTrova(id);if(!idea||idea.status!=='aperta')return;
+  var st=ideaPropostaStato(id);
+  if(st.carica)return; // una sola richiesta alla volta
+  st.carica=true;st.domanda=null;st.avviso=null;render();
+  var corpo={supabaseAction:'ideaProposal',ideaId:id};if(rigenera)corpo.rigenera=true;
+  var esito=await ideeChiama(corpo);
+  st.carica=false;
+  if(esito&&esito.ok&&esito.proposta){
+    if(esito.salvata)ideaAggiornaInElenco(Object.assign({},idea,{preview:esito.proposta,preview_origin:'ai'}));
+    // Stessa proposta gia' aperta in questa sessione: si riapre con le correzioni dello chef.
+    var gen=esito.proposta.base&&esito.proposta.base.generataIl,p=S.loadPreview;
+    if(esito.riutilizzata&&!rigenera&&p&&p.importFonte&&p.importFonte.tipo==='idea'&&p.importFonte.ideaId===id&&gen&&p.importFonte.generataIl===gen){S.ideaAnteprimaId=id;S.view='preview';render();return;}
+    apriAnteprimaDaIdea(idea,esito.proposta,{riutilizzata:!!esito.riutilizzata,salvata:!!esito.salvata});
+    return;
+  }
+  if(esito&&esito.ok&&esito.domanda){st.domanda=esito.domanda;if(S.view==='preview'){S.view='idea';S.ideaAperta=id;}}
+  else st.avviso=ideaPropostaMessaggio(esito);
+  render();
+}
+// Proposta del server -> formato dell'anteprima di importazione (S.loadPreview).
+// Le quantita' di MichelinAI partono NON confermate; quelle dello chef o della fonte no.
+function ideaPropostaInAnteprima(idea,pr){
+  var resa=pr.resa&&pr.resa.qty>0?pr.resa:null;
+  return{
+    name:pr.nome||idea.title||'',category:'',portionsCount:0,gramsPerPortion:0,
+    declaredYield:resa?{qty:String(resa.qty),unit:resa.unit||'',source:'',range:null,toVerify:false}:{qty:'',unit:'',source:'',range:null,toVerify:false},
+    ingredients:(pr.ingredienti||[]).map(function(i,k){
+      var conQuantita=i.qtyKind==='certa'||i.qtyKind==='intervallo';
+      return{id:'ip'+(k+1),name:i.nome,qty:i.qty,unit:i.unit,qtyKind:i.qtyKind,qtyMin:i.qtyMin,qtyMax:i.qtyMax,
+        sourceText:i.evidenza||null,origineQuantita:conQuantita?(i.origine||'ai'):null,quantitaConfermata:!conQuantita||i.origine!=='ai',
+        modificataDaChef:false,nonCoerente:!!i.nonCoerente,propostaOriginale:{qty:i.qty,unit:i.unit,qtyKind:i.qtyKind,qtyMin:i.qtyMin,qtyMax:i.qtyMax}};
+    }),
+    steps:(pr.passi||[]).slice(),subRecipes:[],
+    importFonte:{tipo:'idea',ideaId:idea.id,ideaTitolo:idea.title,scartate:(pr.scartate||[]).slice(),note:pr.note||null,
+      resaOrigine:resa?(resa.origine||'ai'):null,resaEvidenza:resa?resa.evidenza||null:null,generataIl:pr.base&&pr.base.generataIl||null}
+  };
+}
+function apriAnteprimaDaIdea(idea,pr,info){
+  S.loadPreview=ideaPropostaInAnteprima(idea,pr);
+  S.loadPreview.importFonte.riutilizzata=!!(info&&info.riutilizzata);
+  S.loadPreview.importFonte.salvata=info?!!info.salvata:true;
+  S.loadDestinazione='nuova';S.loadDestinazioneSchedaId=null;
+  S.ideaAnteprimaId=idea.id;S.view='preview';
+  render();
+}
+function anteprimaDaIdea(){var p=S.loadPreview;return!!(p&&p.importFonte&&p.importFonte.tipo==='idea');}
+function tornaAllIdeaDaAnteprima(){
+  ideaPrevLeggiCampi();
+  var id=S.loadPreview&&S.loadPreview.importFonte&&S.loadPreview.importFonte.ideaId;
+  if(id&&ideaIdSicuro(id)){S.ideaAperta=id;S.view='idea';render();}else apriIdee();
+}
+// Campi semplici dell'anteprima letti nello stato (cosi' un ridisegno non li perde).
+function ideaPrevLeggiCampi(){
+  if(!anteprimaDaIdea())return;
+  var p=S.loadPreview,v=function(id){var e=document.getElementById(id);return e?e.value:null;};
+  if(v('prev-name')!==null)p.name=v('prev-name');
+  if(v('prev-cat')!==null)p.category=v('prev-cat');
+  if(v('prev-portions')!==null)p.portionsCount=v('prev-portions');
+  if(v('prev-gpp')!==null)p.gramsPerPortion=v('prev-gpp');
+  if(v('prev-yield-qty')!==null)p.declaredYield=Object.assign({},p.declaredYield,{qty:v('prev-yield-qty'),unit:v('prev-yield-unit')||''});
+  p.ingredients.forEach(function(_,idx){ideaPrevApplicaQuantita(idx,false);});
+}
+function ideaPrevIng(idx){return anteprimaDaIdea()?S.loadPreview.ingredients[idx]||null:null;}
+function ideaPrevNomeIng(idx,el){var i=ideaPrevIng(idx);if(i)i.name=el.value.slice(0,120);}
+// Quantita' o unita' cambiate dallo chef: stesse regole del salvataggio dell'anteprima;
+// una quantita' scritta dallo chef e' sua (confermata), la proposta resta visibile.
+// Si applicano solo i campi davvero toccati (data-cambiato), anche prima di ogni ridisegno.
+function ideaPrevApplicaQuantita(idx,avvisa){
+  var i=ideaPrevIng(idx);if(!i)return false;
+  var q=document.querySelector('[data-prev-ing="'+idx+'"][data-field="qty"]'),u=document.querySelector('[data-prev-ing="'+idx+'"][data-field="unit"]');
+  if(!(q&&q.dataset.cambiato)&&!(u&&u.dataset.cambiato))return false;
+  var unita=u?u.value:(i.unit||'');
+  var t=interpretaTestoQuantita(q?q.value:'');
+  if(t.kind==='non_valido'){if(avvisa)toast('«'+(i.name||'ingrediente')+'»: quantità non valida. Scrivi un numero, «q.b.» oppure un intervallo (es. 20-30).','ti-alert-circle');return false;}
+  if(t.kind==='numero'&&t.qty>0){i.qty=t.qty;i.qtyKind='certa';i.qtyMin=null;i.qtyMax=null;i.unit=unita||null;}
+  else if(t.kind==='intervallo'){i.qty=null;i.qtyKind='intervallo';i.qtyMin=t.min;i.qtyMax=t.max;i.unit=unita||null;}
+  else if(t.kind==='variabile'){i.qty=null;i.qtyKind='variabile';i.qtyMin=null;i.qtyMax=null;i.unit=unita||null;}
+  else{i.qty=null;i.qtyKind='mancante';i.qtyMin=null;i.qtyMax=null;i.unit=unita||null;}
+  var conQuantita=i.qtyKind==='certa'||i.qtyKind==='intervallo';
+  i.modificataDaChef=true;i.origineQuantita=conQuantita?'chef':null;i.quantitaConfermata=true;
+  if(q)delete q.dataset.cambiato;if(u)delete u.dataset.cambiato;
+  return true;
+}
+function ideaPrevQuantita(idx,el){
+  if(el&&!el.isConnected)return; // campo gia' sostituito da un ridisegno: il valore e' stato letto prima
+  if(!ideaPrevApplicaQuantita(idx,true))return;
+  ideaPrevLeggiCampi();
+  setTimeout(function(){if(S.view==='preview'&&anteprimaDaIdea())render();},0); // mai un ridisegno dentro l'evento
+}
+function ideaPrevConferma(idx,si){var i=ideaPrevIng(idx);if(!i||i.origineQuantita!=='ai')return;ideaPrevLeggiCampi();i.quantitaConfermata=!!si;render();}
+function ideaPrevConfermaTutte(){
+  if(!anteprimaDaIdea())return;ideaPrevLeggiCampi();
+  S.loadPreview.ingredients.forEach(function(i){if(i.origineQuantita==='ai')i.quantitaConfermata=true;});render();
+}
+function ideaPrevRimuoviIng(idx){if(!anteprimaDaIdea())return;ideaPrevLeggiCampi();S.loadPreview.ingredients.splice(idx,1);render();}
+function ideaPrevAggiungiIng(){
+  if(!anteprimaDaIdea())return;ideaPrevLeggiCampi();
+  S.loadPreview.ingredients.push({id:'ip'+Date.now(),name:'',qty:null,unit:null,qtyKind:'mancante',qtyMin:null,qtyMax:null,sourceText:null,origineQuantita:null,quantitaConfermata:true,modificataDaChef:true,nonCoerente:false,propostaOriginale:null});
+  render();
+}
+function ideaPrevPasso(i,el){if(anteprimaDaIdea()&&S.loadPreview.steps[i]!=null)S.loadPreview.steps[i]=el.value.slice(0,2000);}
+function ideaPrevAggiungiPasso(){if(!anteprimaDaIdea())return;ideaPrevLeggiCampi();S.loadPreview.steps.push('');render();}
+function ideaPrevRimuoviPasso(i){if(!anteprimaDaIdea())return;ideaPrevLeggiCampi();S.loadPreview.steps.splice(i,1);render();}
+function ideaPrevDaConfermare(){return anteprimaDaIdea()?S.loadPreview.ingredients.filter(function(i){return i.origineQuantita==='ai'&&!i.quantitaConfermata;}).length:0;}
+function ideaPrevQtyTesto(o){
+  if(!o)return'';
+  if(o.qtyKind==='certa')return formatQtyDisplay(o.qty)+(o.unit?' '+o.unit:'');
+  if(o.qtyKind==='intervallo')return formatQtyDisplay(o.qtyMin)+'–'+formatQtyDisplay(o.qtyMax)+(o.unit?' '+o.unit:'');
+  if(o.qtyKind==='variabile')return'q.b.';
+  return'da indicare';
+}
+// Riga della provenienza sotto un ingrediente dell'anteprima (solo da Idea).
+function ideaPrevOrigineHtml(ing,idx){
+  var o=ing.origineQuantita,h='';
+  if(ing.modificataDaChef&&ing.propostaOriginale&&(ing.propostaOriginale.qtyKind==='certa'||ing.propostaOriginale.qtyKind==='intervallo'))
+    h=`<span class="idea-orig idea-orig-chef">Modificata da te</span> <span class="idea-orig-nota">proposta di MichelinAI: ${escAttr(ideaPrevQtyTesto(ing.propostaOriginale))}</span>`;
+  else if(o==='chef')h=`<span class="idea-orig idea-orig-chef">Indicata da te</span>${ing.sourceText?` <span class="idea-orig-nota">«${escAttr(ing.sourceText)}»</span>`:''}`;
+  else if(o==='fonte')h=`<span class="idea-orig idea-orig-fonte">Dalla fonte</span>${ing.sourceText?` <span class="idea-orig-nota">«${escAttr(ing.sourceText)}»</span>`:''}`;
+  else if(o==='ai')h=`<span class="idea-orig idea-orig-ai${ing.quantitaConfermata?' confermata':''}">${ing.quantitaConfermata?'Proposta di MichelinAI · confermata':'Proposta di MichelinAI · da confermare'}</span>
+    <label class="idea-orig-conferma"><input type="checkbox" data-idea-conferma="${idx}" ${ing.quantitaConfermata?'checked':''} onchange="ideaPrevConferma(${idx},this.checked)"> Confermo questa quantità</label>`;
+  else if(ing.nonCoerente)h=`<span class="idea-orig idea-orig-ai">La quantità proposta da MichelinAI non era coerente: da indicare</span>`;
+  return h?`<div class="idea-prev-origine" data-origine="${escAttr(o||'')}">${h}</div>`:'';
+}
+
+function renderIdeaRicetta(idea){
+  var id=ideaIdSicuro(idea.id);
+  if(idea.status!=='aperta')return'';
+  var c=ideaChatStato(id),st=ideaPropostaStato(id),salvata=ideaPropostaSalvata(idea);
+  var conversazione=c.turni.some(function(t){return t.status==='completato';});
+  if(!conversazione&&!idea.source_text&&!salvata)return'';
+  var occupata=st.carica||!!c.invio||c.stato!=='pronto';
+  return`<section class="d3-card idee-card idee-ricetta" id="idea-ricetta" aria-labelledby="idea-sez-ricetta">
+      <div class="d3-sez-titolo" id="idea-sez-ricetta">Dalla conversazione alla Ricetta</div>
+      <div class="idee-aiuto">Quando hai deciso, MichelinAI ricostruisce la proposta finale (titolo, ingredienti, quantità, procedimento) dalle tue scelte più recenti. La controlli e la correggi prima di qualunque salvataggio.</div>
+      ${st.domanda?`<div class="idee-avviso idee-ricetta-domanda" id="idea-ricetta-domanda" role="status"><div><strong>Prima di preparare la Ricetta, MichelinAI chiede:</strong> ${escAttr(st.domanda)}</div><div class="idee-aiuto">Rispondi nella conversazione, poi prepara di nuovo la Ricetta.</div></div>`:''}
+      ${st.avviso?`<div class="idee-errore" id="idea-ricetta-avviso" role="alert">${escAttr(st.avviso)}</div>`:''}
+      <div class="d3-riga-azioni">
+        <button class="d3-btn d3-btn-ink" id="idea-prepara-ricetta" onclick="ideaPreparaRicetta()" ${occupata?'disabled':''}>${st.carica?'MichelinAI sta preparando la proposta…':(salvata?'Prepara la Ricetta (aggiornata)':'Prepara la Ricetta')}</button>
+        ${salvata&&!st.carica?`<span class="idee-aiuto" id="idea-ricetta-ultima">Ultima proposta: ${escAttr(ideaDataOra(salvata.base&&salvata.base.generataIl))}. Se la conversazione non è cambiata si riapre senza una nuova richiesta a MichelinAI.</span>`:''}
+      </div>
+    </section>`;
+}
+
 function renderIdea(){
   var s=ideeStato(),id=ideaIdSicuro(S.ideaAperta),idea=id?ideaTrova(id):null;
   var crumb=`<div class="d3-crumb"><button onclick="S.view='app-home';render()">Home</button> › <button onclick="apriIdee()">Idee</button> ›</div>`;
@@ -12534,6 +12741,7 @@ function renderIdea(){
       ${fonte||'<div class="idee-aiuto">Nessun testo.</div>'}
     </section>
     ${renderIdeaChat(idea)}
+    ${renderIdeaRicetta(idea)}
     <section class="d3-card idee-card" aria-labelledby="idea-sez-note">
       <div class="d3-sez-titolo" id="idea-sez-note">Note</div>
       ${note}
@@ -12613,7 +12821,7 @@ function d3SezioneNav(){
   var v=S.view;
   if(v==='recipe')return S.mode==='lab'?'lab':'produzione';
   if(v==='lab-globale')return'lab';
-  if(v==='idee'||v==='idea'||v==='idea-nuova')return'idee';
+  if(v==='idee'||v==='idea'||v==='idea-nuova'||(v==='preview'&&anteprimaDaIdea()))return'idee';
   if(v==='attive'||v==='produzione-guidata'||v==='sessione-operativa'||v==='storico-produzioni')return'produzione';
   if(v==='home'||v==='recipes-all'||v==='ricetta-madre'||v==='ricetta-madre-v2'||v==='confronto'||v==='load'||v==='preview')return'schede';
   return'nessuna';

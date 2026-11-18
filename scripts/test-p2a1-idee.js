@@ -252,7 +252,7 @@ const ANTEPRIMA_NORMALIZZATA = {
     });
     await test('B4. vincoli del database (difesa anche senza il server): provenienza, coerenza, limiti, formato id', async () => {
       for (const [c, v] of [[',', ",'video'"], [',', ",'link'"], [',source_url', ",'link','javascript:alert(1)'"], [',source_url', ",'link','ftp://x.test'"], [',', ",'testo'"], [',source_text', ",'appunto',''"],
-        [',source_text,source_url', ",'appunto','a','https://x.test'"], [',source_text,preview,preview_origin', ",'appunto','a','{}','ai'"], [',source_url,preview', ",'link','https://x.test','{}'"],
+        [',source_text,source_url', ",'appunto','a','https://x.test'"], [',source_text,preview,preview_origin', ",'appunto','a','{}','strutturata'"] /* 0015: un appunto ammette solo una proposta di origine ai */, [',source_url,preview', ",'link','https://x.test','{}'"],
         [',source_url,preview_origin', ",'link','https://x.test','ai'"], [',source_url,preview,preview_origin', ",'link','https://x.test','[]','ai'"],
         [',source_text', ",'testo','" + 'x'.repeat(20001) + "'"], [',source_text,notes', ",'appunto','a','" + 'x'.repeat(5001) + "'"], [',source_text,status', ",'appunto','a','analizzata'"],
         [',source_text,linked_variant_id', ",'appunto','a','variante_inesistente'"]]) {
