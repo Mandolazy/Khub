@@ -415,24 +415,31 @@ function makeClient(handler, opts = {}) {
     assert.deepStrictEqual(c2.S.m2TurnsByVariant.v1.turns.map(t => t.question), ['turno uno', 'turno due']);
   });
 
-  await test('15+16: payload M2 senza cronologia; una sola chiamata Anthropic per invio, zero per load/salvataggio/retry', async () => {
+  // P2: la cronologia della STESSA Ricetta entra nel payload M2 come contesto
+  // (prima il contratto era "payload senza cronologia"). Restano: una sola
+  // chiamata Anthropic per invio, zero per load/salvataggio/retry, e il
+  // ramo m2 del server non legge mai m2_turns dal DB.
+  await test('15+16: payload M2 con gli scambi precedenti di questa Ricetta (P2); una sola chiamata Anthropic per invio, zero per load/salvataggio/retry', async () => {
     const fake = freshDb();
     const c = makeClient(handler);
     await ask(c, 'DOMANDA-UNO-UNICA');
     await ask(c, 'DOMANDA-DUE');
     assert.strictEqual(c.anthropicCalls.length, 2);
-    const secondo = JSON.stringify(c.anthropicCalls[1]);
-    assert.doesNotMatch(secondo, /DOMANDA-UNO-UNICA/, 'la domanda precedente non arriva al modello');
-    assert.doesNotMatch(secondo, /Risposta di MichelinAI/, 'la risposta precedente non arriva al modello');
-    assert.deepStrictEqual(Object.keys(c.anthropicCalls[1]).sort(), ['criteria', 'intention', 'l2', 'l3', 'message', 'mode', 'recipe', 'variant']);
-    const payload = c.api.costruisciPayloadM2('r1', 'x', []);
-    assert.doesNotMatch(JSON.stringify(payload), /DOMANDA-UNO-UNICA|m2t/);
-    assert.doesNotMatch(extractFunction('function costruisciPayloadM2(recipeId, message, classification)'), /m2Turns|m2_turns/);
+    const primo = c.anthropicCalls[0], secondo = c.anthropicCalls[1];
+    assert.deepStrictEqual(primo.history, [], 'primo turno: nessuno scambio precedente');
+    assert.strictEqual(secondo.history.length, 1, 'secondo turno: lo scambio precedente');
+    assert.strictEqual(secondo.history[0].question, 'DOMANDA-UNO-UNICA');
+    assert.match(secondo.history[0].response, /Risposta di MichelinAI/);
+    assert.strictEqual(secondo.message, 'DOMANDA-DUE', 'la domanda attuale resta il messaggio del turno');
+    assert.deepStrictEqual(Object.keys(secondo).sort(), ['criteria', 'history', 'intention', 'l2', 'l3', 'message', 'mode', 'recipe', 'variant']);
+    assert.deepStrictEqual(Object.keys(secondo.history[0]).sort(), ['question', 'response'], 'solo domanda e risposta: nessun id o metadato del turno');
+    assert.doesNotMatch(JSON.stringify(secondo), /m2t/, 'nessun id di turno inviato');
+    assert.match(extractFunction('function costruisciPayloadM2(recipeId, message, classification)'), /S\.m2TurnsByVariant\[v\.id\]/, 'solo la cronologia della Ricetta corrente');
     const c2 = makeClient(handler);
     await c2.api.loadM2Turns('v1');
     await c2.api.riprovaSalvataggioTurnoM2('v1', c2.S.m2TurnsByVariant.v1.turns[0].id);
     assert.strictEqual(c2.anthropicCalls.length, 0);
-    assert.doesNotMatch(chatSrc.slice(chatSrc.indexOf("body.mode === 'm2'"), chatSrc.indexOf('// Proxy Anthropic legacy')), /m2_turns|history/, 'il ramo m2 del server non legge la cronologia');
+    assert.doesNotMatch(chatSrc.slice(chatSrc.indexOf("body.mode === 'm2'"), chatSrc.indexOf('// Proxy Anthropic legacy')), /m2_turns|history/, 'il ramo m2 del server non legge la cronologia dal DB');
   });
 
   console.log('');

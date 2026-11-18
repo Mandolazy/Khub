@@ -45,14 +45,14 @@ function parseM1Response(text) {
   const idx = text.indexOf(marker);
   if (idx === -1) throw new Error('Blocco osservazioni mancante nella risposta');
   const userText = text.slice(0, idx).trim();
-  if (!userText) throw new Error('Lettura del Primo Consulto vuota');
+  if (!userText) throw new Error('Lettura del Consulto vuota');
   let jsonPart = text.slice(idx + marker.length).trim();
   jsonPart = jsonPart.replace(/```json|```/g, '').trim();
   let parsed;
   try { parsed = JSON.parse(jsonPart); } catch (e) { throw new Error("Blocco osservazioni non e'JSON valido"); }
   if (!parsed || !Array.isArray(parsed.observations)) throw new Error('Formato osservazioni non valido');
+  // P2: zero osservazioni e' un esito valido (nessuna criticita').
   const validObs = parsed.observations.filter(o => o && typeof o.content === 'string' && o.content.trim());
-  if (validObs.length === 0) throw new Error('Nessuna osservazione valida prodotta');
   return { userText, validObs };
 }
 
@@ -95,7 +95,7 @@ test('marcatore osservazioni mancante viene rifiutato', () => {
 
 test('testo user-facing vuoto (marcatore in testa) viene rifiutato', () => {
   const text = '===M1_OBSERVATIONS===\n{"observations":[{"label":"x","content":"y"}]}';
-  assert.throws(() => parseM1Response(text), /Lettura del Primo Consulto vuota/);
+  assert.throws(() => parseM1Response(text), /Lettura del Consulto vuota/);
 });
 
 test('JSON malformato dopo il marcatore viene rifiutato', () => {
@@ -108,14 +108,15 @@ test('observations non-array viene rifiutato', () => {
   assert.throws(() => parseM1Response(text), /Formato osservazioni non valido/);
 });
 
-test('zero osservazioni valide (array vuoto) viene rifiutato', () => {
+test('P2: zero osservazioni (array vuoto) e\' un Consulto valido: testo presente, nessuna osservazione', () => {
   const text = 'Testo.\n===M1_OBSERVATIONS===\n{"observations":[]}';
-  assert.throws(() => parseM1Response(text), /Nessuna osservazione valida prodotta/);
+  assert.deepStrictEqual(parseM1Response(text), { userText: 'Testo.', validObs: [] });
 });
 
-test('osservazioni senza content valido vengono filtrate; se restano zero, rifiutato', () => {
+test('osservazioni senza content valido vengono filtrate; se restano zero, Consulto valido senza osservazioni (P2)', () => {
   const text = 'Testo.\n===M1_OBSERVATIONS===\n{"observations":[{"label":"x"},{"content":""},{"content":123}]}';
-  assert.throws(() => parseM1Response(text), /Nessuna osservazione valida prodotta/);
+  assert.deepStrictEqual(parseM1Response(text).validObs, []);
+  assert.throws(() => parseM1Response('\n===M1_OBSERVATIONS===\n{"observations":[]}'), /Lettura del Consulto vuota/, 'il testo del Consulto resta obbligatorio');
 });
 
 test('L2 costruiti da osservazioni valide hanno i campi deterministici corretti (gate M1)', () => {
@@ -227,9 +228,13 @@ test("api/chat.js: gli altri supabaseAction (families, load, update, delete) e f
   });
 });
 
-test("khub_mvp.html: gate 'gia' avvenuto' (D1) basato su L2 provenance m1, nessun nuovo flag DB", () => {
+test("khub_mvp.html (P2): Consulto ripetibile — nessun gate 'gia' avvenuto' in runM1; 'eseguito' da testo o L2 m1, nessun nuovo flag DB", () => {
   assert.match(html, /function hasM1\(v\)\{return\(\(v&&v\.l2Items\)\|\|\[\]\)\.some\(x=>x\.provenanceType==='m1'\)/);
-  assert.match(html, /if\(hasM1\(v\)\)return;/);
+  assert.match(html, /function hasConsulto\(v\)\{return !!\(v&&v\.m1ReadingText\)\|\|hasM1\(v\);\}/);
+  const fnBody = html.slice(html.indexOf('async function runM1'), html.indexOf('async function runPrimoConsulto'));
+  assert.doesNotMatch(fnBody, /if\(hasM1\(v\)\)return;/, 'il Consulto puo\' essere richiesto piu\' volte');
+  assert.doesNotMatch(fnBody, /hasConsulto\(v\)\)return/);
+  assert.match(fnBody, /if\(S\.m1Loading\)return;/, 'resta il blocco del doppio clic');
 });
 
 test("khub_mvp.html: M1 disponibile solo su Bozze LAB (runM1 opera su curLab, mai su validatedVariants)", () => {
@@ -307,12 +312,13 @@ test('FIX 1: runM1() salva m1ReadingText NELLA STESSA upLab/save degli L2 (mai u
   assert.strictEqual(saveCalls, 1, 'atteso un solo saveToSupabase() in runM1, trovati ' + saveCalls);
 });
 
-test('FIX 1: rollback su save failure azzera m1ReadingText insieme agli L2 aggiunti (nessuna prosa orfana)', () => {
+test('FIX 1 (P2): rollback su save failure ripristina il testo del Consulto precedente insieme alla rimozione degli L2 aggiunti (nessuna prosa orfana)', () => {
   const fnBody = html.slice(html.indexOf('async function runM1'), html.indexOf('async function runPrimoConsulto'));
+  assert.match(fnBody, /const testoPrecedente=labOra\.m1ReadingText\|\|null;/);
   assert.match(
     fnBody,
-    /upLab\(recipeId,lab=>\(\{\.\.\.lab,l2Items:\(lab\.l2Items\|\|\[\]\)\.filter\(x=>!newL2\.some\(n=>n\.id===x\.id\)\),m1ReadingText:null\}\)\);/,
-    'il rollback deve azzerare m1ReadingText nella stessa chiamata che rimuove gli L2 appena aggiunti'
+    /upLab\(recipeId,lab=>\(\{\.\.\.lab,l2Items:\(lab\.l2Items\|\|\[\]\)\.filter\(x=>!newL2\.some\(n=>n\.id===x\.id\)\),m1ReadingText:testoPrecedente\}\)\);/,
+    'il rollback deve ripristinare il testo precedente nella stessa chiamata che rimuove gli L2 appena aggiunti'
   );
 });
 
@@ -340,7 +346,7 @@ test('FIX 2: hasM1() resta invariato — basato SOLO sulla presenza di provenanc
 
 test('FIX 2: il render del Primo Consulto divide le osservazioni m1 in attuali (unengaged/open/affected) e risolte/evolute (resolved/superseded)', () => {
   const idx = html.indexOf("labSectionHeader(recipe.id,'primoConsulto'");
-  const block = html.slice(idx, idx + 4000);
+  const block = html.slice(idx, idx + 6000); // P2: il pannello contiene ora anche il pulsante "Nuovo Consulto"
   assert.match(block, /osservazioniAttuali=osservazioniM1\.filter\(x=>\['unengaged','open','affected'\]\.includes\(x\.operationalState\)\)/);
   assert.match(block, /osservazioniRisolte=osservazioniM1\.filter\(x=>\['resolved','superseded'\]\.includes\(x\.operationalState\)\)/);
   assert.match(block, /Risolte \/ evolute/, 'la sezione risolte/evolute deve essere visivamente distinta, non assente');
@@ -350,7 +356,7 @@ test('khub_mvp.html: M1 non completato se saveToSupabase() fallisce (rollback es
   const fnBody = html.slice(html.indexOf('async function runM1'), html.indexOf('async function runPrimoConsulto'));
   assert.match(fnBody, /const ok=await saveToSupabase\(fresh\);/);
   assert.match(fnBody, /if\(!ok\)\{/);
-  assert.match(fnBody, /throw new Error\('Salvataggio delle osservazioni non riuscito'\)/);
+  assert.match(fnBody, /throw new Error\('Salvataggio del Consulto non riuscito'\)/);
 });
 
 test('khub_mvp.html: saveToSupabase() restituisce true/false, cosi\' runM1() puo\' verificare il gate 4', () => {
@@ -371,7 +377,7 @@ test('khub_mvp.html: pannello "Primo Consulto" nel LAB legge le osservazioni da 
   const idx = html.indexOf("labSectionHeader(recipe.id,'primoConsulto'");
   assert.ok(idx !== -1, 'sezione "Primo Consulto" non trovata nel render del LAB');
   const block = html.slice(idx, idx + 3000);
-  assert.match(block, /hasM1\(v\)/);
+  assert.match(block, /const m1Fatto=hasConsulto\(v\);/, 'P2: Consulto eseguito = testo o L2 m1 (hasConsulto usa hasM1)');
   assert.match(block, /osservazioniM1=\(v\.l2Items\|\|\[\]\)\.filter\(x=>x\.provenanceType==='m1'\)/);
 });
 

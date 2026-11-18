@@ -345,18 +345,21 @@ function clientMain(fetchImpl, nomi) {
   const labOf = c => { const r = rec(c); r.currentLabIdx = r.labVersions.findIndex(v => v.id === 'lvB'); return r; };
   console.log('Anteprima Direzione 3 (solo presentazione)');
 
+  // P2: il Consulto e' ripetibile, la sezione si chiama "Consulto" (prima "Primo Consulto").
+  // Unica differenza ammessa nel LAB classico chiuso: quel titolo, e deve esserci.
+  const titoloP2 = h => { assert.ok(h.includes('<i class="ti ti-sparkles"></i> Consulto\n'), 'titolo P2 presente'); return h.replace('<i class="ti ti-sparkles"></i> Consulto\n', '<i class="ti ti-sparkles"></i> Primo Consulto\n'); };
   await test('P1. grafica classica invariata: LAB e Scheda classici (?ui=classic) identici a main', async () => {
     assert.ok(baseHtml, 'storia git con ' + BASE + ' necessaria');
     const c = await setup(); const cm = clientMain(clientFetch, ['renderLabRecipe', 'renderRicettaMadreV2']);
     cm.S.recipes = clone(c.S.recipes); cm.S.selectedId = 'rB';
     for (const k of [c, cm]) { k.S.mode = 'lab'; k.S.view = 'recipe'; labOf(k); }
-    assert.strictEqual(c.renderLabRecipe(rec(c)), cm.renderLabRecipe(rec(cm)), 'LAB classico');
+    assert.strictEqual(titoloP2(c.renderLabRecipe(rec(c))), cm.renderLabRecipe(rec(cm)), 'LAB classico');
     for (const k of [c, cm]) k.S.view = 'ricetta-madre-v2';
     assert.strictEqual(c.renderRicettaMadreV2(rec(c)), cm.renderRicettaMadreV2(rec(cm)), 'Scheda classica');
     const k = await setup({ search: '?ui=classic' }); k.initUiD3();
     assert.ok(k.S.uiD3 === false && !k.bodyClasses.has('ui-d3'), 'grafica classica con ?ui=classic');
     k.S.mode = 'lab'; k.S.view = 'recipe'; labOf(k);
-    assert.strictEqual(k.renderLabRecipe(rec(k)), cm.renderLabRecipe(rec(cm)), 'LAB classico con ?ui=classic identico a main');
+    assert.strictEqual(titoloP2(k.renderLabRecipe(rec(k))), cm.renderLabRecipe(rec(cm)), 'LAB classico con ?ui=classic identico a main');
   });
 
   await test('P2. motore preservato: LAB, scaling, rese, conversioni, Sessioni, salvataggio e MichelinAI identici a main; cambiano solo le funzioni di presentazione', async () => {
@@ -372,7 +375,9 @@ function clientMain(fetchImpl, nomi) {
       // Fase 1A: Storico con selettore Elenco | Per ricetta e filtro sulle Ricette della Scheda (solo presentazione; motore MS17a invariato).
       'renderStoricoProduzioni',
       // P1: contenuti AI codificati come testo e nessun "Conferma" per osservazioni gia' confermate (vedi controllo puntuale sotto).
-      'renderContenutoL2Umano', 'renderMichelinAIPendingActions'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
+      'renderContenutoL2Umano', 'renderMichelinAIPendingActions',
+      // P2: continuita' di MichelinAI (cronologia della Ricetta nel payload) e Consulto ripetibile (verificati da test-p2-continuita-consulto.js).
+      'costruisciPayloadM2', 'inviaMichelinAI', 'runM1', 'ensureLabSectionsOpen'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
     assert.deepStrictEqual(rimosse, [], 'nessuna funzione rimossa');
     for (const n of ['computeFormulationWeights', 'deriveYieldPerUnit', 'computeLabRounding', 'applyLabRound', 'undoLabRound', 'computeSessionScaling', 'createProductionSession', 'buildValidatedVariantPayload', 'onValidate', 'confirmValidate', 'rendiAttivaPronta', 'riapriProntaInLab', 'onLabDeclaredYield', 'onIngQty', 'onStepText'])
       assert.ok(n in b && a[n] === b[n], 'invariata: ' + n);
@@ -385,7 +390,10 @@ function clientMain(fetchImpl, nomi) {
       renderMichelinAIPendingActions: f => f.replace("    // P1: un'osservazione gia' confermata dallo chef non ha nulla da\n    // \"Confermare\": un suo aggiornamento rifiutato (es. un declassamento\n    // proposto da MichelinAI) resta nel report, mai un'azione ambigua qui.\n    if(item.decisionState==='confirmed')return'';\n", ''),
     };
     for (const n of Object.keys(P1_REVERT)) assert.notStrictEqual(b[n], a[n], 'P1 presente: ' + n);
-    michelin.forEach(n => assert.strictEqual(P1_REVERT[n] ? P1_REVERT[n](b[n]) : b[n], a[n], 'MichelinAI invariato: ' + n));
+    // P2: le uniche funzioni MichelinAI che cambiano sono queste tre (e devono cambiare); tutte le altre restano identiche a main.
+    const P2_MICHELIN = ['costruisciPayloadM2', 'inviaMichelinAI', 'runM1'];
+    for (const n of P2_MICHELIN) assert.ok(michelin.includes(n) && b[n] !== a[n], 'P2 presente: ' + n);
+    michelin.filter(n => !P2_MICHELIN.includes(n)).forEach(n => assert.strictEqual(P1_REVERT[n] ? P1_REVERT[n](b[n]) : b[n], a[n], 'MichelinAI invariato: ' + n));
     for (const [m, h] of Object.entries(PROTETTE)) assert.strictEqual(sha(extractFunction(m)), h, 'cambiato: ' + m);
     const git = require('child_process').execSync('git diff --name-only ' + BASE + ' -- middleware.js vercel.json .vercelignore', { cwd: ROOT, encoding: 'utf8' }).trim();
     assert.strictEqual(git, '', 'autenticazione e configurazione invariate');

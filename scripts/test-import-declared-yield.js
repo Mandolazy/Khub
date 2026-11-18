@@ -203,8 +203,8 @@ const PROTETTE = {
   "function computeSessionScaling(input)": "ddfc1febb5010cdc",
   "async function createProductionSession(preparedInput)": "185ca85dcee49397",
   "function buildSessionSnapshotV1(meta,computed)": "1fd7615c172e0ce2",
-  "function costruisciPayloadM2(recipeId, message, classification)": "9850def5ee757a1c",
-  "async function runM1(recipeId)": "c65f22895bf0d242",
+  "function costruisciPayloadM2(recipeId, message, classification)": "27429c2795d7b5ee" /* P2: cronologia della Ricetta nel payload */,
+  "async function runM1(recipeId)": "b10ed736cca74040" /* P2: Consulto ripetibile */,
   "function importTargetValue(field,value)": "4043252f5e784f70",
   "function validateLabProductionTarget(field,value)": "fefbd04eed656496",
 };

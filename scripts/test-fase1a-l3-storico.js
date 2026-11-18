@@ -394,9 +394,12 @@ test('K1. Funzioni di motore, salvataggio, MichelinAI e calcoli identiche a f13b
   const nuove = Object.keys(b).filter(k => !(k in a)).sort();
   assert.deepStrictEqual(cambiate, ['loadFromSupabase', 'renderRicettaMadreV2', 'renderSchedaD3', 'renderStoricoProduzioni',
     /* P1: escaping dei contenuti AI (renderContenutoL2Umano, pannello Consulto in renderLabRecipe) e nessun "Conferma" per osservazioni confermate */
-    'renderContenutoL2Umano', 'renderLabRecipe', 'renderMichelinAIPendingActions'].sort());
+    'renderContenutoL2Umano', 'renderLabRecipe', 'renderMichelinAIPendingActions',
+    /* P2: continuita' di MichelinAI e Consulto ripetibile (test-p2-continuita-consulto.js) */
+    'costruisciPayloadM2', 'ensureLabSectionsOpen', 'inviaMichelinAI', 'runM1'].sort());
   assert.deepStrictEqual(rimosse, []);
-  assert.deepStrictEqual(nuove, ['apriProduzioniScheda', 'azzeraFiltriStoricoConScheda', 'groupHistoryByRecipeVersion', 'historySchedaDiRicetta', 'historySchedaVariantIds', 'l3ConfermaTesto',
+  assert.deepStrictEqual(nuove, ['apriProduzioniScheda', 'azzeraFiltriStoricoConScheda', 'groupHistoryByRecipeVersion',
+    /* P2: Consulto eseguito = testo o osservazioni m1 */ 'hasConsulto', 'historySchedaDiRicetta', 'historySchedaVariantIds', 'l3ConfermaTesto',
     'l3DataTesto', 'l3Html', 'l3ProvenienzaTesto', 'l3TestoValore', 'l3TrovaOrigine', 'renderConoscenzeConsolidate', 'renderHistoryPerRicetta',
     'renderHistoryRicettaBlock', 'setHistoryView', 'toggleConoscenzeConsolidate', 'toggleDettaglioConoscenza', 'togliFiltroSchedaStorico']);
 });

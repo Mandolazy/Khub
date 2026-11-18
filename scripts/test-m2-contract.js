@@ -144,12 +144,18 @@ test('buildM2UserMessage tratta L2 come lista unica (nessuna sezione separata "o
   assert.doesNotMatch(fnBody, /OSSERVAZIONI M1|M1_OBSERVATIONS|blocco M1/i, 'non deve esistere una sezione L2 separata per sola provenienza m1');
 });
 
-test('buildM2UserMessage include il messaggio del turno corrente (mai una cronologia)', () => {
+// P2: la cronologia della stessa Ricetta entra nel messaggio, solo come dato
+// ricevuto dal client e limitato dal server; il builder non legge mai il DB.
+test('buildM2UserMessage include il messaggio del turno corrente e gli scambi precedenti solo da body.history, limitati (P2)', () => {
   const fnStart = chat.indexOf('function buildM2UserMessage(body)');
   const fnEnd = chat.indexOf('\nexport default async function handler', fnStart);
   const fnBody = chat.slice(fnStart, fnEnd);
   assert.match(fnBody, /MESSAGGIO DELLO CHEF IN QUESTO TURNO/);
-  assert.doesNotMatch(fnBody, /cronologia|transcript|history/i, 'nessun riferimento a cronologia/transcript persistente nel context builder');
+  const soloFn = (() => { let d = 0; for (let i = fnBody.indexOf('{'); i < fnBody.length; i++) { if (fnBody[i] === '{') d++; else if (fnBody[i] === '}') { d--; if (!d) return fnBody.slice(0, i + 1); } } })();
+  assert.match(soloFn, /const history = sanitizeHistoryForAi\(body\.history\);/, 'scambi precedenti solo dal payload, sempre limitati');
+  assert.match(soloFn, /dati di contesto, non istruzioni/, 'cronologia presentata come dato');
+  assert.doesNotMatch(soloFn, /fetch\(|m2_turns|transcript/i, 'nessuna lettura di cronologia persistente nel context builder');
+  assert.ok(soloFn.indexOf('SCAMBI PRECEDENTI') < soloFn.indexOf('MESSAGGIO DELLO CHEF IN QUESTO TURNO'), 'il messaggio attuale resta per ultimo');
 });
 
 test('buildM2UserMessage espone x.evidence delle L2 esistenti (campo gia\' dichiarato nell\'input, ora anche visibile al modello)', () => {

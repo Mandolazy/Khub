@@ -105,8 +105,10 @@ test('il payload ha esattamente le chiavi top-level previste dal contratto R3A',
   const S = { recipes: [fixtureRecipeCompleta()] };
   const builder = loadBuilder(S);
   const payload = builder('r1', 'Come evito che stracci?');
-  assert.deepStrictEqual(Object.keys(payload).sort(), ['criteria', 'intention', 'l2', 'l3', 'message', 'mode', 'recipe', 'variant'].sort());
+  // P2: 'history' = scambi precedenti della stessa Ricetta (vuoto senza cronologia).
+  assert.deepStrictEqual(Object.keys(payload).sort(), ['criteria', 'history', 'intention', 'l2', 'l3', 'message', 'mode', 'recipe', 'variant'].sort());
   assert.strictEqual(payload.mode, 'm2');
+  assert.deepStrictEqual(payload.history, []);
 });
 
 test('recipe/variant riportano i campi previsti dal contratto (id/name/category, id/ingredients/steps/portionsCount/gramsPerPortion/note)', () => {

@@ -1443,9 +1443,9 @@ const S = {
   // (chat persistente multi-turno + modifica automatica via applyAISugg).
   michelinAIQuestion: '', // contenuto corrente della textarea "Chiedi a MichelinAI" — sincronizzato per sopravvivere a render() intermedi
   // Cronologia MichelinAI M2 PER variant (tabella m2_turns): ciò che chef e
-  // MichelinAI si sono detti, turni completati con successo. Persistenza/
-  // visualizzazione, MAI PSL, MAI memoria cognitiva, MAI inviata ad
-  // Anthropic (costruisciPayloadM2 non la legge). Sostituisce la vecchia
+  // MichelinAI si sono detti, turni completati con successo. Mai PSL. P2:
+  // gli ultimi scambi della STESSA Ricetta entrano nel payload M2 come
+  // contesto (m2HistoryForAi, ridotti e limitati). Sostituisce la vecchia
   // coppia globale "ultima domanda/risposta", che compariva anche aprendo
   // un'altra Ricetta. La continuità cognitiva resta L2/L3/intention/criteria.
   // { [variantId]: {status:'idle'|'loading'|'loaded'|'error',
@@ -2379,7 +2379,7 @@ function upLab(id,fn){
 function ensureLabSectionsOpen(recipe,v){
   if(!S.labSectionsOpen[recipe.id]){
     S.labSectionsOpen[recipe.id]={
-      primoConsulto:hasM1(v)||!!(v.primoConsulto), // aperta di default solo se esiste già un M1 (o, storicamente, un consulto legacy) per questa bozza
+      primoConsulto:hasConsulto(v)||!!(v.primoConsulto), // aperta di default solo se esiste già un M1 (o, storicamente, un consulto legacy) per questa bozza
       media:!!(v.mediaUrl||v.videoUrl),
       voice:!!S.pendingVoiceText[recipe.id],
       notes:!!(recipe.notes&&recipe.notes.trim()),
@@ -7168,6 +7168,16 @@ function costruisciPayloadM2(recipeId, message, classification){
   const baselineStatusById={};
   (classification||[]).forEach(function(c){baselineStatusById[c.id]=c.status;});
 
+  // P2 — continuità di MichelinAI: gli ultimi scambi della STESSA Ricetta
+  // (variant), già caricati da m2_turns per la cronologia visibile (tenuta in
+  // ordine created_at,id). Solo i più recenti, ridotti in lunghezza. Le
+  // decisioni confermate non dipendono da questa finestra: viaggiano sempre
+  // con gli L2. Il server riapplica gli stessi limiti (sanitizeHistoryForAi).
+  const entryTurni=S.m2TurnsByVariant&&S.m2TurnsByVariant[v.id];
+  const taglia=(t,max)=>{t=typeof t==='string'?t:'';return t.length>max?t.slice(0,max)+'…':t;};
+  const history=(entryTurni&&Array.isArray(entryTurni.turns)?entryTurni.turns:[]).slice(-6)
+    .map(t=>({question:taglia(t.question,1500),response:taglia(t.response,3000)}));
+
   return{
     mode:'m2',
     recipe:{id:recipe.id,name:recipe.name,category:recipe.category},
@@ -7185,6 +7195,7 @@ function costruisciPayloadM2(recipeId, message, classification){
     l3:(recipe.l3Items||[]).slice(),
     intention:{initial:v.intentionInitial!=null?v.intentionInitial:null,current:v.intentionCurrent!=null?v.intentionCurrent:null},
     criteria:{initial:v.criteriaInitial!=null?v.criteriaInitial:null,current:v.criteriaCurrent!=null?v.criteriaCurrent:null},
+    history:history, // P2: scambi precedenti di QUESTA Ricetta, mai di altre
     message:message||'',
   };
 }
@@ -7777,12 +7788,16 @@ function renderMichelinAIPendingActions(recipeId,v){
 // viene più scritto (i 22 record legacy restano nel DB, invariati).
 // ══════════════════════════════════════════════════════════
 function hasM1(v){return((v&&v.l2Items)||[]).some(x=>x.provenanceType==='m1');}
+// P2: il Consulto è ripetibile e può chiudersi senza criticità. È "già
+// eseguito" se esiste il suo testo (ultimo Consulto, sempre sovrascritto) o,
+// per i Consulti storici senza testo, una sua osservazione.
+function hasConsulto(v){return !!(v&&v.m1ReadingText)||hasM1(v);}
 
 async function runM1(recipeId){
   const recipe=R(recipeId);
   const v=recipe&&curLab(recipe);
   if(!v)return; // M1 è disponibile solo su status='lab'
-  if(hasM1(v))return; // M1 avviene una sola volta per Ricetta/Bozza
+  // P2: il Consulto è ripetibile; ogni esecuzione valuta la versione corrente.
   if(S.m1Loading)return; // doppio clic / seconda chiamata mentre la prima è attiva
   const variantId=v.id; // catturato ORA: è la bozza a cui il risultato resterà legato
   const chiaveM1=recipeId+'|'+variantId;
@@ -7805,6 +7820,9 @@ async function runM1(recipeId){
       intention:{initial:v.intentionInitial||null,current:v.intentionCurrent||null},
       criteria:{initial:v.criteriaInitial||null,current:v.criteriaCurrent||null},
       l3:(recipe.l3Items||[]).slice(0,20).map(x=>({distilledContent:x.distilledContent,contextConditions:x.contextConditions,knownLimits:x.knownLimits})),
+      // P2: questioni già affrontate (Consulti precedenti e MichelinAI): stato,
+      // decisione, provenienza e contenuto. Il server le riassume e le limita.
+      l2:(v.l2Items||[]).map(x=>({operationalState:x.operationalState,decisionState:x.decisionState,provenanceType:x.provenanceType,content:x.content})),
     };
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     const data=await res.json().catch(()=>null);
@@ -7815,14 +7833,14 @@ async function runM1(recipeId){
     const idx=text.indexOf(marker);
     if(idx===-1)throw new Error('Blocco osservazioni mancante nella risposta');
     const userText=text.slice(0,idx).trim();
-    if(!userText)throw new Error('Lettura del Primo Consulto vuota');
+    if(!userText)throw new Error('Lettura del Consulto vuota');
     let jsonPart=text.slice(idx+marker.length).trim();
     jsonPart=jsonPart.replace(/```json|```/g,'').trim();
     let parsed;
     try{parsed=JSON.parse(jsonPart);}catch(e){throw new Error('Blocco osservazioni non è JSON valido');}
     if(!parsed||!Array.isArray(parsed.observations))throw new Error('Formato osservazioni non valido');
+    // P2: zero osservazioni è un esito valido (nessuna criticità rilevata).
     const validObs=parsed.observations.filter(o=>o&&typeof o.content==='string'&&o.content.trim());
-    if(validObs.length===0)throw new Error('Nessuna osservazione valida prodotta');
 
     // Controllo avanzato (preservato): la bozza potrebbe essere cambiata
     // mentre si attendeva la risposta AI. Se è cambiata, il risultato va
@@ -7830,7 +7848,7 @@ async function runM1(recipeId){
     const recipeOra=R(recipeId);
     const labOra=recipeOra&&curLab(recipeOra);
     if(!recipeOra||!labOra||labOra.id!==variantId){
-      toast('La Scheda o la bozza sono cambiate nel frattempo: risultato del Primo Consulto scartato.','ti-alert-circle');
+      toast('La Scheda o la bozza sono cambiate nel frattempo: risultato del Consulto scartato.','ti-alert-circle');
       S.m1Loading=false;S.m1LoadingKey=null;
       render();
       return;
@@ -7849,20 +7867,23 @@ async function runM1(recipeId){
     // m1ReadingText nella STESSA mutazione/save degli L2: un solo salvataggio,
     // mai una seconda chiamata. È un artefatto leggibile (mai memoria
     // cognitiva): costruisciPayloadM2() non lo referenzia mai.
+    // P2: le osservazioni precedenti restano tutte, con stato e decisioni
+    // invariati; il testo è quello dell'ultimo Consulto (sovrascritto).
+    const testoPrecedente=labOra.m1ReadingText||null;
     upLab(recipeId,lab=>({...lab,l2Items:[...(lab.l2Items||[]),...newL2],m1ReadingText:userText}));
     const fresh=R(recipeId);
     const ok=await saveToSupabase(fresh);
     if(!ok){
-      // Persistenza fallita: rollback locale COMPLETO (L2 + prosa) — M1 NON è completato (gate 4).
-      upLab(recipeId,lab=>({...lab,l2Items:(lab.l2Items||[]).filter(x=>!newL2.some(n=>n.id===x.id)),m1ReadingText:null}));
-      throw new Error('Salvataggio delle osservazioni non riuscito');
+      // Persistenza fallita: rollback locale COMPLETO (L2 + prosa precedente) — questo Consulto NON è completato (gate 4).
+      upLab(recipeId,lab=>({...lab,l2Items:(lab.l2Items||[]).filter(x=>!newL2.some(n=>n.id===x.id)),m1ReadingText:testoPrecedente}));
+      throw new Error('Salvataggio del Consulto non riuscito');
     }
     S.m1Loading=false;S.m1LoadingKey=null;
-    toast('Primo Consulto completato','ti-sparkles');
+    toast(newL2.length?'Consulto completato':'Consulto completato: nessuna nuova criticità','ti-sparkles');
   }catch(e){
     console.error('[M1] errore:',e);
     S.m1Loading=false;S.m1LoadingKey=null;
-    S.m1Error[variantId]=e.message||'Errore nel Primo Consulto';
+    S.m1Error[variantId]=e.message||'Errore nel Consulto';
   }
   render();
 }
@@ -8401,7 +8422,7 @@ async function inviaMichelinAI(recipeId){
   const inp=document.getElementById('mai-q-input');
   const domanda=inp?.value?.trim();
   if(!domanda)return; // stringa vuota o solo spazi: nessun invio
-  if(S.m2Loading)return; // blocco doppio invio (stesso guard di runM2)
+  if(S.m2Loading||S.m2AttesaCronologia)return; // blocco doppio invio (stesso guard di runM2, anche mentre si carica la cronologia)
 
   const recipe=R(recipeId);
   const v=recipe&&curLab(recipe);
@@ -8411,6 +8432,13 @@ async function inviaMichelinAI(recipeId){
   if(S.m2SaveFailed[variantId])return; // salvataggio automatico precedente non risolto: nessun nuovo turno finché non si riprova
 
   S.michelinAIQuestion='';
+  // P2: la cronologia di questa Ricetta deve essere caricata prima del turno,
+  // così la continuità arriva a MichelinAI anche subito dopo una riapertura.
+  const entryTurni=S.m2TurnsByVariant[variantId];
+  if(!entryTurni||entryTurni.status==='idle'){
+    S.m2AttesaCronologia=true;
+    try{await loadM2Turns(variantId);}finally{S.m2AttesaCronologia=false;}
+  }
   const risultatoPrecedente=S.m2Result[variantId]; // eventuale coda pending di un turno precedente
   await runM2(recipeId,domanda);
 
@@ -9680,9 +9708,9 @@ function renderLabRecipe(recipe){
   P.primoConsulto=`
 
   <div class="card">
-    ${labSectionHeader(recipe.id,'primoConsulto','ti-sparkles','Primo Consulto',sectionsOpen.primoConsulto)}
+    ${labSectionHeader(recipe.id,'primoConsulto','ti-sparkles','Consulto',sectionsOpen.primoConsulto)}
     ${sectionsOpen.primoConsulto?(()=>{
-      const m1Fatto=hasM1(v);
+      const m1Fatto=hasConsulto(v); // P2: anche un Consulto senza criticità è un Consulto eseguito
       const chiaveM1=recipe.id+'|'+v.id;
       const staCaricandoQuestaBozza=S.m1Loading&&S.m1LoadingKey===chiaveM1;
       const staCaricandoAltrove=S.m1Loading&&!staCaricandoQuestaBozza;
@@ -9701,6 +9729,11 @@ function renderLabRecipe(recipe){
       const osservazioniAttuali=osservazioniM1.filter(x=>['unengaged','open','affected'].includes(x.operationalState));
       const osservazioniRisolte=osservazioniM1.filter(x=>['resolved','superseded'].includes(x.operationalState));
       const legacyPresente=!m1Fatto&&v.primoConsulto;
+      // P2: Consulto ripetibile — stesso pulsante, sempre disponibile; un
+      // nuovo Consulto valuta la versione attuale e non tocca le decisioni.
+      const pulsanteConsulto=(etichetta)=>`<button class="btn ${m1Fatto?'btn-outline':'btn-lab'} btn-sm" ${staCaricandoAltrove?'disabled':''} onclick="runM1('${recipe.id}')">
+          <i class="ti ti-sparkles"></i> ${etichetta}
+        </button>`;
       if(staCaricandoQuestaBozza){
         return`<div style="display:flex;align-items:center;gap:8px;color:var(--mid);font-size:13px"><i class="ti ti-loader-2"></i> MichelinAI sta analizzando la bozza…</div>`;
       }
@@ -9711,12 +9744,12 @@ function renderLabRecipe(recipe){
         const tsM1=primaOss&&primaOss.createdAt?new Date(primaOss.createdAt).toLocaleString('it-IT'):null;
         return`
         <div style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;color:var(--lab);margin-bottom:${testoFresco||osservazioniM1.length?'12px':'0'}">
-          <i class="ti ti-circle-check"></i> Primo Consulto effettuato
+          <i class="ti ti-circle-check"></i> Consulto effettuato
         </div>
         ${testoFresco?`<div style="font-size:14px;color:var(--dark);line-height:1.5;white-space:pre-wrap;margin-bottom:${osservazioniM1.length?'12px':'0'}">${escAttr(testoFresco)}</div>`:''}
         ${osservazioniAttuali.length?`
         <div style="display:flex;flex-direction:column;gap:10px">
-          ${!testoFresco?`<div style="font-size:12px;color:var(--mid)">Osservazioni emerse dal Primo Consulto:</div>`:''}
+          ${!testoFresco?`<div style="font-size:12px;color:var(--mid)">Osservazioni emerse dal Consulto:</div>`:''}
           ${osservazioniAttuali.map(o=>`
             <div style="border-left:3px solid var(--lab);padding:6px 0 6px 12px">
               <div style="font-size:12px;font-weight:600;color:var(--lab);margin-bottom:2px">${escAttr((o.content&&o.content.label)||'Osservazione')}</div>
@@ -9735,17 +9768,20 @@ function renderLabRecipe(recipe){
           `).join('')}
         </div>`:''}
         ${tsM1?`<div style="font-size:11px;color:var(--light);margin-top:10px">Consulto di ${v.label||'questa bozza'} del ${tsM1}</div>`:''}
+        ${erroreM1?`<div style="font-size:13px;color:#c0392b;margin-top:12px"><i class="ti ti-alert-circle"></i> ${erroreM1}</div>`:''}
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:14px">
+          <div style="font-size:12px;color:var(--light)">Un nuovo Consulto valuta la versione attuale; osservazioni e decisioni restano.</div>
+          ${pulsanteConsulto(erroreM1?'Riprova il Consulto':'Nuovo Consulto')}
+        </div>
         `;
       }
       return`
       <div style="display:flex;justify-content:flex-end;margin-bottom:${erroreM1?'10px':'0'}">
-        <button class="btn btn-lab btn-sm" ${staCaricandoAltrove?'disabled':''} onclick="runM1('${recipe.id}')">
-          <i class="ti ti-sparkles"></i> ${erroreM1?'Riprova Primo Consulto':'Avvia il Primo Consulto'}
-        </button>
+        ${pulsanteConsulto(erroreM1?'Riprova il Consulto':'Avvia il Consulto')}
       </div>
       ${erroreM1?`<div style="font-size:13px;color:#c0392b;margin-bottom:10px"><i class="ti ti-alert-circle"></i> ${erroreM1}</div>`:''}
       <div style="font-size:13px;color:var(--light)">Chiedi a MichelinAI un primo sguardo tecnico su ${v.label||'questa bozza'}.</div>
-      ${legacyPresente?`<div style="font-size:11px;color:var(--light);margin-top:6px">Esiste un Primo Consulto legacy per questa bozza (storico, non convertito, non aggiornato).</div>`:''}
+      ${legacyPresente?`<div style="font-size:11px;color:var(--light);margin-top:6px">Esiste un Consulto legacy per questa bozza (storico, non convertito, non aggiornato).</div>`:''}
       `;
     })():''}
   </div>`;

@@ -407,8 +407,8 @@ const tick = () => new Promise(r => setTimeout(r, 30));
     const PROTETTE = {
       'async function loadFromSupabase()': '532a7aaa4224a105' /* Fase 1A: +lettura di created_at delle L3 (sola visualizzazione) */, 'async function saveToSupabase(recipe)': '55d82322a3c2285f',
       // Finalizzazione D3: solo il ramo S.uiD3 di "Elimina" (classico identico a main, test-preview-direzione-3 P10).
-      'function renderProdRecipe(recipe)': '3c3eaeaff0e02ea8', 'function costruisciPayloadM2(recipeId, message, classification)': '9850def5ee757a1c',
-      'async function runM1(recipeId)': 'c65f22895bf0d242', 'async function createProductionSession(preparedInput)': '185ca85dcee49397',
+      'function renderProdRecipe(recipe)': '3c3eaeaff0e02ea8', 'function costruisciPayloadM2(recipeId, message, classification)': '27429c2795d7b5ee' /* P2: cronologia della Ricetta nel payload */,
+      'async function runM1(recipeId)': 'b10ed736cca74040' /* P2: Consulto ripetibile */, 'async function createProductionSession(preparedInput)': '185ca85dcee49397',
       'function computeSessionScaling(input)': 'ddfc1febb5010cdc', 'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)': '9df6758db87b12b1',
     };
     for (const [m, h] of Object.entries(PROTETTE)) assert.strictEqual(sha(extractFunction(m)), h, m);
