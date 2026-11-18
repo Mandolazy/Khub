@@ -18,6 +18,10 @@ begin;
 do $$
 declare n bigint;
 begin
+  -- P2-a.2: la conversazione delle Idee (0014) dipende da ideas: va tolta prima.
+  if to_regclass('public.idea_turns') is not null then
+    raise exception 'Rollback 0013 fermato: esiste public.idea_turns (0014). Eseguire prima il rollback 0014.';
+  end if;
   if to_regclass('public.ideas') is not null then
     execute 'select count(*) from public.ideas' into n;
     if n > 0 then
