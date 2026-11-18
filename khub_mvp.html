@@ -12771,6 +12771,21 @@ async function ideaSalvaEsegui(id){
   var r=ideaSalvaLeggi(id);if(!r||r.stato==='salvataggio'||r.stato==='collegamento')return; // un solo tentativo alla volta
   if(r.stato!=='salvata'&&r.stato!=='errore_collegamento'){
     r.stato='salvataggio';r.errore=null;ideaSalvaScrivi(r);render();
+    // Prenotazione della trasformazione prima di ogni salvataggio: un altro dispositivo
+    // che sta gia' trasformando questa Idea blocca il salvataggio (nessuna seconda Ricetta).
+    var cl=await ideeChiama({supabaseAction:'claimIdeaRecipe',ideaId:id,recipeId:r.recipeId,variantId:r.variantId});
+    if(!(cl&&cl.ok)){
+      if(cl&&(cl.code==='idea_in_trasformazione'||cl.code==='idea_gia_trasformata'||cl.code==='idea_archiviata')){
+        // Nulla e' stato salvato da questo dispositivo: il registro si chiude e si torna all'Idea.
+        if(S.ideaSalvataggi)S.ideaSalvataggi[id]=null;
+        try{localStorage.removeItem(IDEA_SALVA_CHIAVE+id);}catch(e){}
+        S.loadPreview=null;S.ideaAnteprimaId=null;S.ideaAperta=id;S.view='idea';
+        toast(cl.code==='idea_in_trasformazione'?'Questa Idea è già in trasformazione da un altro dispositivo: nessuna Ricetta salvata qui.':cl.code==='idea_gia_trasformata'?'L\'Idea è già diventata una Ricetta: ricarica la pagina.':'L\'Idea è stata archiviata.','ti-alert-circle');
+        caricaIdee();return;
+      }
+      r.stato='errore_salvataggio';r.errore=cl&&cl.code==='sessione'?'Sessione scaduta: accedi di nuovo.':'Prenotazione del salvataggio non riuscita: nessun dato salvato.';
+      ideaSalvaScrivi(r);render();return;
+    }
     var primaId=r.recipeId,prima=R(primaId);
     var esito=prima||r.destinazione!=='esistente'?savePreview({rif:r}):null;
     var ricetta=esito?R(esito.recipeId):null,ok=false;

@@ -285,9 +285,28 @@ const figli = []; let tmp;
       assert.deepStrictEqual(M.errori, []); await M.context.close();
     });
 
+    await test('E11. due dispositivi sulla stessa Idea: chi prenota per primo salva; l\'altro non salva nulla, torna all\'Idea con l\'avviso; una sola Ricetta', async () => {
+      const id = await nuovaIdea('Due dispositivi');
+      const B = await nuovaPagina(); // secondo dispositivo: altro browser, altro registro
+      await allAnteprima(id);
+      await B.apri(id); await prepara(B); await B.page.waitForSelector('#btn-save-idea');
+      guasti.push({ azione: 'save', modo: 'ko', volte: 1 }); // il primo dispositivo prenota ma il salvataggio fallisce
+      await P.page.click('#btn-save-idea'); await P.page.waitForSelector('#idea-salva-riprova');
+      const c0 = conteggi();
+      await B.page.click('#btn-save-idea');
+      await B.page.waitForFunction(() => S.view === 'idea', null, { timeout: 15000 });
+      assert.strictEqual(conteggi(), c0, 'il secondo dispositivo non salva nulla');
+      assert.strictEqual(await B.ev(i => localStorage.getItem('khub.ideaSalvataggio.' + i), id), null);
+      assert.strictEqual(idea(id).status, 'aperta');
+      await P.page.click('#idea-salva-riprova'); await attendiLab();
+      assert.strictEqual(idea(id).status, 'trasformata');
+      assert.strictEqual(sql("select count(*) from recipes where id in (select linked_recipe_id from ideas where id='" + id + "')"), '1');
+      assert.deepStrictEqual(B.errori, []); await B.context.close();
+    });
+
     await test('E10. nessun errore JavaScript; solo le azioni previste; nessuna chiamata AI nei salvataggi; credenziali mai nella pagina', async () => {
       assert.deepStrictEqual(P.errori, []);
-      const ammesse = ['load', 'loadConversions', 'loadFamilies', 'loadIdeas', 'loadIdeaTurns', 'createIdea', 'ideaProposal', 'save', 'linkIdeaToRecipe'];
+      const ammesse = ['load', 'loadConversions', 'loadFamilies', 'loadIdeas', 'loadIdeaTurns', 'createIdea', 'ideaProposal', 'claimIdeaRecipe', 'save', 'linkIdeaToRecipe'];
       const altre = [...new Set(azioni.map(a => a.supabaseAction))].filter(a => !ammesse.includes(a));
       assert.deepStrictEqual(altre.filter(a => !/^load/.test(a)), [], altre.join(','));
       const html = await P.page.content();

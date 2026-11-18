@@ -1,11 +1,11 @@
-# Migrazione 0016 — Una sola proposta di Ricetta alla volta per Idea
+# Migrazione 0016 — Una sola proposta e una sola trasformazione alla volta per Idea
 
 **Stato:** preparata e testata solo su PostgreSQL 16 + PostgREST 12.2.3 locali. **Non applicata.** Richiede la 0013. È indipendente dalla 0015: si possono applicare in qualunque ordine.
 
 | File | Ruolo |
 |---|---|
-| `supabase/migrations/0016_idea_proposal_locks.sql` | crea `public.idea_proposal_locks` |
-| `supabase/rollback/PREPARED_NOT_EXECUTED__0016_idea_proposal_locks_rollback.sql` | la elimina |
+| `supabase/migrations/0016_idea_proposal_locks.sql` | crea `public.idea_proposal_locks` e `public.idea_recipe_claims` |
+| `supabase/rollback/PREPARED_NOT_EXECUTED__0016_idea_proposal_locks_rollback.sql` | le elimina |
 
 ## Perché serve
 `ideaProposal` (blocco 2d) chiama MichelinAI per ricostruire la proposta di Ricetta. Due richieste simultanee per la stessa Idea, per esempio da due schede del browser, producevano due chiamate AI. Con la 0016 il server prenota la generazione: vince una sola richiesta, l'altra riceve `proposta_in_corso`.
@@ -13,6 +13,10 @@
 Dettagli: `docs/import-engine/P2-a2-blocco2d-correzioni.md` (C1).
 
 ## Cosa crea
+**Seconda tabella (release candidate): `public.idea_recipe_claims`** con `idea_id` come chiave primaria (riferimento a `ideas`, cancellazione a cascata), `recipe_id`, `variant_id` e `claimed_at`. È la prenotazione della trasformazione di un'Idea in Ricetta, chiesta dalla pagina prima di salvare la Scheda: due dispositivi non creano due Ricette. Ha gli stessi privilegi e lo stesso RLS della prima tabella. Il rollback elimina entrambe le tabelle.
+
+**Prima tabella: `public.idea_proposal_locks`**
+
 | Colonna | Tipo | Note |
 |---|---|---|
 | `idea_id` | `text` | chiave primaria, `references public.ideas(id) on delete cascade` |

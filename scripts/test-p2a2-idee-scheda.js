@@ -221,6 +221,43 @@ const figli = []; let tmp;
       IA.testo = null;
     });
 
+    await test('S11. due dispositivi trasformano la stessa Idea: prenotazione (claimIdeaRecipe) a uno solo; l\'altro non salva e non collega; ripetizione ok; prenotazione abbandonata ripresa solo senza Bozza nel database', async () => {
+      const ideaF = await crea('Due dispositivi');
+      const claim = (r, v, extra) => api(Object.assign({ supabaseAction: 'claimIdeaRecipe', ideaId: ideaF, recipeId: r, variantId: v }, extra || {}));
+      assert.strictEqual((await claim('rX', 'lvX', { status: 'x' })).code, 'richiesta_non_valida');
+      const [a, b] = await Promise.all([claim('rDev1', 'lvDev1'), claim('rDev2', 'lvDev2')]);
+      const vinto = a.ok ? 'Dev1' : 'Dev2', perso = a.ok ? 'Dev2' : 'Dev1';
+      assert.deepStrictEqual([a, b].map(x => x.ok ? 'ok' : x.code).sort(), ['idea_in_trasformazione', 'ok'], JSON.stringify([a, b]));
+      assert.strictEqual((await claim('r' + vinto, 'lv' + vinto)).ripetuto, true, 'ripetizione dello stesso dispositivo');
+      assert.strictEqual((await claim('r' + perso, 'lv' + perso)).code, 'idea_in_trasformazione');
+      // Il perdente non riesce neppure a collegare una sua eventuale Ricetta.
+      const rP = 'r' + perso, vP = 'lv' + perso;
+      assert.strictEqual((await salva(rP, 'Perdente', [bozza(vP, rP, 'Perdente')], [ing(vP + '_1', vP, 'Sale', null, 'g', 'mancante', 0)])).ok, true);
+      assert.strictEqual((await collega(ideaF, rP, vP)).code, 'idea_in_trasformazione');
+      assert.strictEqual(sql("select status from ideas where id='" + ideaF + "'"), 'aperta');
+      // Prenotazione recente: non si riprende. Vecchia ma con la Bozza nel database: non si riprende.
+      const rV = 'r' + vinto, vV = 'lv' + vinto;
+      assert.strictEqual((await salva(rV, 'Vincente', [bozza(vV, rV, 'Vincente')], [ing(vV + '_1', vV, 'Sale', null, 'g', 'mancante', 0)])).ok, true);
+      sql("update idea_recipe_claims set claimed_at = now() - interval '1 hour' where idea_id='" + ideaF + "'");
+      assert.strictEqual((await claim('rTerzo', 'lvTerzo')).code, 'idea_in_trasformazione', 'Bozza salvata: prenotazione valida');
+      assert.strictEqual((await collega(ideaF, rV, vV)).ok, true);
+      assert.strictEqual((await claim('rTerzo', 'lvTerzo')).code, 'idea_gia_trasformata');
+      // Prenotazione abbandonata (nessuna Bozza nel database, piu' di 15 minuti): si riprende.
+      const ideaG = await crea('Abbandonata');
+      assert.strictEqual((await api({ supabaseAction: 'claimIdeaRecipe', ideaId: ideaG, recipeId: 'rMai', variantId: 'lvMai' })).ok, true);
+      assert.strictEqual((await api({ supabaseAction: 'claimIdeaRecipe', ideaId: ideaG, recipeId: 'rNuovo', variantId: 'lvNuovo' })).code, 'idea_in_trasformazione', 'recente');
+      sql("update idea_recipe_claims set claimed_at = now() - interval '20 minutes' where idea_id='" + ideaG + "'");
+      assert.strictEqual((await api({ supabaseAction: 'claimIdeaRecipe', ideaId: ideaG, recipeId: 'rNuovo', variantId: 'lvNuovo' })).ripresa, true);
+      assert.strictEqual(sql("select recipe_id from idea_recipe_claims where idea_id='" + ideaG + "'"), 'rNuovo');
+      // Senza la tabella: nessuna prenotazione, comportamento del 2e.
+      sql('alter table idea_recipe_claims rename to idea_recipe_claims_x'); sql("notify pgrst, 'reload schema'"); await new Promise(r => setTimeout(r, 600));
+      const ideaH = await crea('Senza tabella');
+      const l0 = LOG.length;
+      assert.strictEqual((await api({ supabaseAction: 'claimIdeaRecipe', ideaId: ideaH, recipeId: 'rH', variantId: 'lvH' })).senzaPrenotazione, true);
+      assert.ok(!LOG.slice(l0).some(x => /Supabase error/.test(x)));
+      sql('alter table idea_recipe_claims_x rename to idea_recipe_claims'); sql("notify pgrst, 'reload schema'"); await new Promise(r => setTimeout(r, 600));
+    });
+
     await test('S8. senza la 0016 (tabella assente) la proposta funziona come nel blocco 2d, senza errori nei log', async () => {
       const ideaE = await crea('Senza 0016');
       conv(ideaE, [['Vorrei un semifreddo con albicocche', 'Semifreddo con noci.']]);
@@ -237,11 +274,12 @@ const figli = []; let tmp;
       assert.strictEqual(sql("select relrowsecurity from pg_class where oid='public.idea_proposal_locks'::regclass"), 't');
       assert.strictEqual(sql("select has_table_privilege('anon','public.idea_proposal_locks','select')||'|'||has_table_privilege('authenticated','public.idea_proposal_locks','insert')"), 'false|false');
       assert.strictEqual(sql("select has_table_privilege('service_role','public.idea_proposal_locks','insert')||'|'||has_table_privilege('service_role','public.idea_proposal_locks','delete')"), 'true|false');
+      assert.strictEqual(sql("select relrowsecurity::text||'|'||has_table_privilege('anon','public.idea_recipe_claims','select')||'|'||has_table_privilege('service_role','public.idea_recipe_claims','update')||'|'||has_table_privilege('service_role','public.idea_recipe_claims','delete') from pg_class where oid='public.idea_recipe_claims'::regclass"), 'true|false|true|false');
       sql('alter table idea_proposal_locks add column extra text');
       const ko = psql(null, DB, M); assert.notStrictEqual(ko.status, 0); assert.ok(/colonne diverse/.test(ko.stderr));
       sql('alter table idea_proposal_locks drop column extra');
       const rb = psql(null, DB, path.join(ROOT, 'supabase/rollback/PREPARED_NOT_EXECUTED__0016_idea_proposal_locks_rollback.sql')); assert.strictEqual(rb.status, 0, rb.stderr);
-      assert.strictEqual(sql("select to_regclass('public.idea_proposal_locks') is null"), 't');
+      assert.strictEqual(sql("select to_regclass('public.idea_proposal_locks') is null and to_regclass('public.idea_recipe_claims') is null"), 't');
       const tutto = LOG.join('\n');
       assert.ok(!tutto.includes(process.env.SUPABASE_SECRET_KEY) && !tutto.includes(process.env.ANTHROPIC_API_KEY), 'nessuna credenziale nei log');
       assert.ok(!/Userei 500 g|semifreddo con albicocche/i.test(tutto), 'nessun testo dello chef nei log');

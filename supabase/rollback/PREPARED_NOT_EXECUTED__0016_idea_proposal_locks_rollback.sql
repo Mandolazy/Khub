@@ -13,6 +13,7 @@
 
 begin;
 
+drop table if exists public.idea_recipe_claims;
 drop table if exists public.idea_proposal_locks;
 
 commit;

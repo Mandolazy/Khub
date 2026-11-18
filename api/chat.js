@@ -1204,7 +1204,7 @@ export default async function handler(req, res) {
     //    (concorrenza ottimistica: vince uno solo), al massimo IDEA_CHAT.tentativi volte;
     //  - chiusura (completato/fallito) condizionata allo stesso tentativo: una
     //    elaborazione scaduta e ripresa da altri non sovrascrive nulla.
-    if (['loadIdeaTurns', 'ideaChat', 'ideaProposal', 'linkIdeaToRecipe'].includes(body.supabaseAction)) {
+    if (['loadIdeaTurns', 'ideaChat', 'ideaProposal', 'claimIdeaRecipe', 'linkIdeaToRecipe'].includes(body.supabaseAction)) {
       const azione = body.supabaseAction;
       const no = (code, error, extra) => res.status(200).json(Object.assign({ ok: false, code, error }, extra || {}));
       // Richiesta a PostgREST sulle sole tabelle ideas/idea_turns (percorsi costanti, valori codificati).
@@ -1213,12 +1213,13 @@ export default async function handler(req, res) {
         // Solo due percorsi costanti; il resto e' il filtro, con valori gia' validati e codificati.
         const q = percorso.indexOf('?'), tabella = percorso.slice(0, q === -1 ? percorso.length : q), filtro = q === -1 ? '' : percorso.slice(q);
         const url = tabella === 'ideas' ? SB + '/rest/v1/ideas' + filtro : tabella === 'idea_turns' ? SB + '/rest/v1/idea_turns' + filtro
-          : tabella === 'idea_proposal_locks' ? SB + '/rest/v1/idea_proposal_locks' + filtro : tabella === 'variants' ? SB + '/rest/v1/variants' + filtro : null;
+          : tabella === 'idea_proposal_locks' ? SB + '/rest/v1/idea_proposal_locks' + filtro : tabella === 'variants' ? SB + '/rest/v1/variants' + filtro
+          : tabella === 'idea_recipe_claims' ? SB + '/rest/v1/idea_recipe_claims' + filtro : null;
         if (!url) throw new Error('tabella non ammessa');
         const r = await fetch(url, { method: metodo, headers: h, body: dati === undefined ? undefined : JSON.stringify(dati) });
         const testo = await r.text().catch(() => '');
         let corpo = null; try { corpo = testo ? JSON.parse(testo) : null; } catch (e) { corpo = null; }
-        if (!r.ok && r.status !== 409 && !(tabella === 'idea_proposal_locks' && r.status === 404)) console.error('Supabase error [idea_turns]:', r.status, corpo && typeof corpo.code === 'string' ? corpo.code : ''); // solo il codice: mai il testo dello chef
+        if (!r.ok && r.status !== 409 && !((tabella === 'idea_proposal_locks' || tabella === 'idea_recipe_claims') && r.status === 404)) console.error('Supabase error [idea_turns]:', r.status, corpo && typeof corpo.code === 'string' ? corpo.code : ''); // solo il codice: mai il testo dello chef
         return { ok: r.ok, status: r.status, corpo, headers: r.headers };
       };
       const conta = async filtro => {
@@ -1247,6 +1248,41 @@ export default async function handler(req, res) {
           return res.status(200).json({ ok: true, turns: turni });
         }
 
+        // ── claimIdeaRecipe (release): PRIMA di ogni salvataggio, la pagina prenota la
+        // trasformazione dell'Idea con gli id della sua Scheda/Bozza (tabella idea_recipe_claims,
+        // migrazione 0016). Un solo dispositivo per Idea: un secondo riceve idea_in_trasformazione
+        // e non salva nulla, quindi nessuna seconda Ricetta. Stessi id = ok (ripetizione). Una
+        // prenotazione abbandonata (Bozza mai arrivata nel database, piu' vecchia di 15 minuti)
+        // si riprende. Senza la 0016: nessuna prenotazione (comportamento del blocco 2e).
+        if (azione === 'claimIdeaRecipe') {
+          const estraneiC = Object.keys(body).filter(k => !['supabaseAction', 'ideaId', 'recipeId', 'variantId'].includes(k));
+          if (estraneiC.length) return no('richiesta_non_valida', 'campi non ammessi: ' + estraneiC.join(', '));
+          const recipeId = body.recipeId, variantId = body.variantId;
+          if (!isValidId(recipeId) || !isValidId(variantId)) return no('richiesta_non_valida', 'id della Ricetta non valido');
+          if (idea.status === 'archiviata') return no('idea_archiviata', 'Un\'Idea archiviata non si modifica');
+          if (idea.status === 'trasformata') {
+            if (idea.linked_recipe_id === recipeId && idea.linked_variant_id === variantId) return res.status(200).json({ ok: true, ripetuto: true });
+            return no('idea_gia_trasformata', 'L\'Idea e\' gia\' collegata a un\'altra Ricetta');
+          }
+          const ora = new Date().toISOString();
+          const ins = await sb('POST', 'idea_recipe_claims', { idea_id: ideaId, recipe_id: recipeId, variant_id: variantId, claimed_at: ora }, 'return=representation');
+          if (ins.ok) return res.status(200).json({ ok: true });
+          if (ins.status === 404) return res.status(200).json({ ok: true, senzaPrenotazione: true });
+          if (ins.status !== 409) throw new Error('prenotazione della trasformazione (' + ins.status + ')');
+          const rc = await sb('GET', 'idea_recipe_claims?select=recipe_id,variant_id,claimed_at&idea_id=eq.' + encodeURIComponent(ideaId));
+          const c = rc.ok && Array.isArray(rc.corpo) ? rc.corpo[0] : null;
+          if (!c) throw new Error('lettura della prenotazione (' + rc.status + ')');
+          if (c.recipe_id === recipeId && c.variant_id === variantId) return res.status(200).json({ ok: true, ripetuto: true });
+          const vecchia = Date.parse(c.claimed_at) < Date.now() - IDEA_TRASFORMAZIONE_ABBANDONO_MS;
+          const rv0 = vecchia ? await sb('GET', 'variants?select=id&id=eq.' + encodeURIComponent(c.variant_id)) : null;
+          if (vecchia && rv0.ok && Array.isArray(rv0.corpo) && rv0.corpo.length === 0) {
+            const up = await sb('PATCH', 'idea_recipe_claims?idea_id=eq.' + encodeURIComponent(ideaId) + '&recipe_id=eq.' + encodeURIComponent(c.recipe_id) + '&variant_id=eq.' + encodeURIComponent(c.variant_id),
+              { recipe_id: recipeId, variant_id: variantId, claimed_at: ora }, 'return=representation');
+            if (up.ok && Array.isArray(up.corpo) && up.corpo.length === 1) return res.status(200).json({ ok: true, ripresa: true });
+          }
+          return no('idea_in_trasformazione', 'Questa Idea e\' gia\' in trasformazione da un altro dispositivo');
+        }
+
         // ── linkIdeaToRecipe (blocco 2e): collega l'Idea alla Bozza GIA' salvata (verificata nel
         // database) e la porta a «trasformata». Idempotente: ripetuto con gli stessi id risponde ok.
         if (azione === 'linkIdeaToRecipe') {
@@ -1262,6 +1298,11 @@ export default async function handler(req, res) {
             return res.status(200).json({ ok: true, idea: ideaPubblica(r0.corpo[0]), ripetuto: true });
           }
           if (idea.status === 'archiviata') return no('idea_archiviata', 'Un\'Idea archiviata non si modifica');
+          // Con la 0016: si collega solo la Ricetta del dispositivo che ha la prenotazione.
+          const rcl = await sb('GET', 'idea_recipe_claims?select=recipe_id,variant_id&idea_id=eq.' + encodeURIComponent(ideaId));
+          if (rcl.ok && Array.isArray(rcl.corpo) && rcl.corpo.length && (rcl.corpo[0].recipe_id !== recipeId || rcl.corpo[0].variant_id !== variantId))
+            return no('idea_in_trasformazione', 'Questa Idea e\' gia\' in trasformazione da un altro dispositivo');
+          if (!rcl.ok && rcl.status !== 404) throw new Error('lettura della prenotazione (' + rcl.status + ')');
           // La Bozza deve esistere davvero nel database, appartenere a quella Scheda ed essere in LAB.
           const rv = await sb('GET', 'variants?select=id,recipe_id,status&id=eq.' + encodeURIComponent(variantId));
           if (!rv.ok) throw new Error('lettura della Bozza (' + rv.status + ')');
@@ -2228,6 +2269,7 @@ async function chiamaMichelinAIIdea(messages, opzioni) {
 // ══════════════════════════════════════════════════════════
 const IDEA_PROPOSTA = { contesto: 90000, maxTokens: 4000, ingredienti: 60, passi: 60, scartate: 12, perIdeaGiorno: 10, byte: 150000,
   prenotazioneMs: 120000 }; // prenotazione di una generazione in corso (piu' lunga dei 60 s della chiamata AI)
+const IDEA_TRASFORMAZIONE_ABBANDONO_MS = 15 * 60 * 1000; // prenotazione della trasformazione senza Bozza salvata: ripresa dopo 15 minuti
 const IDEA_PROPOSTA_PROMPT = `Sei MichelinAI, il collega tecnico di cucina che affianca lo chef in KHUB. Lo chef ha chiesto di PREPARARE LA RICETTA a partire da un'Idea e dalla conversazione avuta con te. Il tuo compito e' ricostruire la PROPOSTA FINALE: non una sintesi della conversazione, ma la Ricetta che riflette le decisioni piu' recenti dello chef.
 
 REGOLE
