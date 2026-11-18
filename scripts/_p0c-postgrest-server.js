@@ -19,6 +19,10 @@ const fs = require('fs');
 const crypto = require('crypto');
 const http = require('http');
 
+// Facoltativo (P2-a.2 blocco 2c): Anthropic SIMULATO dentro il server di test,
+// solo con KHUB_TEST_IA_SIMULATA=1 (letta prima di ripulire l'ambiente). Senza,
+// il server resta identico: ogni chiamata esterna e' bloccata.
+const IA_SIMULATA = process.env.KHUB_TEST_IA_SIMULATA === '1';
 const DA_TOGLIERE = /SUPABASE|ANTHROPIC|KHUB|VERCEL|DATABASE|POSTGRES|PG(HOST|USER|PASSWORD|DATABASE|PORT)|OPENAI|API_KEY|SECRET|TOKEN/i;
 Object.keys(process.env).filter(k => DA_TOGLIERE.test(k)).forEach(k => { delete process.env[k]; });
 const SUPABASE_FINTO = 'https://supabase-p0c-locale.invalid';
@@ -26,6 +30,7 @@ process.env.SUPABASE_URL = SUPABASE_FINTO;
 process.env.SUPABASE_SECRET_KEY = 'sb_secret_p0c_locale_non_valida';
 process.env.KHUB_SESSION_SECRET = crypto.randomBytes(32).toString('hex');
 process.env.KHUB_ACCESS_PASSWORD = crypto.randomBytes(16).toString('hex');
+if (IA_SIMULATA) process.env.ANTHROPIC_API_KEY = 'chiave-finta-solo-test-' + crypto.randomBytes(4).toString('hex');
 
 const PORTA = Number(process.argv[2]);
 const REST = String(process.argv[3] || '');
@@ -35,8 +40,25 @@ const CHAT = process.argv[4] ? path.resolve(process.argv[4]) : path.join(ROOT, '
 
 const fetchOriginale = globalThis.fetch;
 const registro = []; // richieste verso PostgREST: metodo, tabella, esito
+// MichelinAI simulato: modo e ritardo impostabili dal test (POST /test/ia), richieste registrate.
+const IA = { modo: 'ok', ritardo: 0, testo: null, chiamate: [] };
+const iaTestoDefault = body => {
+  const ultimo = String((body.messages[body.messages.length - 1] || {}).content || '').toLowerCase();
+  if (/ingredienti/.test(ultimo)) return 'Proposta indicativa (quantita\' mie, da verificare): albicocche 400 g, panna 250 g, zucchero 80 g, noci 60 g. Le noci le hai scelte tu.';
+  if (/noci/.test(ultimo)) return 'D\'accordo: noci al posto delle mandorle, tostate e tritate grossolanamente.';
+  if (/muffin|cucchiaio/.test(ultimo)) return 'Allora niente muffin: ti propongo un semifreddo alle albicocche con rosmarino e mandorle.';
+  return 'Con albicocche e rosmarino potresti fare dei muffin, una crostata morbida o un dolce al cucchiaio.';
+};
+const iaRisposta = async body => {
+  IA.chiamate.push({ model: body.model, system: body.system, messages: body.messages, max_tokens: body.max_tokens });
+  if (IA.ritardo) await new Promise(r => setTimeout(r, IA.ritardo));
+  if (IA.modo === 'errore') return { ok: false, status: 529, json: async () => ({ type: 'error', error: { type: 'overloaded_error' } }) };
+  const testo = IA.testo || iaTestoDefault(body);
+  return { ok: true, status: 200, json: async () => ({ content: [{ type: 'text', text: testo }], stop_reason: 'end_turn' }) };
+};
 const fetchLocale = async function (url, opts) {
   const u = String(url && url.url ? url.url : url);
+  if (IA_SIMULATA && u === 'https://api.anthropic.com/v1/messages') return iaRisposta(JSON.parse((opts || {}).body || '{}'));
   if (!u.startsWith(SUPABASE_FINTO + '/rest/v1/')) {
     const msg = 'Rete esterna disabilitata nel server di test: ' + u.split('?')[0];
     return { ok: false, status: 503, json: async () => ({ error: msg }), text: async () => msg };
@@ -77,6 +99,10 @@ const leggiCorpo = req => new Promise((ok, ko) => { const p = []; req.on('data',
         await handler({ method: 'POST', headers: {}, body }, r);
         res.writeHead(stato, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
         return res.end(JSON.stringify(uscita === undefined ? null : uscita));
+      }
+      if (IA_SIMULATA && url.pathname === '/test/ia') {
+        if (req.method === 'POST') { const b = JSON.parse(await leggiCorpo(req) || '{}'); ['modo', 'ritardo', 'testo'].forEach(k => { if (k in b) IA[k] = b[k]; }); }
+        res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ modo: IA.modo, ritardo: IA.ritardo, chiamate: IA.chiamate }));
       }
       if (req.method === 'GET' && url.pathname === '/test/registro') {
         res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify(registro));

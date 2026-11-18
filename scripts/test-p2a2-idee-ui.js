@@ -356,10 +356,14 @@ let tmp;
         assert.strictEqual(await P.page.$eval('.topbar', e => getComputedStyle(e).backgroundColor), 'rgb(233, 185, 73)', 'fascia dell\'ambiente Idee');
         assert.ok(await P.page.$eval('.d3-amb-testa-voce[data-amb="idee"]', e => e.offsetParent !== null || getComputedStyle(e).display === 'contents'), 'nome e icona Idee nella fascia');
       }
-      assert.match(await P.page.$eval('#idea-note-salva', e => e.className), /d3-btn-primary/, '«Salva note» e\' l\'azione primaria del dettaglio');
+      // Blocco 2c: l'azione primaria del dettaglio e' «Invia» della conversazione; «Salva note» e' secondaria.
+      assert.match(await P.page.$eval('#idea-chat-invia', e => e.className), /d3-btn-primary/, '«Invia» e\' l\'azione primaria del dettaglio');
+      assert.match(await P.page.$eval('#idea-note-salva', e => e.className), /d3-btn-line/, '«Salva note» secondaria');
       // Disattivato leggibile: niente trasparenza, testo a contrasto AA sul fondo del pulsante.
       const dis = await P.page.$eval('#idea-note-salva', e => { const c = getComputedStyle(e); return { d: e.disabled, o: c.opacity, bg: c.backgroundColor, col: c.color }; });
-      assert.deepStrictEqual([dis.d, dis.o, dis.bg, dis.col], [true, '1', 'rgb(251, 241, 214)', 'rgb(107, 95, 85)'], 'Salva note disattivato: tinta chiara, testo grigio scuro');
+      assert.deepStrictEqual([dis.d, dis.o, dis.bg, dis.col], [true, '1', 'rgb(255, 253, 249)', 'rgb(107, 95, 85)'], 'Salva note disattivato: carta, testo grigio scuro (6,1:1)');
+      const inv = await P.page.$eval('#idea-chat-invia', e => { const c = getComputedStyle(e); return [e.disabled, c.opacity, c.backgroundColor, c.color]; });
+      assert.deepStrictEqual(inv, [true, '1', 'rgb(251, 241, 214)', 'rgb(107, 95, 85)'], '«Invia» disattivato senza testo: tinta chiara, testo grigio scuro (5,5:1)');
       await P.page.click('#sb-lab'); await P.page.waitForFunction(() => S.view === 'lab-globale');
       assert.deepStrictEqual(await P.page.$$eval('#sidebar .active', l => l.map(e => e.id)), ['sb-lab'], 'le altre voci funzionano come prima');
       const M = await nuovaPagina({ viewport: { width: 390, height: 844 } });
@@ -384,7 +388,14 @@ let tmp;
       // Contrasto WCAG fra due colori rgb(...) calcolati dal browser.
       const contrasto = (a, b) => { const L = c => { const v = c.match(/\d+(\.\d+)?/g).slice(0, 3).map(Number).map(x => x / 255).map(x => x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4)); return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2]; };
         const x = L(a), y = L(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
-      const stile = (sel, props, pseudo) => P.page.$eval(sel, (e, a) => { const cs = getComputedStyle(e, a[1] || null); return a[0].map(k => cs.getPropertyValue(k)); }, [props, pseudo]);
+      // Lettura ripetuta se un valore e' vuoto: con la conversazione (blocco 2c) la pagina si ridisegna in modo asincrono.
+      const stile = async (sel, props, pseudo) => {
+        for (let i = 0; ; i++) {
+          const v = await P.page.$eval(sel, (e, a) => { const cs = getComputedStyle(e, a[1] || null); return a[0].map(k => cs.getPropertyValue(k)); }, [props, pseudo]);
+          if (v.every(x => x !== '') || i >= 20) return v;
+          await P.page.waitForTimeout(100);
+        }
+      };
       await P.home();
       const token = await P.ev(() => { const cs = getComputedStyle(document.body); return ['--d3-amb-idee', '--d3-amb-idee-testo', '--d3-amb-idee-tinta', '--d3-amb-lab', '--d3-amb-schede', '--d3-amb-produzione', '--d3-terra', '--d3-ink', '--d3-bg', '--d3-card'].map(k => cs.getPropertyValue(k).trim()); });
       assert.deepStrictEqual(token, ['#E9B949', '#7A5A12', '#FBF1D6', '#24533F', '#94661C', '#B4501C', '#B4501C', '#231B14', '#F4EEE2', '#FFFDF9']);
@@ -410,6 +421,7 @@ let tmp;
       const [freccia] = await stile('.idee-riga .idee-riga-freccia', ['color']); const [rigaFondo] = await stile('.idee-lista', ['background-color']);
       assert.ok(contrasto(freccia, rigaFondo) >= 4.5);
       await P.ev(i => apriIdea(i), idee.appunto); await P.page.waitForSelector('.idee-pill-aperta');
+      await P.page.waitForFunction(i => S.ideaChat && S.ideaChat[i] && S.ideaChat[i].stato === 'pronto', idee.appunto); // blocco 2c: conversazione letta (la pagina si ridisegna)
       const [pt, pf] = await stile('.idee-pill-aperta', ['color', 'background-color']); assert.ok(contrasto(pt, pf) >= 4.5, 'pillola: ' + contrasto(pt, pf).toFixed(2));
       // Fuori dalle Idee il primario resta quello dell'ambiente (es. LAB verde, testo bianco).
       await P.ev(() => { S.view = 'lab-globale'; render(); });
@@ -444,7 +456,8 @@ let tmp;
 
     await test('Z1. Contratto: solo azioni gia\' collaudate di P2-a.1 per le Idee, nessuna richiesta AI, nessun errore JavaScript', async () => {
       const ideeAzioni = [...new Set(azioni.filter(a => /idea/i.test(a)))].sort();
-      assert.deepStrictEqual(ideeAzioni.filter(a => !['archiveIdea', 'createIdea', 'loadIdeas', 'updateIdeaNotes'].includes(a)), []);
+      // Blocco 2c: il dettaglio legge anche la conversazione (loadIdeaTurns); qui nessun messaggio viene inviato.
+      assert.deepStrictEqual(ideeAzioni.filter(a => !['archiveIdea', 'createIdea', 'loadIdeas', 'updateIdeaNotes', 'loadIdeaTurns'].includes(a)), []);
       assert.deepStrictEqual(richiesteAI.length, 0, 'nessuna chiamata AI');
       assert.deepStrictEqual(P.errori, []);
       assert.ok(!/Supabase error \[ideas\]/.test(logApp), 'nessun errore del database: ' + logApp.slice(-300));

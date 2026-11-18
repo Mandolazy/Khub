@@ -1178,7 +1178,23 @@ body.ui-d3 .d3-lab .btn-outline{color:var(--d3-ink);border-color:var(--d3-bordo)
 .idee-link{display:flex;flex-direction:column;gap:2px;}
 .idee-link a{color:var(--d3-amb-idee-testo);font-weight:600;overflow-wrap:anywhere;}
 .idee-link-url{font-size:12px;color:var(--d3-ink2);overflow-wrap:anywhere;}
-.idee-conversazione{border-style:dashed;border-color:var(--d3-campo);min-height:180px;background:var(--d3-bar);}
+.idee-conversazione{min-height:180px;}
+.idee-chat-elenco{display:flex;flex-direction:column;gap:10px;}
+.idee-msg{max-width:min(680px,88%);border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;gap:4px;}
+.idee-msg-chi{font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--d3-ink2);}
+.idee-msg-testo{white-space:pre-wrap;overflow-wrap:anywhere;font-size:15px;line-height:1.55;color:var(--d3-ink);}
+.idee-msg-chef{align-self:flex-end;background:var(--d3-amb-idee-tinta);border:1px solid var(--d3-amb-idee);border-bottom-right-radius:4px;}
+.idee-msg-ai{align-self:flex-start;background:var(--d3-bar);border:1px solid var(--d3-bordo);border-bottom-left-radius:4px;}
+.idee-msg-ai .idee-msg-chi{color:var(--d3-amb-idee-testo);}
+.idee-msg-attesa .idee-msg-testo{color:var(--d3-ink2);font-style:italic;}
+.idee-msg-errore{align-self:flex-start;background:var(--d3-pericolo-tinta);border:1px solid var(--d3-pericolo);color:var(--d3-pericolo);gap:8px;}
+.idee-msg-errore .idee-msg-testo{color:var(--d3-pericolo);font-size:14px;}
+.idee-msg-errore .d3-btn{align-self:flex-start;min-height:36px;padding:6px 12px;}
+.idee-puntini span{animation:idee-puntino 1.2s infinite;opacity:.2;}
+.idee-puntini span:nth-child(2){animation-delay:.2s}.idee-puntini span:nth-child(3){animation-delay:.4s}
+@keyframes idee-puntino{0%,100%{opacity:.2}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){.idee-puntini span{animation:none;opacity:1}}
+.idee-chat-composer{display:flex;flex-direction:column;gap:10px;border-top:1px solid var(--d3-bordo);padding-top:14px;}
 .idee-conv-testa{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
 .idee-conv-vuota{color:var(--d3-ink2);font-size:14px;max-width:560px;}
 .idee-avviso{background:var(--d3-sabbia);border-radius:8px;padding:10px 14px;font-size:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
@@ -11549,7 +11565,7 @@ function render(){
   // MS15: render() ricostruisce #main; se si sta scrivendo la nota, cursore e
   // focus vengono ripristinati (il testo e' gia' nella bozza).
   // MS17b: stesso trattamento per la ricerca dello Storico (si filtra a ogni tasto).
-  const noteFocus=(()=>{const a=document.activeElement;return a&&(a.id==='session-note-input'||a.id==='history-search'||a.id==='prod-recipe-search'||a.id==='d3-schede-search'||a.id==='d3-schede-search-m'||a.id==='quick-calc-portions'||a.id==='quick-calc-gpp'||a.id==='idea-titolo'||a.id==='idea-spunto'||a.id==='idea-url'||a.id==='idea-nuova-note'||a.id==='idea-note')?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null;})();
+  const noteFocus=(()=>{const a=document.activeElement;return a&&(a.id==='session-note-input'||a.id==='history-search'||a.id==='prod-recipe-search'||a.id==='d3-schede-search'||a.id==='d3-schede-search-m'||a.id==='quick-calc-portions'||a.id==='quick-calc-gpp'||a.id==='idea-titolo'||a.id==='idea-spunto'||a.id==='idea-url'||a.id==='idea-nuova-note'||a.id==='idea-note'||a.id==='idea-chat-testo')?{id:a.id,s:a.selectionStart,e:a.selectionEnd}:null;})();
   if(main)main.innerHTML=mainContent+(S.showFamilyPicker?renderFamilyPicker():'')+(S.showMergePicker?renderMergePicker():'')+(S.showMergeConfirm?renderMergeConfirm():'')+(S.uiD3?renderD3Overlays():'')+(S.showSchedeFamiglie?renderSchedeFamigliePicker():'')+(S.showCondividiStaff?renderCondividiStaffModal():'')+(S.showOnboarding?renderOnboarding():'')+(S.toastAction?renderToastAction():S.toast?`<div class="toast"><i class="ti ${S.toast.icon}"></i>${escAttr(S.toast.msg)}</div>`:'')+renderUnitConversionModal()+renderLabConversionModal()+renderMandaInProduzioneModal()+renderConversionPreflightModal();
 
   if(noteFocus){const ta=document.getElementById(noteFocus.id);if(ta){try{ta.focus();ta.setSelectionRange(noteFocus.s,noteFocus.e);}catch(e){}}}
@@ -11566,6 +11582,8 @@ function render(){
 
   syncProductionHomeLoad(); // Home Produzione: Sessioni ricaricate a ogni ingresso
   syncIdeeLoad(); // Idee: primo caricamento (Home compresa, per il conteggio)
+  syncIdeaChat(); // Idee: conversazione letta all'apertura del dettaglio
+  ideaChatDopoRender(); // Idee: scorrimento sull'ultimo scambio
   revealProductionHighlight(); // Sessione appena creata: portata nell'area visibile
 
   syncHistory();
@@ -11963,7 +11981,10 @@ function syncIdeeLoad(){
 function apriIdee(){ideeStato();S.view='idee';render();caricaIdee();}
 function apriIdea(id){
   id=ideaIdSicuro(id);if(!id)return;
-  ideeStato();S.ideaAperta=id;S.ideaConfermaArchivio=null;S.view='idea';render();
+  ideeStato();S.ideaAperta=id;S.ideaConfermaArchivio=null;S.view='idea';
+  var c=ideaChatStato(id);if(!c.invio){c.stato=c.stato==='pronto'?'pronto':'nonCaricato';c.avviso=null;}
+  render();
+  if(c.stato==='pronto'&&!c.invio)ideaChatCarica(id,true); // gia' vista: si aggiorna senza svuotare
 }
 function setIdeeFiltro(f){ideeStato().filtro=['aperte','trasformate','archiviate'].indexOf(f)!==-1?f:'aperte';render();}
 function apriNuovaIdea(){ideeStato();S.ideaNuova.errore=null;S.view='idea-nuova';render();}
@@ -11974,6 +11995,7 @@ function ideaDettaturaSupportata(){return typeof window!=='undefined'&&!!(window
 function ideaDettaturaAttiva(campo){return!!(S.recording&&S.recordingTarget==='idea-'+campo);}
 function ideaAggiungiTesto(base,testo){base=base||'';return base.trim()?base.replace(/\s+$/,'')+' '+testo:testo;}
 function toggleIdeaDettatura(campo){
+  if(campo==='chat')return toggleIdeaChatDettatura();
   if(S.recording){
     if(S.recordingTarget!=='idea-'+campo){toast("C'è già un microfono attivo","ti-microphone");return;}
     stopDictation();return;
@@ -12006,7 +12028,7 @@ function stopIdeaDettaturaSeUscita(){
   if(!S.recording||typeof S.recordingTarget!=='string'||S.recordingTarget.indexOf('idea-')!==0)return;
   var c=S.recordingTarget.slice(5);
   if((c==='spunto'||c==='nuova-note')&&S.view==='idea-nuova')return;
-  if(c==='note'&&S.view==='idea')return;
+  if((c==='note'||c==='chat')&&S.view==='idea')return;
   try{if(S._speechRecognition)S._speechRecognition.stop();}catch(e){console.error('[Idee] stop dettatura',e);}
   S.recording=false;
 }
@@ -12179,6 +12201,288 @@ function apriSchedaDaIdea(recipeId){
   var r=typeof recipeId==='string'?R(recipeId):null;if(!r)return;
   S.selectedId=r.id;S.view='ricetta-madre-v2';render();
 }
+// ── Conversazione con MichelinAI (P2-a.2, blocco 2c) ──
+// Usa SOLO loadIdeaTurns e ideaChat (blocco 2b): modello, istruzioni e
+// cronologia li decide il server. Il browser genera un turnId per ogni nuovo
+// messaggio e lo RIUSA per lo stesso testo finche' l'esito non e' certo:
+// l'idempotenza e' quella del server, qui non ce n'e' una seconda.
+// Bozza locale (solo questo browser): testo non inviato + turnId in sospeso.
+var IDEA_CHAT_MAX=4000;
+var IDEA_CHAT_PRENOTAZIONE_MS=185000; // come il server (180 s) + margine: oltre, un turno "in corso" e' interrotto
+var IDEA_CHAT_CONTROLLO_MS=4000;      // controllo dell'esito di un turno in elaborazione
+var IDEA_CHAT_BOZZA_KEY='khub_idea_chat_';
+var IDEA_TURNO_RE=/^it_[A-Za-z0-9_-]{8,64}$/;
+function ideaChatStato(id){
+  if(!S.ideaChat)S.ideaChat={};
+  if(!S.ideaChat[id])S.ideaChat[id]={stato:'nonCaricato',turni:[],invio:null,avviso:null,richiesta:0,timer:null};
+  return S.ideaChat[id];
+}
+function ideaChatNuovoId(){
+  var hex='';
+  try{var b=new Uint8Array(12);crypto.getRandomValues(b);for(var i=0;i<b.length;i++)hex+=b[i].toString(16).padStart(2,'0');}
+  catch(e){hex=Date.now().toString(16)+Math.random().toString(16).slice(2,14);}
+  return'it_'+hex;
+}
+function ideaChatLeggiBozza(id){
+  if(!S.ideaChatBozze)S.ideaChatBozze={};
+  if(!S.ideaChatBozze[id]){
+    var b={testo:'',origine:'testo',turnId:null,turnTesto:null};
+    try{
+      var v=JSON.parse(localStorage.getItem(IDEA_CHAT_BOZZA_KEY+id)||'null');
+      if(v&&typeof v==='object'){
+        if(typeof v.testo==='string')b.testo=v.testo.slice(0,IDEA_CHAT_MAX);
+        if(v.origine==='voce')b.origine='voce';
+        if(typeof v.turnId==='string'&&IDEA_TURNO_RE.test(v.turnId)&&typeof v.turnTesto==='string'){b.turnId=v.turnId;b.turnTesto=v.turnTesto;}
+      }
+    }catch(e){}
+    S.ideaChatBozze[id]=b;
+  }
+  return S.ideaChatBozze[id];
+}
+function ideaChatScriviBozza(id,b){
+  if(!S.ideaChatBozze)S.ideaChatBozze={};
+  S.ideaChatBozze[id]=b;
+  try{if(!b.testo&&!b.turnId)localStorage.removeItem(IDEA_CHAT_BOZZA_KEY+id);else localStorage.setItem(IDEA_CHAT_BOZZA_KEY+id,JSON.stringify(b));}catch(e){}
+}
+function ideaChatAggiorna(c,turno){ // un turno per id, ordine del server
+  if(!turno||!IDEA_TURNO_RE.test(turno.id||''))return;
+  var trovato=false;
+  c.turni=c.turni.map(function(t){if(t.id===turno.id){trovato=true;return turno;}return t;});
+  if(!trovato)c.turni.push(turno);
+  c.turni.sort(function(a,b){return String(a.created_at||'').localeCompare(String(b.created_at||''))||(a.id<b.id?-1:a.id>b.id?1:0);});
+}
+function ideaChatInterrotto(t){
+  if(t.status!=='in_corso')return false;
+  var u=Date.parse(t.updated_at||t.created_at||'');
+  return isFinite(u)&&Date.now()-u>IDEA_CHAT_PRENOTAZIONE_MS;
+}
+function ideaChatVisibile(id){return S.view==='idea'&&S.ideaAperta===id;}
+// Allinea la bozza con il server: un messaggio arrivato al server (in qualunque
+// stato) non resta nel campo; uno mai arrivato resta, con lo stesso turnId.
+function ideaChatRiconcilia(id){
+  var c=ideaChatStato(id),b=ideaChatLeggiBozza(id);
+  if(!b.turnId||c.invio)return;
+  var t=c.turni.find(function(x){return x.id===b.turnId;});
+  if(t){ // arrivato al server: si vede nella conversazione, non resta nel campo
+    ideaChatScriviBozza(id,{testo:b.testo===b.turnTesto?'':b.testo,origine:b.testo===b.turnTesto?'testo':b.origine,turnId:null,turnTesto:null});
+  }else if(!b.testo.trim()){ // mai arrivato: torna nel campo con lo stesso turnId
+    ideaChatScriviBozza(id,{testo:b.turnTesto,origine:b.origine,turnId:b.turnId,turnTesto:b.turnTesto});
+  }
+}
+function ideaChatPianifica(id){
+  var c=ideaChatStato(id);
+  if(c.timer){clearTimeout(c.timer);c.timer=null;}
+  var attesa=c.turni.some(function(t){return t.status==='in_corso'&&!ideaChatInterrotto(t);});
+  if(attesa&&!c.invio)c.timer=setTimeout(function(){c.timer=null;if(ideaChatVisibile(id))ideaChatCarica(id,true);},IDEA_CHAT_CONTROLLO_MS);
+}
+async function ideaChatCarica(id,silenzioso){
+  var c=ideaChatStato(id);
+  var n=++c.richiesta;
+  if(!silenzioso&&c.stato!=='pronto')c.stato='caricamento';
+  var esito=await ideeChiama({supabaseAction:'loadIdeaTurns',ideaId:id});
+  if(n!==c.richiesta)return;
+  if(esito&&esito.ok&&Array.isArray(esito.turns)){
+    var prima=c.turni.length,eraPronto=c.stato==='pronto';
+    c.turni=[];esito.turns.forEach(function(t){ideaChatAggiorna(c,t);});
+    c.stato='pronto';
+    ideaChatRiconcilia(id);
+    if(!eraPronto||c.turni.length!==prima)S.ideaChatScorri=id;
+  }else if(c.stato!=='pronto'){
+    c.stato='errore';c.avviso=ideaChatMessaggio(esito,'caricamento');
+  }
+  ideaChatPianifica(id);
+  if(ideaChatVisibile(id))render();
+}
+// Chiamata da render(): conversazione letta all'apertura dell'Idea.
+function syncIdeaChat(){
+  if(S.view!=='idea')return;
+  var id=ideaIdSicuro(S.ideaAperta);if(!id)return;
+  if(ideaChatStato(id).stato==='nonCaricato')ideaChatCarica(id);
+}
+function ideaChatMessaggio(esito,fase){
+  var c=esito&&esito.code;
+  var m={
+    sessione:'Sessione scaduta: accedi di nuovo. Il messaggio resta nel campo.',
+    rete:'Connessione non riuscita. Il messaggio resta nel campo: puoi inviarlo di nuovo.',
+    risposta:'Esito non chiaro. Il messaggio resta nel campo: puoi inviarlo di nuovo senza duplicarlo.',
+    idee_non_disponibili:'Conversazione non disponibile in questo momento. Il messaggio resta nel campo: riprova.',
+    idea_occupata:'MichelinAI sta ancora rispondendo a un altro messaggio di questa Idea: attendi la risposta, poi invia.',
+    turno_in_elaborazione:'MichelinAI sta ancora rispondendo a questo messaggio.',
+    limite_turni:'Questa Idea ha raggiunto il numero massimo di scambi con MichelinAI.',
+    limite_giornaliero:'Limite giornaliero di MichelinAI raggiunto: riprova domani. Il messaggio resta nel campo.',
+    messaggio_non_valido:'Messaggio non valido: '+((esito&&esito.error)||'controlla il testo')+'.',
+    idea_archiviata:'L\'Idea è archiviata: la conversazione è in sola lettura.',
+    idea_trasformata:'L\'Idea è già diventata una Ricetta: la conversazione è in sola lettura.',
+    tentativi_esauriti:'Troppi tentativi per quel messaggio: è tornato nel campo, puoi inviarlo di nuovo.',
+    turno_non_valido:'Il messaggio è cambiato rispetto al tentativo precedente: invialo di nuovo.'
+  };
+  if(fase==='caricamento'&&(!c||c==='rete'||c==='risposta'||c==='idee_non_disponibili'))return'Conversazione non disponibile in questo momento.';
+  return m[c]||null;
+}
+function ideaChatErroreTurno(code){
+  return{ai_non_disponibile:'MichelinAI non era disponibile.',ai_tempo_scaduto:'MichelinAI non ha risposto in tempo.',risposta_non_valida:'MichelinAI ha dato una risposta non utilizzabile.',
+    ai_non_configurata:'MichelinAI non è configurato in questo ambiente.',interrotto:'L\'elaborazione si è interrotta.',errore_server:'Errore del server durante la risposta.'}[code]||'La risposta non è arrivata.';
+}
+function ideaChatInput(el){
+  var id=S.ideaAperta;if(!id)return;
+  var b=ideaChatLeggiBozza(id);
+  ideaChatScriviBozza(id,{testo:el.value.slice(0,IDEA_CHAT_MAX),origine:el.value.trim()?b.origine:'testo',turnId:b.turnId,turnTesto:b.turnTesto});
+  var btn=document.getElementById('idea-chat-invia'),c=ideaChatStato(id);
+  if(btn)btn.disabled=!el.value.trim()||!!c.invio;
+  var cont=document.getElementById('idea-chat-conta');
+  if(cont)cont.textContent=el.value.length>IDEA_CHAT_MAX-500?el.value.length+' / '+IDEA_CHAT_MAX:'';
+}
+function ideaChatTasto(e){if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();ideaChatInvia();}}
+// Invio del messaggio nel campo, o nuovo tentativo di un turno salvato (retry: stesso turnId e stesso testo).
+async function ideaChatInvia(retry){
+  var id=ideaIdSicuro(S.ideaAperta);if(!id)return;
+  var idea=ideaTrova(id);if(!idea||idea.status!=='aperta')return;
+  var c=ideaChatStato(id);
+  if(c.invio)return; // un solo invio alla volta per Idea
+  var b=ideaChatLeggiBozza(id),invio;
+  if(retry){
+    var t=c.turni.find(function(x){return x.id===retry;});if(!t)return;
+    invio={turnId:t.id,testo:t.question,origine:t.question_origin==='voce'?'voce':'testo',retry:true};
+  }else{
+    var el=document.getElementById('idea-chat-testo');
+    var testo=((el?el.value:b.testo)||'').slice(0,IDEA_CHAT_MAX);
+    if(!testo.trim())return;
+    var turnId=b.turnId&&b.turnTesto===testo?b.turnId:ideaChatNuovoId(); // stesso testo, esito incerto: stesso turnId
+    invio={turnId:turnId,testo:testo,origine:b.origine,retry:false};
+    // Il campo si svuota (il messaggio si vede nella conversazione); testo e turnId restano nella bozza locale.
+    ideaChatScriviBozza(id,{testo:'',origine:b.origine,turnId:turnId,turnTesto:testo});
+  }
+  if(S.recording&&S.recordingTarget==='idea-chat')stopDictation();
+  c.invio=invio;c.avviso=null;S.ideaChatScorri=id;
+  if(c.timer){clearTimeout(c.timer);c.timer=null;}
+  render();
+  var esito=await ideeChiama({supabaseAction:'ideaChat',ideaId:id,turnId:invio.turnId,message:invio.testo,origin:invio.origine});
+  c.invio=null;
+  var code=esito&&esito.code;
+  var bozza=ideaChatLeggiBozza(id);
+  var pulisci=function(){ // il messaggio e' nel server: niente piu' turnId in sospeso (resta cio' che l'utente ha scritto nel frattempo)
+    if(!invio.retry)ideaChatScriviBozza(id,{testo:bozza.testo,origine:bozza.testo.trim()?bozza.origine:'testo',turnId:null,turnTesto:null});
+  };
+  var rimetti=function(conId){ // il messaggio torna nel campo (se l'utente non ha gia' scritto altro)
+    var testo=bozza.testo.trim()?bozza.testo:invio.testo;
+    ideaChatScriviBozza(id,conId?{testo:testo,origine:invio.origine,turnId:invio.turnId,turnTesto:invio.testo}:{testo:testo,origine:invio.origine,turnId:null,turnTesto:null});
+  };
+  if(esito&&esito.ok&&esito.turn){
+    ideaChatAggiorna(c,esito.turn);pulisci();S.ideaChatScorri=id;
+  }else if(code==='turno_in_elaborazione'||/^(ai_|risposta_non_valida)/.test(code||'')){
+    pulisci(); // turno salvato dal server (in corso o fallito): si vede nella conversazione
+    if(code==='turno_in_elaborazione')c.avviso=ideaChatMessaggio(esito);
+  }else if(code==='tentativi_esauriti'){
+    c.avviso=ideaChatMessaggio(esito);rimetti(false); // reinviato, sara' un turno nuovo
+  }else if(code==='turno_non_valido'){
+    c.avviso=ideaChatMessaggio(esito);if(!invio.retry)rimetti(false);
+  }else if(code==='idea_archiviata'||code==='idea_trasformata'){
+    c.avviso=ideaChatMessaggio(esito);if(!invio.retry)rimetti(false);caricaIdee();
+  }else if(invio.retry){
+    c.avviso=ideaChatMessaggio(esito)||'Nuovo tentativo non riuscito: riprova.';
+  }else{
+    // Esito incerto (rete, sessione, errore) o rifiuto senza turno: il testo torna nel campo con lo
+    // stesso turnId, cosi' il nuovo invio non puo' duplicare un turno gia' arrivato al server.
+    c.avviso=ideaChatMessaggio(esito)||'Messaggio non inviato. Resta nel campo: riprova.';
+    rimetti(true);
+  }
+  await ideaChatCarica(id,true); // il server e' la fonte della conversazione (nessun turno doppio)
+}
+function ideaChatRiscrivi(turnId){
+  var id=S.ideaAperta,c=ideaChatStato(id),t=c.turni.find(function(x){return x.id===turnId;});
+  if(!t)return;
+  var b=ideaChatLeggiBozza(id);
+  ideaChatScriviBozza(id,{testo:b.testo&&b.testo.trim()?b.testo:t.question,origine:t.question_origin==='voce'?'voce':'testo',turnId:null,turnTesto:null});
+  render();
+  var el=document.getElementById('idea-chat-testo');if(el){el.focus();}
+}
+// Dettatura nel campo del messaggio: testo AGGIUNTO, mai inviato da solo.
+function toggleIdeaChatDettatura(){
+  if(S.recording){
+    if(S.recordingTarget!=='idea-chat'){toast("C'è già un microfono attivo","ti-microphone");return;}
+    stopDictation();return;
+  }
+  var id=S.ideaAperta;if(!id)return;
+  var el=document.getElementById('idea-chat-testo');if(el)ideaChatInput(el);
+  startDictation({target:'idea-chat',previewId:'idea-voce-chat',
+    onFinal:function(testo){
+      var b=ideaChatLeggiBozza(id);
+      ideaChatScriviBozza(id,{testo:ideaAggiungiTesto(b.testo,testo).slice(0,IDEA_CHAT_MAX),origine:'voce',turnId:b.turnId,turnTesto:b.turnTesto});
+    },
+    onEmpty:function(){toast('Nessun testo riconosciuto: il messaggio non è cambiato.','ti-microphone-off');},
+    errorMessage:function(code){
+      if(code==='not-allowed'||code==='service-not-allowed')return'Permesso del microfono negato: puoi sempre scrivere.';
+      if(code==='audio-capture')return'Nessun microfono disponibile: puoi sempre scrivere.';
+      if(code==='no-speech')return'Nessun parlato rilevato.';
+      if(code==='network')return'Servizio vocale del browser non raggiungibile: puoi sempre scrivere.';
+      return null;
+    }
+  });
+}
+// Dopo il disegno: la conversazione scorre sull'ultimo scambio (pagina intera, anche su smartphone).
+function ideaChatDopoRender(){
+  if(!S.ideaChatScorri||S.ideaChatScorri!==S.ideaAperta||S.view!=='idea')return;
+  var f=document.getElementById('idea-chat-fondo');
+  if(!f)return;
+  S.ideaChatScorri=null;
+  try{f.scrollIntoView({block:'end',behavior:'smooth'});}catch(e){f.scrollIntoView(false);}
+}
+function renderIdeaChat(idea){
+  var id=ideaIdSicuro(idea.id),c=ideaChatStato(id),aperta=idea.status==='aperta';
+  var bolla=function(chi,testo,extra){
+    return`<div class="idee-msg idee-msg-${chi}"${extra||''}><div class="idee-msg-chi">${chi==='chef'?'Tu':'MichelinAI'}</div><div class="idee-msg-testo">${escAttr(testo)}</div></div>`;
+  };
+  var scrive=`<div class="idee-msg idee-msg-ai idee-msg-attesa" role="status"><div class="idee-msg-chi">MichelinAI</div><div class="idee-msg-testo">Sta rispondendo<span class="idee-puntini" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></div></div>`;
+  var righe=c.turni.map(function(t){
+    var tid=ideaIdSicuro(t.idea_id)===id&&IDEA_TURNO_RE.test(t.id)?t.id:'';
+    var chef=bolla('chef',t.question,` data-turno="${tid}"${t.question_origin==='voce'?' data-voce="1"':''}`)
+      .replace('<div class="idee-msg-chi">Tu</div>','<div class="idee-msg-chi">Tu'+(t.question_origin==='voce'?' · dettato':'')+'</div>');
+    if(t.status==='completato')return chef+bolla('ai',t.response||'',` data-turno="${tid}"`);
+    var occupato=!!c.invio;
+    if(c.invio&&c.invio.turnId===t.id)return chef+scrive; // nuovo tentativo in corso
+    if(t.status==='in_corso'&&!ideaChatInterrotto(t))return chef+scrive;
+    var errore=t.status==='in_corso'?ideaChatErroreTurno('interrotto'):ideaChatErroreTurno(t.error_code);
+    var azione='';
+    if(aperta&&!(c.invio&&c.invio.turnId===t.id)){
+      azione=(t.attempts||1)<3||t.status==='in_corso'
+        ?`<button class="d3-btn d3-btn-line idee-msg-riprova" data-turno="${tid}" onclick="ideaChatInvia('${tid}')" ${occupato?'disabled':''}>Riprova</button>`
+        :`<button class="d3-btn d3-btn-text" data-turno="${tid}" onclick="ideaChatRiscrivi('${tid}')">Riscrivi il messaggio</button>`;
+    }
+    return chef+`<div class="idee-msg idee-msg-errore" role="alert" data-turno="${tid}"><div class="idee-msg-testo">${escAttr(errore)}${(t.attempts||1)>=3&&t.status!=='in_corso'?' Troppi tentativi per questo messaggio.':''}</div>${azione}</div>`;
+  }).join('');
+  // Invio in corso di un messaggio non ancora nella conversazione (risposta in arrivo).
+  if(c.invio&&!c.turni.some(function(t){return t.id===c.invio.turnId;}))righe+=bolla('chef',c.invio.testo)+scrive;
+  var corpo;
+  if(c.stato==='caricamento'||c.stato==='nonCaricato')corpo=`<div class="idee-aiuto" id="idea-chat-caricamento">Caricamento della conversazione…</div>`;
+  else if(c.stato==='errore')corpo=`<div class="idee-errore" id="idea-chat-errore" role="alert">${escAttr(c.avviso||'Conversazione non disponibile.')} <button class="d3-btn d3-btn-text" onclick="ideaChatStato('${id}').stato='nonCaricato';render()">Riprova</button></div>`;
+  else if(!righe)corpo=aperta?`<div class="idee-conv-vuota" id="idea-chat-vuota">Racconta a MichelinAI cosa vorresti ottenere: un piatto, un ingrediente, una consistenza. Puoi scrivere o dettare liberamente; le proposte restano proposte finché non decidi tu.</div>`
+    :`<div class="idee-aiuto" id="idea-chat-vuota">Nessuno scambio con MichelinAI.</div>`;
+  else corpo=`<div class="idee-chat-elenco" id="idea-chat-elenco" aria-live="polite">${righe}</div>`;
+  var composer='';
+  if(aperta&&c.stato!=='errore'){
+    var b=ideaChatLeggiBozza(id),testo=b.testo||'';
+    composer=`<div class="idee-chat-composer">
+      ${c.avviso?`<div class="idee-errore" id="idea-chat-avviso" role="alert">${escAttr(c.avviso)}</div>`:''}
+      <label class="idee-campo"><span class="idee-etichetta">Messaggio a MichelinAI</span>
+        <textarea id="idea-chat-testo" rows="3" maxlength="${IDEA_CHAT_MAX}" placeholder="Scrivi o detta liberamente…" oninput="ideaChatInput(this)" onkeydown="ideaChatTasto(event)">${escAttr(testo)}</textarea></label>
+      <div class="d3-riga-azioni">
+        <button class="d3-btn d3-btn-primary" id="idea-chat-invia" onclick="ideaChatInvia()" ${c.invio||!testo.trim()?'disabled':''}>${c.invio?'MichelinAI sta rispondendo…':'Invia'}</button>
+        ${ideaMicHtml('chat')}
+        <span class="idee-aiuto" id="idea-chat-conta">${testo.length>IDEA_CHAT_MAX-500?testo.length+' / '+IDEA_CHAT_MAX:''}</span>
+      </div>${ideaVoceHtml('chat')}
+      <div class="idee-aiuto">Le quantità proposte da MichelinAI sono indicative: diventano tue solo quando le scegli. Ctrl+Invio per inviare.</div>
+    </div>`;
+  }else if(!aperta){
+    composer=`<div class="idee-aiuto" id="idea-chat-sola-lettura">Conversazione in sola lettura: ${idea.status==='archiviata'?'l\'Idea è archiviata':'l\'Idea è già diventata una Ricetta'}.</div>`;
+  }
+  return`<section class="d3-card idee-card idee-conversazione" id="idea-conversazione" aria-labelledby="idea-sez-conv">
+      <div class="idee-conv-testa"><div class="d3-sez-titolo" id="idea-sez-conv">Conversazione con MichelinAI</div></div>
+      ${corpo}
+      ${composer}
+      <div id="idea-chat-fondo"></div>
+    </section>`;
+}
+
 function renderIdea(){
   var s=ideeStato(),id=ideaIdSicuro(S.ideaAperta),idea=id?ideaTrova(id):null;
   var crumb=`<div class="d3-crumb"><button onclick="S.view='app-home';render()">Home</button> › <button onclick="apriIdee()">Idee</button> ›</div>`;
@@ -12202,7 +12506,7 @@ function renderIdea(){
   var note=aperta
     ?`<textarea id="idea-note" rows="4" maxlength="${IDEA_LIMITI.note}" placeholder="Annota cosa vuoi provare, dubbi, riferimenti…" oninput="ideaNoteInput(this)">${escAttr(noteTesto)}</textarea>
       <div class="d3-riga-azioni">
-        <button class="d3-btn d3-btn-primary" id="idea-note-salva" onclick="salvaNoteIdea()" ${S.ideaSalvaNote||noteTesto===(idea.notes||'')?'disabled':''}>${S.ideaSalvaNote?'Salvataggio…':'Salva note'}</button>
+        <button class="d3-btn d3-btn-line" id="idea-note-salva" onclick="salvaNoteIdea()" ${S.ideaSalvaNote||noteTesto===(idea.notes||'')?'disabled':''}>${S.ideaSalvaNote?'Salvataggio…':'Salva note'}</button>
         ${ideaMicHtml('note')}
       </div>${ideaVoceHtml('note')}`
     :(idea.notes?`<div class="idee-spunto" id="idea-note-testo">${escAttr(idea.notes)}</div>`:`<div class="idee-aiuto" id="idea-note-testo">Nessuna nota.</div>`);
@@ -12229,10 +12533,7 @@ function renderIdea(){
       <div class="d3-sez-titolo" id="idea-sez-spunto">${idea.source_type==='link'?'Provenienza':'Spunto'}</div>
       ${fonte||'<div class="idee-aiuto">Nessun testo.</div>'}
     </section>
-    <section class="d3-card idee-card idee-conversazione" id="idea-conversazione" aria-labelledby="idea-sez-conv">
-      <div class="idee-conv-testa"><div class="d3-sez-titolo" id="idea-sez-conv">Conversazione con MichelinAI</div>${d3Previsto()}</div>
-      <div class="idee-conv-vuota">Qui svilupperai l'Idea parlando o scrivendo a MichelinAI: proposte, alternative, ingredienti, quantità e procedimento. La Ricetta nascerà solo quando lo chiederai tu.</div>
-    </section>
+    ${renderIdeaChat(idea)}
     <section class="d3-card idee-card" aria-labelledby="idea-sez-note">
       <div class="d3-sez-titolo" id="idea-sez-note">Note</div>
       ${note}
