@@ -18,6 +18,10 @@ begin;
 do $$
 declare n bigint;
 begin
+  -- P2-a.2 (blocco 2e): le prenotazioni delle proposte (0016) dipendono da ideas.
+  if to_regclass('public.idea_proposal_locks') is not null then
+    raise exception 'Rollback 0013 fermato: esiste public.idea_proposal_locks (0016). Eseguire prima il rollback 0016.';
+  end if;
   -- P2-a.2: la conversazione delle Idee (0014) dipende da ideas: va tolta prima.
   if to_regclass('public.idea_turns') is not null then
     raise exception 'Rollback 0013 fermato: esiste public.idea_turns (0014). Eseguire prima il rollback 0014.';

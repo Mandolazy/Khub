@@ -393,7 +393,11 @@ function clientMain(fetchImpl, nomi) {
       'addIngredient', 'onIngQty', 'toggleActiveV2',
       // P2-a.2 (blocco 2a): area Idee. Riga «Idee» nella Home classica, Idea aperta ricordata dal tasto Indietro;
       // render/bindEvents erano gia' nell'elenco. Test: test-p2a2-idee-ui.
-      'navState', 'renderAppHome'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
+      'navState', 'renderAppHome',
+      // P2-a.2 (blocco 2e): savePreview riusata per salvare la proposta di un'Idea con id fissati
+      // (savePreview({rif}), ripetibile senza duplicati); senza argomento l'importazione e' identica.
+      // Test: test-p2a2-idee-scheda-ui E1-E8 e la suite dell'importazione.
+      'savePreview'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
     assert.deepStrictEqual(rimosse, [], 'nessuna funzione rimossa');
     // P0-c: computeFormulationWeights, computeSessionScaling e buildValidatedVariantPayload cambiano (elenco sopra).
     for (const n of ['deriveYieldPerUnit', 'computeLabRounding', 'applyLabRound', 'undoLabRound', 'createProductionSession', 'onValidate', 'confirmValidate', 'rendiAttivaPronta', 'riapriProntaInLab', 'onLabDeclaredYield', 'onStepText']) // P0-c.2: onIngQty cambia (elenco sopra)

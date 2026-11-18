@@ -1204,7 +1204,7 @@ export default async function handler(req, res) {
     //    (concorrenza ottimistica: vince uno solo), al massimo IDEA_CHAT.tentativi volte;
     //  - chiusura (completato/fallito) condizionata allo stesso tentativo: una
     //    elaborazione scaduta e ripresa da altri non sovrascrive nulla.
-    if (['loadIdeaTurns', 'ideaChat', 'ideaProposal'].includes(body.supabaseAction)) {
+    if (['loadIdeaTurns', 'ideaChat', 'ideaProposal', 'linkIdeaToRecipe'].includes(body.supabaseAction)) {
       const azione = body.supabaseAction;
       const no = (code, error, extra) => res.status(200).json(Object.assign({ ok: false, code, error }, extra || {}));
       // Richiesta a PostgREST sulle sole tabelle ideas/idea_turns (percorsi costanti, valori codificati).
@@ -1212,12 +1212,13 @@ export default async function handler(req, res) {
         const h = { ...SH_READ }; if (prefer) h.Prefer = prefer;
         // Solo due percorsi costanti; il resto e' il filtro, con valori gia' validati e codificati.
         const q = percorso.indexOf('?'), tabella = percorso.slice(0, q === -1 ? percorso.length : q), filtro = q === -1 ? '' : percorso.slice(q);
-        const url = tabella === 'ideas' ? SB + '/rest/v1/ideas' + filtro : tabella === 'idea_turns' ? SB + '/rest/v1/idea_turns' + filtro : null;
+        const url = tabella === 'ideas' ? SB + '/rest/v1/ideas' + filtro : tabella === 'idea_turns' ? SB + '/rest/v1/idea_turns' + filtro
+          : tabella === 'idea_proposal_locks' ? SB + '/rest/v1/idea_proposal_locks' + filtro : tabella === 'variants' ? SB + '/rest/v1/variants' + filtro : null;
         if (!url) throw new Error('tabella non ammessa');
         const r = await fetch(url, { method: metodo, headers: h, body: dati === undefined ? undefined : JSON.stringify(dati) });
         const testo = await r.text().catch(() => '');
         let corpo = null; try { corpo = testo ? JSON.parse(testo) : null; } catch (e) { corpo = null; }
-        if (!r.ok && r.status !== 409) console.error('Supabase error [idea_turns]:', r.status, corpo && typeof corpo.code === 'string' ? corpo.code : ''); // solo il codice: mai il testo dello chef
+        if (!r.ok && r.status !== 409 && !(tabella === 'idea_proposal_locks' && r.status === 404)) console.error('Supabase error [idea_turns]:', r.status, corpo && typeof corpo.code === 'string' ? corpo.code : ''); // solo il codice: mai il testo dello chef
         return { ok: r.ok, status: r.status, corpo, headers: r.headers };
       };
       const conta = async filtro => {
@@ -1236,7 +1237,7 @@ export default async function handler(req, res) {
       try {
         const ideaId = typeof body.ideaId === 'string' ? body.ideaId : '';
         if (!IDEA_ID.test(ideaId)) return no('idea_non_valida', 'id dell\'Idea non valido');
-        const ri = await sb('GET', 'ideas?select=id,title,status,source_type,source_url,source_text,notes,preview,preview_origin&id=eq.' + encodeURIComponent(ideaId));
+        const ri = await sb('GET', 'ideas?select=id,title,status,source_type,source_url,source_text,notes,preview,preview_origin,linked_recipe_id,linked_variant_id&id=eq.' + encodeURIComponent(ideaId));
         if (!ri.ok) throw new Error('lettura Idea (' + ri.status + ')');
         const idea = Array.isArray(ri.corpo) && ri.corpo.length ? ri.corpo[0] : null;
         if (!idea) return no('idea_non_trovata', 'Idea non trovata');
@@ -1244,6 +1245,38 @@ export default async function handler(req, res) {
         if (azione === 'loadIdeaTurns') {
           const turni = await sbSelectAll('idea_turns?select=' + IDEA_TURNO_COLONNE + '&idea_id=eq.' + encodeURIComponent(ideaId) + '&order=created_at.asc,id.asc');
           return res.status(200).json({ ok: true, turns: turni });
+        }
+
+        // ── linkIdeaToRecipe (blocco 2e): collega l'Idea alla Bozza GIA' salvata (verificata nel
+        // database) e la porta a «trasformata». Idempotente: ripetuto con gli stessi id risponde ok.
+        if (azione === 'linkIdeaToRecipe') {
+          const estraneiL = Object.keys(body).filter(k => !['supabaseAction', 'ideaId', 'recipeId', 'variantId'].includes(k));
+          if (estraneiL.length) return no('richiesta_non_valida', 'campi non ammessi: ' + estraneiL.join(', '));
+          const recipeId = body.recipeId, variantId = body.variantId;
+          if (!isValidId(recipeId) || !isValidId(variantId)) return no('richiesta_non_valida', 'id della Ricetta non valido');
+          const ideaPubblica = r => { const o = {}; IDEA_COLONNE.split(',').forEach(k => { o[k] = r[k] === undefined ? null : r[k]; }); return o; };
+          const gia = () => idea.linked_recipe_id === recipeId && idea.linked_variant_id === variantId;
+          if (idea.status === 'trasformata') {
+            if (!gia()) return no('idea_gia_trasformata', 'L\'Idea e\' gia\' collegata a un\'altra Ricetta');
+            const r0 = await sb('GET', 'ideas?select=' + IDEA_COLONNE + '&id=eq.' + encodeURIComponent(ideaId));
+            return res.status(200).json({ ok: true, idea: ideaPubblica(r0.corpo[0]), ripetuto: true });
+          }
+          if (idea.status === 'archiviata') return no('idea_archiviata', 'Un\'Idea archiviata non si modifica');
+          // La Bozza deve esistere davvero nel database, appartenere a quella Scheda ed essere in LAB.
+          const rv = await sb('GET', 'variants?select=id,recipe_id,status&id=eq.' + encodeURIComponent(variantId));
+          if (!rv.ok) throw new Error('lettura della Bozza (' + rv.status + ')');
+          const v = Array.isArray(rv.corpo) && rv.corpo.length ? rv.corpo[0] : null;
+          if (!v) return no('ricetta_non_trovata', 'La Ricetta non risulta salvata', { retry: true });
+          if (v.recipe_id !== recipeId || v.status !== 'lab') return no('ricetta_non_valida', 'La Ricetta indicata non e\' una Bozza di quella Scheda');
+          const w = await sb('PATCH', 'ideas?id=eq.' + encodeURIComponent(ideaId) + '&status=eq.aperta',
+            { status: 'trasformata', linked_recipe_id: recipeId, linked_variant_id: variantId, updated_at: new Date().toISOString() }, 'return=representation');
+          if (!w.ok) throw new Error('collegamento (' + w.status + ')');
+          if (Array.isArray(w.corpo) && w.corpo.length === 1) return res.status(200).json({ ok: true, idea: ideaPubblica(w.corpo[0]) });
+          // Nessuna riga: nel frattempo l'Idea e' cambiata (stesso collegamento = ok, altrimenti conflitto).
+          const r2 = await sb('GET', 'ideas?select=' + IDEA_COLONNE + '&id=eq.' + encodeURIComponent(ideaId));
+          const ora2 = r2.ok && Array.isArray(r2.corpo) ? r2.corpo[0] : null;
+          if (ora2 && ora2.status === 'trasformata' && ora2.linked_recipe_id === recipeId && ora2.linked_variant_id === variantId) return res.status(200).json({ ok: true, idea: ideaPubblica(ora2), ripetuto: true });
+          return no('idea_cambiata', 'L\'Idea e\' cambiata nel frattempo: ricarica la pagina');
         }
 
         // ── ideaProposal (blocco 2d): proposta di Ricetta ricostruita dalla conversazione.
@@ -1265,6 +1298,22 @@ export default async function handler(req, res) {
           const recenti = (prec && prec.base && Array.isArray(prec.base.generazioni) ? prec.base.generazioni : []).filter(x => typeof x === 'string' && Date.parse(x) > oraP - 86400000);
           if (recenti.length >= IDEA_PROPOSTA.perIdeaGiorno) return no('limite_proposte', 'Troppe proposte per questa Idea nelle ultime 24 ore');
           if ((await conta('created_at=gte.' + encodeURIComponent(new Date(oraP - 86400000).toISOString()))) >= IDEA_CHAT.turniGiorno) return no('limite_giornaliero', 'Limite giornaliero di MichelinAI raggiunto: riprova domani');
+          // Una sola generazione alla volta per Idea (tabella idea_proposal_locks, migrazione 0016):
+          // INSERT vince una richiesta sola; una prenotazione scaduta si riprende con un UPDATE
+          // condizionato. Senza la 0016 nessun blocco (comportamento del blocco 2d).
+          const prenotataIl = new Date().toISOString();
+          let prenotata = false;
+          const pIns = await sb('POST', 'idea_proposal_locks', { idea_id: ideaId, started_at: prenotataIl }, 'return=representation');
+          if (pIns.ok) prenotata = true;
+          else if (pIns.status === 409) {
+            const scad = new Date(Date.now() - IDEA_PROPOSTA.prenotazioneMs).toISOString();
+            const pUp = await sb('PATCH', 'idea_proposal_locks?idea_id=eq.' + encodeURIComponent(ideaId) + '&started_at=lt.' + encodeURIComponent(scad), { started_at: prenotataIl }, 'return=representation');
+            if (!pUp.ok) throw new Error('prenotazione della proposta (' + pUp.status + ')');
+            if (!Array.isArray(pUp.corpo) || pUp.corpo.length !== 1) return no('proposta_in_corso', 'MichelinAI sta gia\' preparando la proposta di questa Idea', { retry: true });
+            prenotata = true;
+          } else if (pIns.status !== 404) throw new Error('prenotazione della proposta (' + pIns.status + ')');
+          const rilascia = async () => { if (prenotata) { prenotata = false; await sb('PATCH', 'idea_proposal_locks?idea_id=eq.' + encodeURIComponent(ideaId) + '&started_at=eq.' + encodeURIComponent(prenotataIl), { started_at: '1970-01-01T00:00:00.000Z' }); } };
+          try {
           const ai = await chiamaMichelinAIIdea(ideaPropostaMessaggi(idea, conversazione), { system: IDEA_PROPOSTA_PROMPT, maxTokens: IDEA_PROPOSTA.maxTokens });
           if (!ai.ok) {
             const testiP = { ai_non_disponibile: 'MichelinAI non e\' disponibile in questo momento', ai_tempo_scaduto: 'MichelinAI non ha risposto in tempo',
@@ -1282,6 +1331,7 @@ export default async function handler(req, res) {
             salvata = w.ok && Array.isArray(w.corpo) && w.corpo.length === 1;
           }
           return res.status(200).json({ ok: true, proposta, riutilizzata: false, salvata });
+          } finally { await rilascia().catch(() => {}); }
         }
 
         // ── ideaChat: solo questi campi; modello, istruzioni e cronologia li decide il server.
@@ -2176,7 +2226,8 @@ async function chiamaMichelinAIIdea(messages, opzioni) {
 // chef" solo se le sue parole la contengono davvero; "dalla fonte" solo se e'
 // nel testo della fonte; altrimenti e' una proposta di MichelinAI).
 // ══════════════════════════════════════════════════════════
-const IDEA_PROPOSTA = { contesto: 90000, maxTokens: 4000, ingredienti: 60, passi: 60, scartate: 12, perIdeaGiorno: 10, byte: 150000 };
+const IDEA_PROPOSTA = { contesto: 90000, maxTokens: 4000, ingredienti: 60, passi: 60, scartate: 12, perIdeaGiorno: 10, byte: 150000,
+  prenotazioneMs: 120000 }; // prenotazione di una generazione in corso (piu' lunga dei 60 s della chiamata AI)
 const IDEA_PROPOSTA_PROMPT = `Sei MichelinAI, il collega tecnico di cucina che affianca lo chef in KHUB. Lo chef ha chiesto di PREPARARE LA RICETTA a partire da un'Idea e dalla conversazione avuta con te. Il tuo compito e' ricostruire la PROPOSTA FINALE: non una sintesi della conversazione, ma la Ricetta che riflette le decisioni piu' recenti dello chef.
 
 REGOLE

@@ -322,6 +322,11 @@ const ANTEPRIMA_NORMALIZZATA = {
       const r2 = psql(null, DB2, MIG); assert.notStrictEqual(r2.status, 0); assert.ok(/esiste gia' con colonne diverse/.test(r2.stderr), r2.stderr);
       assert.strictEqual(sql("select count(*) from information_schema.columns where table_name='ideas'", DB2), '2', 'nessuna modifica');
       sql('drop database ' + DB2, 'postgres');
+      // P2-a.2 (blocco 2e): con la 0016 applicata il rollback 0013 si ferma e chiede prima il rollback 0016.
+      if (sql("select to_regclass('public.idea_proposal_locks') is not null") === 't') {
+        const r00 = psql(null, DB, RB); assert.notStrictEqual(r00.status, 0); assert.ok(/Eseguire prima il rollback 0016/.test(r00.stderr), r00.stderr);
+        const rb16 = psql(null, DB, path.join(ROOT, 'supabase/rollback/PREPARED_NOT_EXECUTED__0016_idea_proposal_locks_rollback.sql')); assert.strictEqual(rb16.status, 0, rb16.stderr);
+      }
       // P2-a.2: con la 0014 applicata il rollback 0013 si ferma e chiede prima il rollback 0014.
       if (sql("select to_regclass('public.idea_turns') is not null") === 't') {
         const r0 = psql(null, DB, RB); assert.notStrictEqual(r0.status, 0); assert.ok(/Eseguire prima il rollback 0014/.test(r0.stderr), r0.stderr);

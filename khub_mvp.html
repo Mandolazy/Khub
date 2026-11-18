@@ -3790,14 +3790,20 @@ async function extractRecipe(){
 }
 
 function savePreview(){
-  const p=S.loadPreview;if(!p)return;
+  // P2-a.2 (blocco 2e): savePreview({rif}) = proposta di un'Idea gia' controllata, con id
+  // della Scheda, della Bozza e degli ingredienti fissati prima del primo tentativo: ripetere
+  // il salvataggio riscrive le stesse righe (mai una seconda Ricetta). Senza argomento:
+  // importazione invariata (firma invariata: i test dell'importazione la estraggono per nome).
+  const opz=arguments[0];
+  const rif=opz&&opz.rif||null;
+  const p=rif?rif.preview:S.loadPreview;if(!p)return;
   const ts=Date.now();
 
   const buildLabVersion=note=>({
-    id:'lv'+ts,label:p.name||'Nuova Scheda',name:p.name||'Nuova Scheda',note:importYieldNote(note,p.declaredYield),originVariantId:null,
+    id:rif?rif.variantId:'lv'+ts,label:p.name||'Nuova Scheda',name:p.name||'Nuova Scheda',note:importYieldNote(note,p.declaredYield),originVariantId:null,
     ...importYieldFields(p.declaredYieldValue), // resa confermata in anteprima; assente = non impostata
     portionsCount:importTargetValue('portions',p.portionsCount),gramsPerPortion:importTargetValue('gpp',p.gramsPerPortion),portionSize:importTargetValue('gpp',p.gramsPerPortion),portionUnit:'g',
-    ingredients:p.ingredients.map(i=>({...i,id:uid()})),
+    ingredients:p.ingredients.map(i=>({...i,id:rif?i.id:uid()})),
     steps:p.steps||[],mediaUrl:null,videoUrl:null,active:false,
   });
 
@@ -3823,28 +3829,34 @@ function savePreview(){
   }
 
   let landingId,toastMsg;
+  const notaOrigine=rif?'Dall\'Idea «'+(rif.ideaTitolo||p.name||'')+'»'+(p.notaResa?' · '+p.notaResa:''):'Importata';
 
-  if(S.loadDestinazione==='esistente'&&S.loadDestinazioneSchedaId){
-    const target=R(S.loadDestinazioneSchedaId);
+  if(rif?rif.destinazione==='esistente':(S.loadDestinazione==='esistente'&&S.loadDestinazioneSchedaId)){
+    const target=R(rif?rif.targetId:S.loadDestinazioneSchedaId);
     if(!target){toast('Scheda non trovata: riprova.','ti-alert-circle');return;}
     // Entra come nuova bozza in LAB — non tocca validatedVariants, quindi non
     // modifica né sostituisce la Ricetta attiva della Scheda.
-    const nuovaBozza=buildLabVersion('Importata');
-    S.recipes=S.recipes.map(r=>r.id===target.id?{...r,labVersions:[...r.labVersions,nuovaBozza],currentLabIdx:r.labVersions.length}:r);
+    const nuovaBozza=buildLabVersion(notaOrigine);
+    if(!(rif&&target.labVersions.some(v=>v.id===rif.variantId))) // da Idea: una sola Bozza anche ripetendo
+      S.recipes=S.recipes.map(r=>r.id===target.id?{...r,labVersions:[...r.labVersions,nuovaBozza],currentLabIdx:r.labVersions.length}:r);
     S.recipes=[...S.recipes,...recipesToSave];
     landingId=target.id;
     toastMsg='Ricetta aggiunta come bozza a "'+target.name+'"';
   }else{
-    const mainId='r'+ts;
+    const mainId=rif?rif.recipeId:'r'+ts;
     const mainRecipe={
       id:mainId,name:p.name||'Nuova Scheda',category:normalizzaCategoria(p.category),department:'Cucina',
       validatedVariants:[],currentLabIdx:0,
-      labVersions:[buildLabVersion('Importata')],mediaUrl:null,videoUrl:null,notes:'',
+      labVersions:[buildLabVersion(notaOrigine)],mediaUrl:null,videoUrl:null,notes:'',
     };
-    S.recipes=[...S.recipes,mainRecipe,...recipesToSave];
+    // Da Idea, ripetendo: la Scheda gia' presente non si duplica (si aggiunge solo la Bozza, se manca).
+    S.recipes=rif&&R(mainId)?[...S.recipes.map(r=>r.id===mainId&&!r.labVersions.some(v=>v.id===rif.variantId)?{...r,labVersions:[...r.labVersions,buildLabVersion(notaOrigine)]}:r),...recipesToSave]
+      :[...S.recipes,mainRecipe,...recipesToSave];
     landingId=mainId;
     toastMsg=recipesToSave.length?`Salvate ${1+recipesToSave.length} Schede`:'Scheda salvata';
   }
+  // Da Idea: il chiamante attende il salvataggio nel database prima di collegare e aprire il LAB.
+  if(rif)return{recipeId:landingId,variantId:rif.variantId};
 
   S.selectedId=landingId;
   S.view='ricetta-madre-v2'; // Lifecycle della Scheda: si atterra sulla Scheda, mai direttamente nel LAB
@@ -9879,6 +9891,8 @@ function renderLoad(){
 
 function renderPreview(){
   const p=S.loadPreview;if(!p)return'';
+  // P2-a.2 (blocco 2e): proposta da Idea gia' inviata al salvataggio = contenuto fissato.
+  if(p.importFonte&&p.importFonte.tipo==='idea'&&ideaSalvaLeggi(p.importFonte.ideaId))return ideaSalvataggioHtml(ideaSalvaLeggi(p.importFonte.ideaId));
   // Percentuali sul peso a crudo dopo le conversioni (computeFormulationWeights,
   // stesse regole di Produzione e stampa): mai somme di quantita' in unita'
   // diverse. Pesi di riferimento non confermati = stima; conversioni mancanti
@@ -9943,6 +9957,7 @@ function renderPreview(){
         ${ideaDaConfermare?'<button type="button" class="btn btn-outline btn-sm" id="preview-idea-conferma-tutte" onclick="ideaPrevConfermaTutte()">Conferma tutte le quantità proposte</button>':''}
         <button type="button" class="btn btn-outline btn-sm" id="preview-idea-rigenera" onclick="ideaPrevLeggiCampi();ideaPreparaRicetta(true)" ${S.ideaProposta&&S.ideaProposta[fonte.ideaId]&&S.ideaProposta[fonte.ideaId].carica?'disabled':''}>Rigenera la proposta</button>
       </div>
+      ${fonte.resaOrigine==='ai'&&fonte.resaProposta?`<label class="idea-orig-conferma" id="preview-idea-resa"><input type="checkbox" data-idea-resa ${fonte.resaConfermata?'checked':''} onchange="ideaPrevConfermaResa(this.checked)"> Confermo la resa proposta da MichelinAI (${escAttr(fonte.resaProposta.qty+' '+fonte.resaProposta.unit)}). Se non la confermi né la modifichi, non viene salvata come resa.</label>`:''}
       ${fonte.salvata===false?'<div class="preview-idea-avviso">La proposta non è stata conservata nell\'Idea: se chiudi questa pagina servirà una nuova richiesta a MichelinAI.</div>':''}
     </div>`;
   return `<div class="card${daIdea?' preview-da-idea':''}">
@@ -10001,10 +10016,7 @@ function renderPreview(){
     </div>
     <div style="margin-top:12px">${p.subRecipes.map((sr,i)=>renderImportYieldFields(sr.declaredYield,'prev-sr-yield-'+i,'Resa dichiarata di '+escAttr(sr.name||'preparazione '+(i+1)))).join('')}</div>`:''}
 
-    ${daIdea?`<div class="preview-idea-fine" id="preview-idea-fine" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
-      <div class="idee-aiuto">La proposta resta nell'Idea: puoi tornare alla conversazione e prepararla di nuovo quando vuoi. Il salvataggio in una Scheda e l'apertura nel LAB arrivano nel passaggio successivo.</div>
-      <div style="margin-top:12px;display:flex;justify-content:flex-end"><button class="btn btn-outline" onclick="tornaAllIdeaDaAnteprima()"><i class="ti ti-arrow-left"></i> Torna all'Idea</button></div>
-    </div>`:`
+    ${daIdea?ideaPrevDestinazioneHtml():`
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
       <div class="card-label" style="margin-bottom:10px"><i class="ti ti-folder"></i> Destinazione</div>
       <div style="display:flex;gap:8px;margin-bottom:${destinazioneEsistente?'12px':'0'}">
@@ -12581,7 +12593,8 @@ function ideaPropostaInAnteprima(idea,pr){
     }),
     steps:(pr.passi||[]).slice(),subRecipes:[],
     importFonte:{tipo:'idea',ideaId:idea.id,ideaTitolo:idea.title,scartate:(pr.scartate||[]).slice(),note:pr.note||null,
-      resaOrigine:resa?(resa.origine||'ai'):null,resaEvidenza:resa?resa.evidenza||null:null,generataIl:pr.base&&pr.base.generataIl||null}
+      resaOrigine:resa?(resa.origine||'ai'):null,resaEvidenza:resa?resa.evidenza||null:null,generataIl:pr.base&&pr.base.generataIl||null,
+      resaProposta:resa?{qty:String(resa.qty),unit:resa.unit||''}:null,resaConfermata:false}
   };
 }
 function apriAnteprimaDaIdea(idea,pr,info){
@@ -12671,10 +12684,203 @@ function ideaPrevOrigineHtml(ing,idx){
   return h?`<div class="idea-prev-origine" data-origine="${escAttr(o||'')}">${h}</div>`:'';
 }
 
+// ── Dalla proposta alla Bozza nel LAB (P2-a.2, blocco 2e) ──
+// «Crea la Scheda» fissa il contenuto controllato dallo chef e gli id (Scheda, Bozza,
+// ingredienti) in un registro per Idea, conservato anche nel browser; poi riusa
+// savePreview e saveToSupabase come l'importazione. Solo dopo la conferma del database
+// collega l'Idea (linkIdeaToRecipe) e apre la Bozza nel LAB. Ogni ripetizione usa lo
+// stesso registro: stesse righe, mai una seconda Ricetta. Idea e conversazione restano.
+var IDEA_SALVA_CHIAVE='khub.ideaSalvataggio.';
+function ideaSalvaLeggi(id){
+  id=ideaIdSicuro(id);if(!id)return null;
+  if(!S.ideaSalvataggi)S.ideaSalvataggi={};
+  if(S.ideaSalvataggi[id]!==undefined)return S.ideaSalvataggi[id];
+  var r=null;
+  try{var t=localStorage.getItem(IDEA_SALVA_CHIAVE+id);r=t?JSON.parse(t):null;}catch(e){r=null;}
+  if(!r||r.ideaId!==id||typeof r.recipeId!=='string'||typeof r.variantId!=='string'||!r.preview||!Array.isArray(r.preview.ingredients))r=null;
+  // Interrotto a meta' (pagina chiusa): l'esito non e' noto, si riprova con gli stessi id.
+  if(r&&r.stato==='salvataggio')r.stato='errore_salvataggio';
+  if(r&&r.stato==='collegamento')r.stato='errore_collegamento';
+  if(r&&r.stato==='collegata')r=null;
+  S.ideaSalvataggi[id]=r;
+  return r;
+}
+function ideaSalvaScrivi(r){
+  if(!S.ideaSalvataggi)S.ideaSalvataggi={};
+  S.ideaSalvataggi[r.ideaId]=r.stato==='collegata'?null:r;
+  try{if(r.stato==='collegata')localStorage.removeItem(IDEA_SALVA_CHIAVE+r.ideaId);else localStorage.setItem(IDEA_SALVA_CHIAVE+r.ideaId,JSON.stringify(r));}catch(e){}
+}
+function ideaPrevConfermaResa(si){if(!anteprimaDaIdea())return;ideaPrevLeggiCampi();S.loadPreview.importFonte.resaConfermata=!!si;render();}
+// Contenuto da salvare: solo le scelte dello chef. Una quantita' di MichelinAI non
+// confermata diventa «da indicare», con la proposta nella nota dell'ingrediente.
+function ideaPrevPerSalvataggio(){
+  ideaPrevLeggiCampi();
+  var p=S.loadPreview,f=p.importFonte;
+  var nome=String(p.name||'').trim().slice(0,200);
+  if(!nome)return{errore:'Scrivi il nome della Ricetta.'};
+  var esistente=S.loadDestinazione==='esistente';
+  if(esistente&&!(S.loadDestinazioneSchedaId&&R(S.loadDestinazioneSchedaId)))return{errore:'Scegli la Scheda in cui aggiungere la Ricetta.'};
+  var vp=validateLabProductionTarget('portions',labTargetInputValue(p.portionsCount));if(!vp.ok)return{errore:vp.error};
+  var vg=validateLabProductionTarget('gpp',labTargetInputValue(p.gramsPerPortion));if(!vg.ok)return{errore:vg.error};
+  var dy=p.declaredYield||{},ry=normalizeDeclaredYield(dy.qty==null?'':String(dy.qty),dy.unit||'');
+  if(!ry.ok)return{errore:declaredYieldErrorMessage(ry.error)};
+  var resa=ry.value,notaResa='';
+  var rp=f.resaProposta;
+  if(resa&&f.resaOrigine==='ai'&&!f.resaConfermata&&rp&&String(dy.qty).trim()===rp.qty&&String(dy.unit||'').trim()===rp.unit){
+    resa=null;notaResa='Resa proposta da MichelinAI, non confermata: '+rp.qty+' '+rp.unit;
+  }
+  var ingredienti=[];
+  for(var k=0;k<p.ingredients.length;k++){
+    var i=p.ingredients[k],n=String(i.name||'').trim().slice(0,120);
+    var conQ=i.qtyKind==='certa'||i.qtyKind==='intervallo';
+    if(!n){if(conQ)return{errore:'C\'è una quantità senza il nome dell\'ingrediente.'};continue;}
+    var o={id:null,name:n,qty:i.qty,unit:i.unit||null,qtyKind:['certa','intervallo','variabile','mancante'].indexOf(i.qtyKind)!==-1?i.qtyKind:'mancante',qtyMin:i.qtyMin,qtyMax:i.qtyMax,sourceText:null};
+    if(conQ&&i.origineQuantita==='ai'&&!i.quantitaConfermata){
+      o.qty=null;o.qtyKind='mancante';o.qtyMin=null;o.qtyMax=null;
+      o.sourceText=('Proposta di MichelinAI, non confermata: '+ideaPrevQtyTesto(i)).slice(0,300);
+    }else{
+      if(conQ&&!o.unit)return{errore:'«'+n+'»: scegli l\'unità di misura.'};
+      if((i.origineQuantita==='chef'||i.origineQuantita==='fonte')&&!i.modificataDaChef&&i.sourceText)o.sourceText=String(i.sourceText).slice(0,300);
+    }
+    if(o.qtyKind!=='certa')o.qty=null;
+    if(o.qtyKind!=='intervallo'){o.qtyMin=null;o.qtyMax=null;}
+    ingredienti.push(o);
+  }
+  if(!ingredienti.length)return{errore:'Serve almeno un ingrediente con il nome.'};
+  var passi=(p.steps||[]).map(function(x){return String(x||'').trim().slice(0,2000);}).filter(Boolean);
+  return{preview:{name:nome,category:esistente?'':normalizzaCategoria(p.category),portionsCount:vp.value,gramsPerPortion:vg.value,
+    declaredYield:{qty:'',unit:'',source:'',range:null,toVerify:false},declaredYieldValue:resa,notaResa:notaResa,
+    ingredients:ingredienti,steps:passi,subRecipes:[],importFonte:{tipo:'idea',ideaId:f.ideaId,ideaTitolo:f.ideaTitolo}},esistente:esistente};
+}
+async function ideaSalvaRicetta(){
+  if(!anteprimaDaIdea())return;
+  var id=ideaIdSicuro(S.loadPreview.importFonte.ideaId);if(!id)return;
+  var idea=ideaTrova(id);
+  if(!idea||idea.status!=='aperta'){toast('L\'Idea non è più aperta: ricarica la pagina.','ti-alert-circle');return;}
+  if(!ideaSalvaLeggi(id)){
+    var c=ideaPrevPerSalvataggio();
+    if(c.errore){toast(c.errore,'ti-alert-circle');return;}
+    var ts=Date.now(),vId='lv'+ts;
+    c.preview.ingredients.forEach(function(x,k){x.id=vId+'_'+(k+1);});
+    ideaSalvaScrivi({ideaId:id,ideaTitolo:idea.title,destinazione:c.esistente?'esistente':'nuova',targetId:c.esistente?S.loadDestinazioneSchedaId:null,
+      recipeId:c.esistente?S.loadDestinazioneSchedaId:'r'+ts,variantId:vId,preview:c.preview,stato:'pronto',errore:null,creatoIl:new Date(ts).toISOString()});
+  }
+  await ideaSalvaEsegui(id);
+}
+async function ideaSalvaEsegui(id){
+  var r=ideaSalvaLeggi(id);if(!r||r.stato==='salvataggio'||r.stato==='collegamento')return; // un solo tentativo alla volta
+  if(r.stato!=='salvata'&&r.stato!=='errore_collegamento'){
+    r.stato='salvataggio';r.errore=null;ideaSalvaScrivi(r);render();
+    var primaId=r.recipeId,prima=R(primaId);
+    var esito=prima||r.destinazione!=='esistente'?savePreview({rif:r}):null;
+    var ricetta=esito?R(esito.recipeId):null,ok=false;
+    if(ricetta){try{ok=await saveToSupabase(ricetta);}catch(e){ok=false;}}
+    if(ok!==true){
+      // Nessuna Scheda o Bozza non salvata resta visibile; il registro resta per riprovare.
+      S.recipes=prima?S.recipes.map(function(x){return x.id===primaId?prima:x;}):S.recipes.filter(function(x){return x.id!==primaId;});
+      r.stato='errore_salvataggio';
+      r.errore=ricetta?'Il salvataggio della Scheda non è riuscito: l\'Idea non è stata collegata.':'La Scheda scelta non è disponibile: ricarica la pagina e riprova.';
+      ideaSalvaScrivi(r);render();return;
+    }
+    r.stato='salvata';ideaSalvaScrivi(r);
+  }
+  await ideaCollegaEsegui(id);
+}
+function ideaCollegaMessaggio(e){
+  var c=e&&e.code;
+  return{sessione:'Sessione scaduta: accedi di nuovo, poi collega di nuovo.',rete:'Connessione non riuscita.',ricetta_non_trovata:'Il database non conferma ancora la Ricetta.',
+    idea_gia_trasformata:'L\'Idea risulta già collegata a un\'altra Ricetta.',idea_archiviata:'L\'Idea è stata archiviata.',idea_cambiata:'L\'Idea è cambiata nel frattempo: ricarica la pagina.',
+    ricetta_non_valida:'La Ricetta salvata non risulta una Bozza di quella Scheda.'}[c]||'Collegamento non riuscito.';
+}
+async function ideaCollegaEsegui(id){
+  var r=ideaSalvaLeggi(id);if(!r||r.stato==='collegamento'||r.stato==='salvataggio')return;
+  if(r.stato!=='salvata'&&r.stato!=='errore_collegamento')return; // mai collegare prima della conferma del salvataggio
+  r.stato='collegamento';r.errore=null;ideaSalvaScrivi(r);render();
+  var e=await ideeChiama({supabaseAction:'linkIdeaToRecipe',ideaId:id,recipeId:r.recipeId,variantId:r.variantId});
+  if(e&&e.ok&&e.idea){
+    ideaAggiornaInElenco(e.idea);
+    r.stato='collegata';ideaSalvaScrivi(r);
+    ideaApriBozzaSalvata(id,r);
+    return;
+  }
+  r.stato='errore_collegamento';r.errore=ideaCollegaMessaggio(e);ideaSalvaScrivi(r);render();
+}
+function ideaApriBozzaSalvata(id,r){
+  r=r||ideaSalvaLeggi(id);if(!r)return;
+  var collegata=r.stato==='collegata';
+  if(!R(r.recipeId)){toast('Scheda non disponibile: ricarica la pagina.','ti-alert-circle');return;}
+  S.loadPreview=null;S.ideaAnteprimaId=null;S.loadDestinazione='nuova';S.loadDestinazioneSchedaId=null;
+  apriBozzaDalLabGlobale(r.recipeId,r.variantId);
+  toast(collegata?'Bozza creata dall\'Idea e aperta nel LAB':'Bozza aperta nel LAB (Idea non ancora collegata)','ti-flask');
+}
+function ideaRiprendiSalvataggio(id){
+  var r=ideaSalvaLeggi(id);if(!r)return;
+  S.loadPreview=JSON.parse(JSON.stringify(r.preview));
+  S.ideaAnteprimaId=r.ideaId;S.view='preview';render();
+}
+// Riquadro dell'anteprima dopo «Crea la Scheda»: contenuto fissato, stato del salvataggio.
+function ideaSalvataggioHtml(r){
+  var p=r.preview,target=r.destinazione==='esistente'?R(r.targetId):null,id=ideaIdSicuro(r.ideaId);
+  var daIndicare=p.ingredients.filter(function(i){return/^Proposta di MichelinAI, non confermata/.test(i.sourceText||'');}).length;
+  var st=r.stato,msg='',azioni='';
+  if(st==='salvataggio')msg='<div class="idee-avviso" role="status">Salvataggio della Scheda in corso…</div>';
+  else if(st==='errore_salvataggio'){msg=`<div class="idee-errore" role="alert">${escAttr(r.errore||'Il salvataggio non è riuscito.')} Riprova: verrà usata la stessa Ricetta, senza crearne una seconda.</div>`;
+    azioni=`<button class="btn btn-lab" id="idea-salva-riprova" onclick="ideaSalvaEsegui('${id}')"><i class="ti ti-refresh"></i> Riprova il salvataggio</button>`;}
+  else if(st==='salvata'||st==='collegamento')msg='<div class="idee-avviso" role="status">Scheda salvata. Collegamento all\'Idea…</div>';
+  else if(st==='errore_collegamento'){msg=`<div class="idee-errore" role="alert">La Ricetta è salvata, ma il collegamento all'Idea non è riuscito. ${escAttr(r.errore||'')}</div>`;
+    azioni=`<button class="btn btn-lab" id="idea-collega-riprova" onclick="ideaCollegaEsegui('${id}')"><i class="ti ti-link"></i> Collega di nuovo</button>
+      <button class="btn btn-outline" id="idea-apri-bozza" onclick="ideaApriBozzaSalvata('${id}')">Apri la Bozza nel LAB</button>`;}
+  else if(st==='pronto'){msg='<div class="idee-avviso" role="status">Salvataggio non ancora avviato.</div>';
+    azioni=`<button class="btn btn-lab" id="idea-salva-riprova" onclick="ideaSalvaEsegui('${id}')"><i class="ti ti-flask"></i> Salva la Scheda</button>`;}
+  return`<div class="card preview-da-idea" id="preview-idea-salvataggio" data-stato="${escAttr(st)}">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:8px">
+      <div><div class="card-label" style="margin-bottom:4px"><i class="ti ti-flask"></i> Dalla proposta alla Bozza</div>
+      <div style="font-size:11px;color:var(--mid)">Il contenuto è fissato: le correzioni successive si fanno nella Bozza, nel LAB.</div></div>
+      <button class="btn btn-outline btn-sm" id="btn-back-idea" onclick="tornaAllIdeaDaAnteprima()"><i class="ti ti-arrow-left"></i> Torna all'Idea</button>
+    </div>
+    <div class="preview-fonte preview-fonte-idea" id="preview-idea-riepilogo" role="note">
+      <div><strong>«${escAttr(p.name)}»</strong> · ${target?'nuova Bozza nella Scheda «'+escAttr(target.name)+'»':r.destinazione==='esistente'?'nuova Bozza in una Scheda esistente':'nuova Scheda'}</div>
+      <div>${p.ingredients.length} ingredient${p.ingredients.length===1?'e':'i'} · ${p.steps.length} passaggi${daIndicare?' · <strong>'+daIndicare+' quantit'+(daIndicare===1?'à':'à')+' da indicare</strong> (proposte di MichelinAI non confermate, in nota)':''}${p.notaResa?' · '+escAttr(p.notaResa):''}</div>
+      <div>L'Idea e la conversazione restano com'erano.</div>
+    </div>
+    ${msg}
+    ${azioni?`<div class="d3-riga-azioni" style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">${azioni}</div>`:''}
+  </div>`;
+}
+// Destinazione e salvataggio nell'anteprima di una proposta da Idea (stessa scelta dell'importazione).
+function ideaPrevDestinazioneHtml(){
+  var esistente=S.loadDestinazione==='esistente';
+  return`<div class="preview-idea-fine" id="preview-idea-fine" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border)">
+      <div class="card-label" style="margin-bottom:10px"><i class="ti ti-folder"></i> Destinazione</div>
+      <div style="display:flex;gap:8px;margin-bottom:${esistente?'12px':'0'}">
+        <button class="btn ${!esistente?'btn-lab':'btn-outline'} btn-sm" id="preview-idea-dest-nuova" onclick="ideaPrevLeggiCampi();S.loadDestinazione='nuova';S.loadDestinazioneSchedaId=null;render()">Nuova Scheda</button>
+        ${S.recipes.length>0?`<button class="btn ${esistente?'btn-lab':'btn-outline'} btn-sm" id="preview-idea-dest-esistente" onclick="ideaPrevLeggiCampi();S.loadDestinazione='esistente';render()">Scheda esistente</button>`:''}
+      </div>
+      ${esistente?`<div class="form-group" style="margin-bottom:0">
+        <label class="form-label" for="preview-idea-scheda">Scegli la Scheda (la Ricetta entra come nuova Bozza: la Ricetta attiva non cambia)</label>
+        <select class="form-input" id="preview-idea-scheda" onchange="ideaPrevLeggiCampi();S.loadDestinazioneSchedaId=this.value||null;render()">
+          <option value="">— seleziona —</option>
+          ${[...S.recipes].sort(function(a,b){return a.name.localeCompare(b.name);}).map(function(r){return`<option value="${escAttr(r.id)}" ${S.loadDestinazioneSchedaId===r.id?'selected':''}>${escAttr(r.name)}</option>`;}).join('')}
+        </select>
+      </div>`:''}
+      <div class="idee-aiuto" style="margin-top:10px">Le quantità di MichelinAI non confermate saranno salvate «da indicare», con la proposta in nota. L'Idea e la conversazione restano.</div>
+      <div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-outline" onclick="tornaAllIdeaDaAnteprima()"><i class="ti ti-arrow-left"></i> Torna all'Idea</button>
+        <button class="btn btn-lab" id="btn-save-idea" onclick="ideaSalvaRicetta()" ${esistente&&!S.loadDestinazioneSchedaId?'disabled':''}><i class="ti ti-flask"></i> ${esistente?'Aggiungi come Bozza e apri nel LAB':'Crea la Scheda e apri nel LAB'}</button>
+      </div>
+    </div>`;
+}
+
 function renderIdeaRicetta(idea){
   var id=ideaIdSicuro(idea.id);
   if(idea.status!=='aperta')return'';
   var c=ideaChatStato(id),st=ideaPropostaStato(id),salvata=ideaPropostaSalvata(idea);
+  var rs=ideaSalvaLeggi(id);
+  if(rs)return`<section class="d3-card idee-card idee-ricetta" id="idea-ricetta" aria-labelledby="idea-sez-ricetta">
+      <div class="d3-sez-titolo" id="idea-sez-ricetta">Dalla conversazione alla Ricetta</div>
+      <div class="idee-avviso" id="idea-salvataggio-da-riprendere" role="status">${rs.stato==='errore_collegamento'||rs.stato==='salvata'?'La Ricetta «'+escAttr(rs.preview.name)+'» è salvata ma non ancora collegata a questa Idea.':'Il salvataggio della Ricetta «'+escAttr(rs.preview.name)+'» non è stato completato.'} Riprendilo: non verrà creata una seconda Ricetta.</div>
+      <div class="d3-riga-azioni"><button class="d3-btn d3-btn-ink" id="idea-riprendi-salvataggio" onclick="ideaRiprendiSalvataggio('${id}')">Riprendi il salvataggio</button></div>
+    </section>`;
   var conversazione=c.turni.some(function(t){return t.status==='completato';});
   if(!conversazione&&!idea.source_text&&!salvata)return'';
   var occupata=st.carica||!!c.invio||c.stato!=='pronto';
