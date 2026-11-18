@@ -392,7 +392,9 @@ test('K1. Funzioni di motore, salvataggio, MichelinAI e calcoli identiche a f13b
   const cambiate = Object.keys(a).filter(k => k in b && a[k] !== b[k]).sort();
   const rimosse = Object.keys(a).filter(k => !(k in b));
   const nuove = Object.keys(b).filter(k => !(k in a)).sort();
-  assert.deepStrictEqual(cambiate, ['loadFromSupabase', 'renderRicettaMadreV2', 'renderSchedaD3', 'renderStoricoProduzioni']);
+  assert.deepStrictEqual(cambiate, ['loadFromSupabase', 'renderRicettaMadreV2', 'renderSchedaD3', 'renderStoricoProduzioni',
+    /* P1: escaping dei contenuti AI (renderContenutoL2Umano, pannello Consulto in renderLabRecipe) e nessun "Conferma" per osservazioni confermate */
+    'renderContenutoL2Umano', 'renderLabRecipe', 'renderMichelinAIPendingActions'].sort());
   assert.deepStrictEqual(rimosse, []);
   assert.deepStrictEqual(nuove, ['apriProduzioniScheda', 'azzeraFiltriStoricoConScheda', 'groupHistoryByRecipeVersion', 'historySchedaDiRicetta', 'historySchedaVariantIds', 'l3ConfermaTesto',
     'l3DataTesto', 'l3Html', 'l3ProvenienzaTesto', 'l3TestoValore', 'l3TrovaOrigine', 'renderConoscenzeConsolidate', 'renderHistoryPerRicetta',

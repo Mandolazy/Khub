@@ -370,14 +370,22 @@ function clientMain(fetchImpl, nomi) {
       // Finalizzazione: errori di persistenza visibili (HTTP non 2xx, {ok:false}, risposte non valide); test E1-E9.
       'loadFromSupabase', 'saveToSupabase',
       // Fase 1A: Storico con selettore Elenco | Per ricetta e filtro sulle Ricette della Scheda (solo presentazione; motore MS17a invariato).
-      'renderStoricoProduzioni'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
+      'renderStoricoProduzioni',
+      // P1: contenuti AI codificati come testo e nessun "Conferma" per osservazioni gia' confermate (vedi controllo puntuale sotto).
+      'renderContenutoL2Umano', 'renderMichelinAIPendingActions'].sort(), 'presentazione + ciclo di vita (attivazione diretta eliminata; eliminazioni e Unisci con esito verificato) + errori di persistenza visibili');
     assert.deepStrictEqual(rimosse, [], 'nessuna funzione rimossa');
     for (const n of ['computeFormulationWeights', 'deriveYieldPerUnit', 'computeLabRounding', 'applyLabRound', 'undoLabRound', 'computeSessionScaling', 'createProductionSession', 'buildValidatedVariantPayload', 'onValidate', 'confirmValidate', 'rendiAttivaPronta', 'riapriProntaInLab', 'onLabDeclaredYield', 'onIngQty', 'onStepText'])
       assert.ok(n in b && a[n] === b[n], 'invariata: ' + n);
     // Il segnaposto "MichelinAI" e' solo una card di testo (presentazione), non il motore.
     const michelin = Object.keys(a).filter(n => /michelin|m1|m2|primoConsulto/i.test(n) && n !== 'renderMichelinAIGlobalePlaceholder');
     assert.ok(michelin.length > 5);
-    michelin.forEach(n => assert.strictEqual(b[n], a[n], 'MichelinAI invariato: ' + n));
+    // P1: le uniche differenze ammesse sono quelle P1; annullandole la funzione torna identica a main.
+    const P1_REVERT = {
+      renderContenutoL2Umano: f => f.replace("escAttr(content.label)", 'content.label').replace("escAttr(content.text)", 'content.text'),
+      renderMichelinAIPendingActions: f => f.replace("    // P1: un'osservazione gia' confermata dallo chef non ha nulla da\n    // \"Confermare\": un suo aggiornamento rifiutato (es. un declassamento\n    // proposto da MichelinAI) resta nel report, mai un'azione ambigua qui.\n    if(item.decisionState==='confirmed')return'';\n", ''),
+    };
+    for (const n of Object.keys(P1_REVERT)) assert.notStrictEqual(b[n], a[n], 'P1 presente: ' + n);
+    michelin.forEach(n => assert.strictEqual(P1_REVERT[n] ? P1_REVERT[n](b[n]) : b[n], a[n], 'MichelinAI invariato: ' + n));
     for (const [m, h] of Object.entries(PROTETTE)) assert.strictEqual(sha(extractFunction(m)), h, 'cambiato: ' + m);
     const git = require('child_process').execSync('git diff --name-only ' + BASE + ' -- middleware.js vercel.json .vercelignore', { cwd: ROOT, encoding: 'utf8' }).trim();
     assert.strictEqual(git, '', 'autenticazione e configurazione invariate');

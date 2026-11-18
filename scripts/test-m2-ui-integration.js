@@ -48,6 +48,7 @@ function extractTemplateBlock(startMarker, endMarkerRegexSrc) {
   return rest.slice(0, m.index + m[0].length);
 }
 
+const srcEscAttr = extractFunction('function escAttr(s)'); // P1: renderContenutoL2Umano codifica il contenuto AI
 const srcR = extractFunction('function R(id)');
 const srcCurLab = extractFunction('function curLab(recipe)');
 const srcRenderContenuto = extractFunction('function renderContenutoL2Umano(content)');
@@ -126,7 +127,7 @@ function makeAzioneChef(srcFn, fnName, S, applyImpl) {
 function makeRenderPending() {
   const factory = new Function(
     'S',
-    srcRenderContenuto + '\n' + srcRenderPending + '\nreturn renderMichelinAIPendingActions;'
+    srcEscAttr + '\n' + srcRenderContenuto + '\n' + srcRenderPending + '\nreturn renderMichelinAIPendingActions;'
   );
   return factory;
 }
