@@ -203,7 +203,7 @@ const PROTETTE = {
   "async function createProductionSession(preparedInput)": "185ca85dcee49397",
   "function buildValidatedVariantPayload(recipeId,vv)": "f4fc64648a86a261",
   "async function saveToSupabase(recipe)": "f9dc1d860de4899d",
-  "async function loadFromSupabase()": "d7b44d135ae075e5",
+  "async function loadFromSupabase()": "5ed5466018f6c924" /* Integrazione: P0-c (main) + lettura created_at delle L3 (Fase 1A) */,
   "function firmaContenutoBozza(v)": "846ec26eda61f09a",
   "function toggleActiveV2(recipeId,variantId,currentActive)": "d5278818ecdb15f9",
   "async function confirmActiveYieldEdit()": "92f6565ceacf884a",
@@ -212,7 +212,11 @@ const PROTETTE = {
 };
 
 // Funzioni reali aggiuntive: validazione, attivazione, riapertura, accesso al LAB, rinomina.
-const EXTRA = ['function getStructuredSteps(legacySteps,stepsV2)', 'function parseSteps(raw)', 'function addHistory(variantId,event,label)', 'function findDependentsOfVariant(variantId)',
+const EXTRA = [
+  // Fase 1A: sezione «Conoscenze consolidate» (sola lettura) richiamata dalla Scheda classica, con le sue dipendenze.
+  'function renderConoscenzeConsolidate(recipe,ui)', 'function l3TestoValore(v,depth)', 'function l3Html(v)', 'function l3TrovaOrigine(recipe,l2Id)',
+  'function l3DataTesto(iso)', 'function l3ConfermaTesto(origine)', 'function l3ProvenienzaTesto(p)',
+  'function getStructuredSteps(legacySteps,stepsV2)', 'function parseSteps(raw)', 'function addHistory(variantId,event,label)', 'function findDependentsOfVariant(variantId)',
   'function suggestFamilies(recipe, variantName)', 'function idVariantiScheda(recipe)', 'function famigliaAutomaticaScheda(recipe)', 'function famigliaUsataAltrove(familyId,recipeId)', 'async function saveFamilies(variantId, familyIds, newFamilyName)', 'function onValidate()', 'async function confirmValidate()',
   'function toggleActiveV2(recipeId,variantId,currentActive)', 'function prontaRiapribileMotivo(recipe,vv)', 'function correggibileInPagina(recipe,vv)', 'function rendiAttivaPronta(recipeId,variantId)',
   'async function riapriProntaInLab(recipeId,variantId)', 'function bozzaVuota(v)', 'function nuovaBozzaDaRicetta(recipeId,variantId)', 'function creaBozzaDaSorgente(recipeId,attiva)',

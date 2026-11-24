@@ -405,10 +405,10 @@ const tick = () => new Promise(r => setTimeout(r, 30));
     const chat = fs.readFileSync(path.join(ROOT, 'api/chat.js'), 'utf8');
     assert.ok((chat.match(/categoria: ' \+ \(recipe\.category \|\| 'n\/d'\)/g) || []).length === 2, 'M1/M2 lato server: categoria mancante -> n/d (invariato)');
     const PROTETTE = {
-      'async function loadFromSupabase()': 'd7b44d135ae075e5', 'async function saveToSupabase(recipe)': 'f9dc1d860de4899d',
+      'async function loadFromSupabase()': '5ed5466018f6c924' /* Integrazione: P0-c (main) + lettura created_at delle L3 (Fase 1A) */, 'async function saveToSupabase(recipe)': 'f9dc1d860de4899d',
       // Finalizzazione D3: solo il ramo S.uiD3 di "Elimina" (classico identico a main, test-preview-direzione-3 P10).
-      'function renderProdRecipe(recipe)': '65593bb8883e3f3a', 'function costruisciPayloadM2(recipeId, message, classification)': 'bfe146dcab9a721d',
-      'async function runM1(recipeId)': '5eb87f13cfe9d839', 'async function createProductionSession(preparedInput)': '185ca85dcee49397',
+      'function renderProdRecipe(recipe)': '65593bb8883e3f3a', 'function costruisciPayloadM2(recipeId, message, classification)': '3732983042f6e6d1' /* Integrazione: quantita P0-c (main) + cronologia della Ricetta (P2) */,
+      'async function runM1(recipeId)': '559377c04fe9115e' /* Integrazione: quantita P0-c (main) + Consulto ripetibile (P2) */, 'async function createProductionSession(preparedInput)': '185ca85dcee49397',
       'function computeSessionScaling(input)': 'ff44a92ee6881ba1', 'function buildPreparedInputDaRicettaAttiva(recipe,vv,targetPortions,targetGramsPerPortion)': '142443edbb06025b',
     };
     for (const [m, h] of Object.entries(PROTETTE)) assert.strictEqual(sha(extractFunction(m)), h, m);

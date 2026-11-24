@@ -48,6 +48,7 @@ function extractTemplateBlock(startMarker, endMarkerRegexSrc) {
   return rest.slice(0, m.index + m[0].length);
 }
 
+const srcEscAttr = extractFunction('function escAttr(s)'); // P1: renderContenutoL2Umano codifica il contenuto AI
 const srcR = extractFunction('function R(id)');
 const srcCurLab = extractFunction('function curLab(recipe)');
 const srcRenderContenuto = extractFunction('function renderContenutoL2Umano(content)');
@@ -93,10 +94,11 @@ function makeInvia(S, opts) {
   const runM2Calls = [];
   const applyCalls = [];
   const recordCalls = [];
+  const loadCalls = [];
   const runM2Impl = opts.runM2 || (async () => {});
   const applyImpl = opts.apply || (async () => ({ ok: true }));
   const factory = new Function(
-    'S', 'document', 'runM2', 'applyM2Persistence', 'render', 'recordM2Turn',
+    'S', 'document', 'runM2', 'applyM2Persistence', 'render', 'recordM2Turn', 'loadM2Turns',
     srcR + '\n' + srcCurLab + '\n' + srcInvia + '\nreturn inviaMichelinAI;'
   );
   const inviaMichelinAI = factory(
@@ -104,9 +106,11 @@ function makeInvia(S, opts) {
     async (recipeId, message) => { runM2Calls.push({ recipeId, message }); return runM2Impl(recipeId, message); },
     async (recipeId, options) => { applyCalls.push({ recipeId, options }); return applyImpl(recipeId, options); },
     () => renderLog.push(1),
-    (variantId, question, response) => { recordCalls.push({ variantId, question, response }); }
+    (variantId, question, response) => { recordCalls.push({ variantId, question, response }); },
+    // P2: prima del turno la cronologia della Ricetta viene caricata (stub: nessuna rete).
+    async (variantId) => { loadCalls.push(variantId); if (S.m2TurnsByVariant) S.m2TurnsByVariant[variantId] = S.m2TurnsByVariant[variantId] || { status: 'loaded', turns: [] }; }
   );
-  return { inviaMichelinAI, runM2Calls, applyCalls, recordCalls, renderLog };
+  return { inviaMichelinAI, runM2Calls, applyCalls, recordCalls, renderLog, loadCalls };
 }
 
 function makeAzioneChef(srcFn, fnName, S, applyImpl) {
@@ -126,7 +130,7 @@ function makeAzioneChef(srcFn, fnName, S, applyImpl) {
 function makeRenderPending() {
   const factory = new Function(
     'S',
-    srcRenderContenuto + '\n' + srcRenderPending + '\nreturn renderMichelinAIPendingActions;'
+    srcEscAttr + '\n' + srcRenderContenuto + '\n' + srcRenderPending + '\nreturn renderMichelinAIPendingActions;'
   );
   return factory;
 }

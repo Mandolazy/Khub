@@ -192,7 +192,7 @@ const PROTETTE = {
   "function firmaContenutoBozza(v)": "846ec26eda61f09a",
   "async function saveToSupabase(recipe)": "f9dc1d860de4899d",
   // Conversioni per nomi equivalenti (approvato): caricamento con selectConversionFacts; impronta aggiornata solo qui.
-  "async function loadFromSupabase()": "d7b44d135ae075e5",
+  "async function loadFromSupabase()": "5ed5466018f6c924" /* Integrazione: P0-c (main) + lettura created_at delle L3 (Fase 1A) */,
   "function buildValidatedVariantPayload(recipeId,vv)": "f4fc64648a86a261",
   "function declaredYieldFromRow(row)": "1a670be06f8aeba4",
   "function copyDeclaredYield(src)": "f990f25c54e140b4",
@@ -203,8 +203,8 @@ const PROTETTE = {
   "function computeSessionScaling(input)": "ff44a92ee6881ba1",
   "async function createProductionSession(preparedInput)": "185ca85dcee49397",
   "function buildSessionSnapshotV1(meta,computed)": "7ea3e2c1642ba7a6",
-  "function costruisciPayloadM2(recipeId, message, classification)": "bfe146dcab9a721d",
-  "async function runM1(recipeId)": "5eb87f13cfe9d839",
+  "function costruisciPayloadM2(recipeId, message, classification)": "3732983042f6e6d1" /* Integrazione: quantita P0-c (main) + cronologia della Ricetta (P2) */,
+  "async function runM1(recipeId)": "559377c04fe9115e" /* Integrazione: quantita P0-c (main) + Consulto ripetibile (P2) */,
   "function importTargetValue(field,value)": "4043252f5e784f70",
   "function validateLabProductionTarget(field,value)": "fefbd04eed656496",
 };

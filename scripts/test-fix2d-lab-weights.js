@@ -404,9 +404,9 @@ const box = (h, cls) => { const m = h.match(new RegExp('class="' + cls + '"[^>]*
     const PROTETTE = {
       'function computeSessionScaling(input)': 'ff44a92ee6881ba1', 'async function createProductionSession(preparedInput)': '185ca85dcee49397',
       'function buildValidatedVariantPayload(recipeId,vv)': 'f4fc64648a86a261', 'async function saveToSupabase(recipe)': 'f9dc1d860de4899d',
-      'async function loadFromSupabase()': 'd7b44d135ae075e5', 'function firmaContenutoBozza(v)': '846ec26eda61f09a',
-      'function computeFormulationWeights(ingredients,resolveFact)': 'f481a42d06c68c3a', 'function costruisciPayloadM2(recipeId, message, classification)': 'bfe146dcab9a721d',
-      'async function runM1(recipeId)': '5eb87f13cfe9d839', 'function onIngQty(recipeId,ingId,val)': '6525a50d6ecda173',
+      'async function loadFromSupabase()': '5ed5466018f6c924' /* Integrazione: P0-c (main) + lettura created_at delle L3 (Fase 1A) */, 'function firmaContenutoBozza(v)': '846ec26eda61f09a',
+      'function computeFormulationWeights(ingredients,resolveFact)': 'f481a42d06c68c3a', 'function costruisciPayloadM2(recipeId, message, classification)': '3732983042f6e6d1' /* Integrazione: quantita P0-c (main) + cronologia della Ricetta (P2) */,
+      'async function runM1(recipeId)': '559377c04fe9115e' /* Integrazione: quantita P0-c (main) + Consulto ripetibile (P2) */, 'function onIngQty(recipeId,ingId,val)': '6525a50d6ecda173',
       'function onLabDeclaredYield(recipeId,field,value)': '7bbbd369b9438f26', 'function toggleActiveV2(recipeId,variantId,currentActive)': 'd5278818ecdb15f9',
       'async function confirmValidate()': '84c902e4f4cba6ae', 'function validateLabProductionTarget(field,value)': 'fefbd04eed656496',
       'function computeRecipeWeightSummary(recipe,vv)': 'beac67cc93eee93b', 'function onIngUnit(recipeId,ingId,val)': '9839d1f8237ed53e',
